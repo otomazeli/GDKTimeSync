@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/GDK.TimeSync.Console/GDK.TimeSync.Console.csproj" />
     <Project Path="src/GDK.TimeSync.Core/GDK.TimeSync.Core.csproj" />
+    <Project Path="src/GDK.TimeSync.Desktop/GDK.TimeSync.Desktop.csproj" />
     <Project Path="src/GDK.TimeSync.Jira/GDK.TimeSync.Jira.csproj" />
     <Project Path="src/GDK.TimeSync.Tempo/GDK.TimeSync.Tempo.csproj" />
     <Project Path="src/GDK.TimeSync.Toggl/GDK.TimeSync.Toggl.csproj" />

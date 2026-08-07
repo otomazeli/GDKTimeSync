@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\GDK.TimeSync.Core\GDK.TimeSync.Core.csproj" />
+    <ProjectReference Include="..\GDK.TimeSync.Toggl\GDK.TimeSync.Toggl.csproj" />
+    <ProjectReference Include="..\GDK.TimeSync.Jira\GDK.TimeSync.Jira.csproj" />
+    <ProjectReference Include="..\GDK.TimeSync.Tempo\GDK.TimeSync.Tempo.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>GDK.TimeSync</AssemblyName>
+    <RootNamespace>GDK.TimeSync.Desktop</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+</Project>
