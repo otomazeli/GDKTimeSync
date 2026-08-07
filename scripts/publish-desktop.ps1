@@ -12,7 +12,7 @@ $project = Join-Path $projectRoot 'src\GDK.TimeSync.Desktop\GDK.TimeSync.Desktop
 $output = Join-Path $projectRoot "artifacts\GDK.TimeSync-$RuntimeIdentifier"
 
 & $dotnetPath publish $project --configuration $Configuration --runtime $RuntimeIdentifier --self-contained true `
-    -p:PublishSingleFile=true -p:PublishTrimmed=false -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=embedded --output $output
+    -p:PublishSingleFile=true -p:PublishTrimmed=false -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=embedded -p:DebugSymbols=false -p:CopyOutputSymbolsToPublishDirectory=false --output $output
 
 if ($LASTEXITCODE -ne 0) {
     throw 'Desktop publish failed.'
