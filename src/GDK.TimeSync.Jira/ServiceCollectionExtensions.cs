@@ -13,6 +13,7 @@ public static class ServiceCollectionExtensions
             .Validate(options => !string.IsNullOrWhiteSpace(options.PersonalAccessToken), "Jira:PersonalAccessToken must be configured.")
             .ValidateOnStart();
 
+        services.AddSingleton<JiraOptions>(provider => provider.GetRequiredService<IOptions<JiraOptions>>().Value);
         services.AddHttpClient<JiraClient>();
         return services;
     }
