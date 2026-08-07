@@ -10,4 +10,3 @@ namespace GDK.TimeSync.Desktop;
 public partial class App : System.Windows.Application
 {
 }
-
