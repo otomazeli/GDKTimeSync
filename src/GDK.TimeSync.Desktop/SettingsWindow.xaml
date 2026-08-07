@@ -1,7 +1,7 @@
 <Window x:Class="GDK.TimeSync.Desktop.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="GDK TimeSync Settings" Width="560" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner">
+        Title="GDK TimeSync Settings" Width="560" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Loaded="OnLoaded">
     <Grid Margin="26">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -17,7 +17,7 @@
 
         <StackPanel>
             <TextBlock Text="Connections" FontSize="22" FontWeight="SemiBold" />
-            <TextBlock Margin="0,6,0,0" Foreground="DimGray" Text="Credentials are stored in Windows Credential Manager, never in settings.json." TextWrapping="Wrap" />
+            <TextBlock Margin="0,6,0,0" Foreground="DimGray" Text="Credentials are stored in Windows Credential Manager and are never shown again." TextWrapping="Wrap" />
         </StackPanel>
         <StackPanel Grid.Row="2">
             <TextBlock Text="Jira base URL" />
@@ -25,10 +25,14 @@
         </StackPanel>
         <StackPanel Grid.Row="4">
             <TextBlock Text="Toggl API token" />
+            <TextBlock x:Name="TogglConfiguredText" Margin="0,5,0,0" Text="Token configured ✓" Visibility="Collapsed" />
+            <Button x:Name="TogglReplaceButton" Width="120" Margin="0,5,0,0" HorizontalAlignment="Left" Click="OnReplaceTogglClick" Visibility="Collapsed">Replace Token</Button>
             <PasswordBox x:Name="TogglTokenPasswordBox" Margin="0,5,0,0" />
         </StackPanel>
         <StackPanel Grid.Row="6">
-            <TextBlock Text="Jira personal access token" />
+            <TextBlock Text="CGM Jira personal access token" />
+            <TextBlock x:Name="JiraConfiguredText" Margin="0,5,0,0" Text="Token configured ✓" Visibility="Collapsed" />
+            <Button x:Name="JiraReplaceButton" Width="120" Margin="0,5,0,0" HorizontalAlignment="Left" Click="OnReplaceJiraClick" Visibility="Collapsed">Replace Token</Button>
             <PasswordBox x:Name="JiraTokenPasswordBox" Margin="0,5,0,0" />
         </StackPanel>
         <StackPanel Grid.Row="8" Orientation="Horizontal" HorizontalAlignment="Right">

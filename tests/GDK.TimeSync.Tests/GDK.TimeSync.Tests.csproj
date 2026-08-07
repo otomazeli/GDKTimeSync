@@ -1,7 +1,7 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -19,6 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\GDK.TimeSync.Desktop\GDK.TimeSync.Desktop.csproj" />
     <ProjectReference Include="..\..\src\GDK.TimeSync.Core\GDK.TimeSync.Core.csproj" />
     <ProjectReference Include="..\..\src\GDK.TimeSync.Jira\GDK.TimeSync.Jira.csproj" />
     <ProjectReference Include="..\..\src\GDK.TimeSync.Tempo\GDK.TimeSync.Tempo.csproj" />

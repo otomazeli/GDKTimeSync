@@ -1,6 +1,7 @@
 using System.Windows;
 using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
+using GDK.TimeSync.Desktop.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GDK.TimeSync.Desktop;
@@ -19,11 +20,17 @@ public partial class App : System.Windows.Application
         services.AddTimeSyncCore();
         services.AddHttpClient();
         services.AddSingleton<UserSettingsService>();
+        services.AddSingleton<IUserSettingsStore>(provider => provider.GetRequiredService<UserSettingsService>());
         services.AddSingleton<WindowsCredentialStore>();
+        services.AddSingleton<ICredentialStore>(provider => provider.GetRequiredService<WindowsCredentialStore>());
+        services.AddSingleton<IConfigurationStateService, ConfigurationStateService>();
+        services.AddSingleton<MainViewModel>();
+        services.AddTransient<SettingsViewModel>();
         services.AddSingleton<MainWindow>();
+        services.AddTransient<SettingsWindow>();
 
         serviceProvider = services.BuildServiceProvider();
-        trayIcon = new TrayIconService(ShowMainWindow, ShowSettings, ExitApplication);
+        trayIcon = new TrayIconService(ShowMainWindow, ShowSettings, ExitApplication, serviceProvider.GetRequiredService<MainViewModel>().SyncNowCommand);
         ShowMainWindow();
     }
 
@@ -42,11 +49,10 @@ public partial class App : System.Windows.Application
         window.Activate();
     }
 
-    private void ShowSettings()
+    internal void ShowSettings()
     {
-        var settings = serviceProvider!.GetRequiredService<UserSettingsService>();
-        var credentials = serviceProvider!.GetRequiredService<WindowsCredentialStore>();
-        var window = new SettingsWindow(settings, credentials) { Owner = Current.MainWindow };
+        var window = serviceProvider!.GetRequiredService<SettingsWindow>();
+        window.Owner = Current.MainWindow;
         window.ShowDialog();
     }
 

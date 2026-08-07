@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="GDK TimeSync" Height="420" Width="760" MinHeight="420" MinWidth="700"
-        Closing="OnClosing">
+        Closing="OnClosing" Loaded="OnLoaded">
     <Grid Margin="28">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -17,14 +17,14 @@
         <Border Grid.Row="2" Padding="22" Background="#FFF7F7F7" BorderBrush="#FFE0E0E0" BorderThickness="1" CornerRadius="6">
             <StackPanel>
                 <TextBlock Text="Connection status" FontSize="18" FontWeight="SemiBold" />
-                <TextBlock x:Name="StatusText" Margin="0,16,0,0" FontSize="15" TextWrapping="Wrap" />
+                <TextBlock Margin="0,16,0,0" FontSize="15" TextWrapping="Wrap" Text="{Binding StatusText}" />
                 <Separator Margin="0,22,0,18" />
-                <TextBlock Text="Sync and reconciliation will become available once the client orchestration layer is configured." TextWrapping="Wrap" Foreground="DimGray" />
+                <TextBlock Text="Tokens remain in Windows Credential Manager and are never displayed here." TextWrapping="Wrap" Foreground="DimGray" />
             </StackPanel>
         </Border>
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Width="100" Margin="0,0,10,0" Click="OnSettingsClick">Settings</Button>
-            <Button Width="100" IsEnabled="False">Sync Now</Button>
+            <Button Width="100" Command="{Binding SyncNowCommand}">Sync Now</Button>
         </StackPanel>
     </Grid>
 </Window>
