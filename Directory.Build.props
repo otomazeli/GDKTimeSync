@@ -1,0 +1,9 @@
+<Project>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'GDK.TimeSync.Jira'">
+    <ProjectReference Include="$(MSBuildThisFileDirectory)src\GDK.TimeSync.Core\GDK.TimeSync.Core.csproj" />
+  </ItemGroup>
+</Project>

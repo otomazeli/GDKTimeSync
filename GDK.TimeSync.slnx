@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/GDK.TimeSync.Console/GDK.TimeSync.Console.csproj" />
+    <Project Path="src/GDK.TimeSync.Core/GDK.TimeSync.Core.csproj" />
+    <Project Path="src/GDK.TimeSync.Jira/GDK.TimeSync.Jira.csproj" />
+    <Project Path="src/GDK.TimeSync.Tempo/GDK.TimeSync.Tempo.csproj" />
+    <Project Path="src/GDK.TimeSync.Toggl/GDK.TimeSync.Toggl.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/GDK.TimeSync.Tests/GDK.TimeSync.Tests.csproj" />
+  </Folder>
+</Solution>

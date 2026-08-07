@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\GDK.TimeSync.Core\GDK.TimeSync.Core.csproj" />
+    <ProjectReference Include="..\GDK.TimeSync.Toggl\GDK.TimeSync.Toggl.csproj" />
+    <ProjectReference Include="..\GDK.TimeSync.Jira\GDK.TimeSync.Jira.csproj" />
+    <ProjectReference Include="..\GDK.TimeSync.Tempo\GDK.TimeSync.Tempo.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
