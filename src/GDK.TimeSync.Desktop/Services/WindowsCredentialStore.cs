@@ -5,8 +5,8 @@ namespace GDK.TimeSync.Desktop.Services;
 
 public sealed class WindowsCredentialStore
 {
-    public const string TogglTokenTarget = "GDK.TimeSync/TogglApiToken";
-    public const string JiraPatTarget = "GDK.TimeSync/JiraPersonalAccessToken";
+    public const string TogglTokenTarget = "GDK.TimeSync.Toggl.ApiToken";
+    public const string JiraPatTarget = "GDK.TimeSync.CGM.JiraPAT";
 
     private const uint GenericCredentialType = 1;
     private const uint LocalMachinePersistence = 2;
