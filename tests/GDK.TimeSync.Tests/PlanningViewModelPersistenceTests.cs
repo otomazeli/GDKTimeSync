@@ -54,6 +54,21 @@ public sealed class PlanningViewModelPersistenceTests
         Assert.Single(viewModel.Templates);
     }
 
+    [Fact]
+    public async Task TodayInitialization_ReportsARecoverableLoadFailureAndRemainsSaveable()
+    {
+        var repository = new RecoveringDailyPlanRepository();
+        var viewModel = new TodayViewModel(repository, new DateOnly(2026, 8, 10));
+
+        await viewModel.InitializeAsync();
+
+        Assert.Contains("Could not load today's plan", viewModel.PersistenceError);
+        Assert.True(Assert.Single(viewModel.Items).IsEditable);
+        viewModel.AddItemCommand.Execute(null);
+        await viewModel.FlushAsync();
+        Assert.NotNull(repository.SavedPlan);
+    }
+
     private sealed class InMemoryTemplateRepository : ITemplateRepository
     {
         public List<RecurringTaskTemplate> Templates { get; } = [];
@@ -90,5 +105,18 @@ public sealed class PlanningViewModelPersistenceTests
         public Task<IReadOnlyList<RecurringTaskTemplate>> ListAsync(CancellationToken cancellationToken = default) => throw new InvalidOperationException("The database is unavailable.");
 
         public Task SaveAsync(RecurringTaskTemplate template, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class RecoveringDailyPlanRepository : IDailyPlanRepository
+    {
+        public DailyPlan? SavedPlan { get; private set; }
+
+        public Task<DailyPlan?> GetAsync(DateOnly date, CancellationToken cancellationToken = default) => throw new InvalidOperationException("The database is unavailable.");
+
+        public Task SaveAsync(DailyPlan plan, CancellationToken cancellationToken = default)
+        {
+            SavedPlan = plan;
+            return Task.CompletedTask;
+        }
     }
 }

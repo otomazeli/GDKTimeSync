@@ -53,6 +53,9 @@ public sealed class TodayViewModel : INotifyPropertyChanged
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
+            if (Items.Count == 0)
+                Items.Add(new PlannedWorkItemViewModel());
+            isInitialized = true;
             PersistenceError = "Could not load today's plan.";
         }
     }

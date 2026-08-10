@@ -6,6 +6,7 @@
             <TextBlock Text="Today" FontSize="24" FontWeight="SemiBold" />
             <TextBlock Margin="0,8,0,0" Text="{Binding PlannedSeconds, StringFormat=Planned: {0} seconds}" Foreground="DimGray" />
             <TextBlock Margin="0,4,0,12" Text="Rows are saved locally. Nothing is posted externally." Foreground="DimGray" />
+            <TextBlock Margin="0,0,0,8" Text="{Binding PersistenceError}" Foreground="DarkRed" TextWrapping="Wrap" />
             <Button Width="110" HorizontalAlignment="Left" Command="{Binding AddItemCommand}">Add item</Button>
         </StackPanel>
         <DataGrid Margin="0,16,0,0" ItemsSource="{Binding Items}" AutoGenerateColumns="False" CanUserAddRows="False">
