@@ -4,6 +4,7 @@ namespace GDK.TimeSync.Desktop.Services;
 public sealed record UserSettings
 {
     public string JiraBaseUrl { get; init; } = string.Empty;
+    public string JiraUser { get; init; } = string.Empty;
     public long? TogglWorkspaceId { get; init; }
     public string ReviewReminderTime { get; init; } = "16:00";
     public string DefaultTempoWorkCategory { get; init; } = "DEVELOPMENT";

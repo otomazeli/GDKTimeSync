@@ -33,6 +33,21 @@ public sealed class DesktopConfigurationTests
     }
 
     [Fact]
+    public void Jira_user_round_trips_as_a_non_secret_json_setting()
+    {
+        const string jiraUser = "planner@example.com";
+
+        var json = JsonSerializer.Serialize(new UserSettings { JiraUser = jiraUser });
+        var restored = JsonSerializer.Deserialize<UserSettings>(json);
+
+        Assert.Equal(jiraUser, restored!.JiraUser);
+        Assert.Contains("JiraUser", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("Token", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("PersonalAccess", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("webhook", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Saving_slack_webhook_records_only_its_credential_key_and_exposes_presence()
     {
         const string webhook = "https://hooks.slack.com/services/sentinel-webhook";
@@ -60,16 +75,46 @@ public sealed class DesktopConfigurationTests
     [Fact]
     public async Task Saving_a_draft_that_fails_does_not_replace_current_view_model_preferences()
     {
-        var initial = new UserSettings { JiraBaseUrl = "https://jira.cgm.ag", ReviewReminderTime = "16:00" };
+        var initial = new UserSettings { JiraBaseUrl = "https://jira.cgm.ag", JiraUser = "saved@example.com", ReviewReminderTime = "16:00" };
         var credentials = new FakeCredentialStore();
         var settings = new ThrowingSettingsStore(initial);
         var state = new ConfigurationStateService(credentials, settings);
         var viewModel = new SettingsViewModel(credentials, settings, state);
         await viewModel.LoadAsync();
 
-        await Assert.ThrowsAsync<SettingsSaveException>(() => viewModel.SaveAsync(initial with { ReviewReminderTime = "17:00" }, null, null, null));
+        await Assert.ThrowsAsync<SettingsSaveException>(() => viewModel.SaveAsync(initial with { JiraUser = "draft@example.com", ReviewReminderTime = "17:00" }, null, null, null));
 
         Assert.Equal("16:00", viewModel.ReviewReminderTime);
+        Assert.Equal("saved@example.com", viewModel.JiraUser);
+    }
+
+    [Fact]
+    public async Task Invalid_jira_user_prevents_saving_credentials_or_settings()
+    {
+        var credentials = new FakeCredentialStore();
+        var initial = new UserSettings { JiraBaseUrl = "https://jira.cgm.ag", JiraUser = "saved@example.com" };
+        var settings = new FakeSettingsStore(initial);
+        var state = new ConfigurationStateService(credentials, settings);
+        var viewModel = new SettingsViewModel(credentials, settings, state);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => viewModel.SaveAsync(initial with { JiraUser = "not-an-email" }, "toggl-token", null, null));
+
+        Assert.Empty(credentials.SavedKeys);
+        Assert.Equal(initial, settings.Current);
+    }
+
+    [Fact]
+    public async Task Saving_a_valid_jira_user_persists_the_normalized_value()
+    {
+        var credentials = new FakeCredentialStore();
+        var settings = new FakeSettingsStore(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" });
+        var state = new ConfigurationStateService(credentials, settings);
+        var viewModel = new SettingsViewModel(credentials, settings, state);
+
+        await viewModel.SaveAsync(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag", JiraUser = "  planner@example.com  " }, null, null, null);
+
+        Assert.Equal("planner@example.com", settings.Current.JiraUser);
+        Assert.Equal("planner@example.com", viewModel.JiraUser);
     }
 
     [Fact]
@@ -111,6 +156,9 @@ public sealed class DesktopConfigurationTests
     [Fact]
     public async Task Saving_tokens_uses_canonical_credential_keys_and_refreshes_configuration()
     {
+        const string togglToken = "toggl-token";
+        const string jiraPat = "jira-token";
+        const string slackWebhook = "https://hooks.slack.com/services/sentinel-webhook";
         var credentials = new FakeCredentialStore();
         var settings = new FakeSettingsStore(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" });
         var state = new ConfigurationStateService(credentials, settings);
@@ -118,12 +166,20 @@ public sealed class DesktopConfigurationTests
         var refreshEvents = 0;
         state.ConfigurationChanged += (_, _) => refreshEvents++;
 
-        await viewModel.SaveAsync("https://jira.cgm.ag", "toggl-token", "jira-token");
+        await viewModel.SaveAsync("https://jira.cgm.ag", togglToken, jiraPat, slackWebhook);
 
         Assert.Contains(CredentialKeys.TogglApiToken, credentials.SavedKeys);
         Assert.Contains(CredentialKeys.JiraPat, credentials.SavedKeys);
         Assert.True(state.IsConfigured);
         Assert.True(refreshEvents > 0);
+        Assert.DoesNotContain(typeof(SettingsViewModel).GetProperties(), property =>
+            property.PropertyType == typeof(string) &&
+            (Equals(property.GetValue(viewModel), togglToken) || Equals(property.GetValue(viewModel), jiraPat) || Equals(property.GetValue(viewModel), slackWebhook)));
+
+        var storedJson = JsonSerializer.Serialize(settings.Current);
+        Assert.DoesNotContain(togglToken, storedJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(jiraPat, storedJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(slackWebhook, storedJson, StringComparison.Ordinal);
     }
 
     [Fact]

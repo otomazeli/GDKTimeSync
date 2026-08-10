@@ -12,6 +12,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
     private bool isSlackWebhookConfigured;
     private bool isSaving;
     private string jiraBaseUrl = string.Empty;
+    private string jiraUser = string.Empty;
     private long? togglWorkspaceId;
     private string reviewReminderTime = "16:00";
     private string defaultTempoWorkCategory = "DEVELOPMENT";
@@ -41,6 +42,12 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
     {
         get => jiraBaseUrl;
         set => SetField(ref jiraBaseUrl, value);
+    }
+
+    public string JiraUser
+    {
+        get => jiraUser;
+        set => SetField(ref jiraUser, value);
     }
 
     public long? TogglWorkspaceId
@@ -84,6 +91,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         => SaveAsync(settings.Load() with
         {
             JiraBaseUrl = jiraBaseUrl,
+            JiraUser = JiraUser,
             TogglWorkspaceId = TogglWorkspaceId,
             ReviewReminderTime = ReviewReminderTime,
             DefaultTempoWorkCategory = DefaultTempoWorkCategory,
@@ -94,6 +102,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         => SaveAsync(settings.Load() with
         {
             JiraBaseUrl = jiraBaseUrl,
+            JiraUser = JiraUser,
             TogglWorkspaceId = TogglWorkspaceId,
             ReviewReminderTime = ReviewReminderTime,
             DefaultTempoWorkCategory = DefaultTempoWorkCategory,
@@ -105,6 +114,9 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         ArgumentNullException.ThrowIfNull(proposedSettings);
         if (!Uri.TryCreate(proposedSettings.JiraBaseUrl, UriKind.Absolute, out _))
             throw new ArgumentException("Enter an absolute Jira base URL.", nameof(proposedSettings));
+        var normalizedJiraUser = proposedSettings.JiraUser.Trim();
+        if (!string.IsNullOrEmpty(normalizedJiraUser) && !IsEmailAddress(normalizedJiraUser))
+            throw new ArgumentException("Enter a valid Jira user email address.", nameof(proposedSettings));
         if (!TimeOnly.TryParseExact(proposedSettings.ReviewReminderTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var reviewTime))
             throw new ArgumentException("Enter review reminder time as HH:mm.", nameof(proposedSettings));
 
@@ -113,6 +125,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         var normalizedSettings = proposedSettings with
         {
             JiraBaseUrl = normalizedJiraBaseUrl,
+            JiraUser = normalizedJiraUser,
             ReviewReminderTime = normalizedReviewReminderTime,
             DefaultTempoWorkCategory = proposedSettings.DefaultTempoWorkCategory.Trim()
         };
@@ -156,6 +169,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
     private void LoadNonSecretSettings(UserSettings currentSettings)
     {
         JiraBaseUrl = currentSettings.JiraBaseUrl;
+        JiraUser = currentSettings.JiraUser;
         TogglWorkspaceId = currentSettings.TogglWorkspaceId;
         ReviewReminderTime = currentSettings.ReviewReminderTime;
         DefaultTempoWorkCategory = currentSettings.DefaultTempoWorkCategory;
@@ -167,6 +181,12 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         IsTogglTokenConfigured = configurationState.HasTogglCredential;
         IsJiraPatConfigured = configurationState.HasJiraCredential;
         IsSlackWebhookConfigured = await credentials.ExistsAsync(CredentialKeys.SlackWebhook, cancellationToken);
+    }
+
+    private static bool IsEmailAddress(string value)
+    {
+        try { return new System.Net.Mail.MailAddress(value).Address == value; }
+        catch (FormatException) { return false; }
     }
 
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

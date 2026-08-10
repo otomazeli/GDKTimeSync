@@ -26,6 +26,7 @@ public partial class SettingsWindow : Window
     private void PopulateControls()
     {
         JiraBaseUrlTextBox.Text = viewModel.JiraBaseUrl;
+        JiraUserTextBox.Text = viewModel.JiraUser;
         TogglWorkspaceIdTextBox.Text = viewModel.TogglWorkspaceId?.ToString() ?? string.Empty;
         ReviewReminderTimeTextBox.Text = viewModel.ReviewReminderTime;
         DefaultTempoWorkCategoryTextBox.Text = viewModel.DefaultTempoWorkCategory;
@@ -43,6 +44,7 @@ public partial class SettingsWindow : Window
             var draftSettings = settings.Load() with
             {
                 JiraBaseUrl = JiraBaseUrlTextBox.Text.Trim(),
+                JiraUser = JiraUserTextBox.Text.Trim(),
                 TogglWorkspaceId = string.IsNullOrWhiteSpace(TogglWorkspaceIdTextBox.Text) ? null : workspaceId,
                 ReviewReminderTime = ReviewReminderTimeTextBox.Text.Trim(),
                 DefaultTempoWorkCategory = DefaultTempoWorkCategoryTextBox.Text.Trim(),

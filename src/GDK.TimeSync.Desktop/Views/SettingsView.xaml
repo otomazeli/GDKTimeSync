@@ -12,18 +12,21 @@
                 <RowDefinition Height="Auto" /><RowDefinition Height="8" />
                 <RowDefinition Height="Auto" /><RowDefinition Height="8" />
                 <RowDefinition Height="Auto" /><RowDefinition Height="8" />
+                <RowDefinition Height="Auto" /><RowDefinition Height="8" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <TextBlock Text="Jira base URL" />
             <TextBlock Grid.Column="1" Text="{Binding JiraBaseUrl}" TextWrapping="Wrap" />
-            <TextBlock Grid.Row="2" Text="Toggl workspace" />
-            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding TogglWorkspaceId}" />
-            <TextBlock Grid.Row="4" Text="Review reminder" />
-            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding ReviewReminderTime}" />
-            <TextBlock Grid.Row="6" Text="Tempo category" />
-            <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding DefaultTempoWorkCategory}" />
-            <TextBlock Grid.Row="8" Text="AI assistance" />
-            <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding AiEnabled}" />
+            <TextBlock Grid.Row="2" Text="Jira user" />
+            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding JiraUser}" />
+            <TextBlock Grid.Row="4" Text="Toggl workspace" />
+            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding TogglWorkspaceId}" />
+            <TextBlock Grid.Row="6" Text="Review reminder" />
+            <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding ReviewReminderTime}" />
+            <TextBlock Grid.Row="8" Text="Tempo category" />
+            <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding DefaultTempoWorkCategory}" />
+            <TextBlock Grid.Row="10" Text="AI assistance" />
+            <TextBlock Grid.Row="10" Grid.Column="1" Text="{Binding AiEnabled}" />
         </Grid>
         <TextBlock Margin="0,20,0,8" Text="Credentials are presence-only and are never displayed." Foreground="DimGray" TextWrapping="Wrap" />
         <StackPanel Orientation="Horizontal">
