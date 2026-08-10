@@ -10,17 +10,20 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     private readonly TodayViewModel today;
     private readonly TemplatesViewModel templates;
     private readonly ReviewViewModel review;
+    private readonly SettingsViewModel? settings;
 
     public ShellViewModel(
         IConfigurationStateService configurationState,
         TodayViewModel? today = null,
         TemplatesViewModel? templates = null,
-        ReviewViewModel? review = null)
+        ReviewViewModel? review = null,
+        SettingsViewModel? settings = null)
     {
         _ = configurationState;
         this.today = today ?? new TodayViewModel();
         this.templates = templates ?? new TemplatesViewModel(this.today);
         this.review = review ?? new ReviewViewModel();
+        this.settings = settings;
         NavigateCommand = new RelayCommand(Navigate);
     }
 
@@ -45,6 +48,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         NavigationPage.Today => today,
         NavigationPage.Templates => templates,
         NavigationPage.Review => review,
+        NavigationPage.Settings when settings is not null => settings,
         _ => SelectedPage
     };
 
@@ -52,6 +56,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     {
         await templates.InitializeAsync(cancellationToken);
         await today.InitializeAsync(cancellationToken);
+        if (settings is not null) await settings.LoadAsync(cancellationToken);
     }
 
     public Task FlushAsync() => Task.WhenAll(today.FlushAsync(), templates.FlushAsync());

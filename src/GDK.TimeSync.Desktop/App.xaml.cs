@@ -36,7 +36,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<TemplatesViewModel>();
         services.AddSingleton<ReviewViewModel>();
         services.AddSingleton<ShellViewModel>();
-        services.AddTransient<SettingsViewModel>();
+        services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<MainWindow>();
         services.AddTransient<SettingsWindow>();
 

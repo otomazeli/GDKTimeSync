@@ -6,20 +6,22 @@ namespace GDK.TimeSync.Desktop;
 
 public partial class SettingsWindow : Window
 {
-    private readonly IUserSettingsStore settings;
     private readonly SettingsViewModel viewModel;
 
-    public SettingsWindow(IUserSettingsStore settings, SettingsViewModel viewModel)
+    public SettingsWindow(SettingsViewModel viewModel)
     {
-        this.settings = settings;
         this.viewModel = viewModel;
         InitializeComponent();
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        JiraBaseUrlTextBox.Text = settings.Load().JiraBaseUrl;
         await viewModel.LoadAsync();
+        JiraBaseUrlTextBox.Text = viewModel.JiraBaseUrl;
+        TogglWorkspaceIdTextBox.Text = viewModel.TogglWorkspaceId?.ToString() ?? string.Empty;
+        ReviewReminderTimeTextBox.Text = viewModel.ReviewReminderTime;
+        DefaultTempoWorkCategoryTextBox.Text = viewModel.DefaultTempoWorkCategory;
+        AiEnabledCheckBox.IsChecked = viewModel.AiEnabled;
         UpdateCredentialControls();
     }
 
@@ -28,9 +30,17 @@ public partial class SettingsWindow : Window
         IsEnabled = false;
         try
         {
-            await viewModel.SaveAsync(JiraBaseUrlTextBox.Text.Trim(), TogglTokenPasswordBox.Password, JiraTokenPasswordBox.Password);
+            if (!long.TryParse(TogglWorkspaceIdTextBox.Text.Trim(), out var workspaceId) && !string.IsNullOrWhiteSpace(TogglWorkspaceIdTextBox.Text))
+                throw new ArgumentException("Enter a numeric Toggl workspace ID.");
+
+            viewModel.TogglWorkspaceId = string.IsNullOrWhiteSpace(TogglWorkspaceIdTextBox.Text) ? null : workspaceId;
+            viewModel.ReviewReminderTime = ReviewReminderTimeTextBox.Text.Trim();
+            viewModel.DefaultTempoWorkCategory = DefaultTempoWorkCategoryTextBox.Text.Trim();
+            viewModel.AiEnabled = AiEnabledCheckBox.IsChecked == true;
+            await viewModel.SaveAsync(JiraBaseUrlTextBox.Text.Trim(), TogglTokenPasswordBox.Password, JiraTokenPasswordBox.Password, SlackWebhookPasswordBox.Password);
             TogglTokenPasswordBox.Password = string.Empty;
             JiraTokenPasswordBox.Password = string.Empty;
+            SlackWebhookPasswordBox.Password = string.Empty;
             DialogResult = true;
         }
         catch (SettingsSaveException exception)
@@ -67,10 +77,19 @@ public partial class SettingsWindow : Window
         JiraTokenPasswordBox.Focus();
     }
 
+    private void OnReplaceSlackClick(object sender, RoutedEventArgs e)
+    {
+        SlackConfiguredText.Visibility = Visibility.Collapsed;
+        SlackReplaceButton.Visibility = Visibility.Collapsed;
+        SlackWebhookPasswordBox.Visibility = Visibility.Visible;
+        SlackWebhookPasswordBox.Focus();
+    }
+
     private void UpdateCredentialControls()
     {
         SetCredentialControls(viewModel.IsTogglTokenConfigured, TogglConfiguredText, TogglReplaceButton, TogglTokenPasswordBox);
         SetCredentialControls(viewModel.IsJiraPatConfigured, JiraConfiguredText, JiraReplaceButton, JiraTokenPasswordBox);
+        SetCredentialControls(viewModel.IsSlackWebhookConfigured, SlackConfiguredText, SlackReplaceButton, SlackWebhookPasswordBox);
     }
 
     private static void SetCredentialControls(bool configured, UIElement configuredText, UIElement replaceButton, UIElement passwordBox)

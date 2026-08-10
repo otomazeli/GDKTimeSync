@@ -9,11 +9,83 @@ public sealed class DesktopConfigurationTests
     [Fact]
     public void Settings_json_contains_only_persisted_non_secret_fields()
     {
-        var json = JsonSerializer.Serialize(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" });
+        var json = JsonSerializer.Serialize(new UserSettings
+        {
+            JiraBaseUrl = "https://jira.cgm.ag",
+            TogglWorkspaceId = 42,
+            ReviewReminderTime = "16:30",
+            DefaultTempoWorkCategory = "DEVELOPMENT",
+            AiEnabled = true
+        });
 
         Assert.DoesNotContain("IsConfigured", json, StringComparison.Ordinal);
         Assert.DoesNotContain("Token", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("PersonalAccess", json, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("TogglWorkspaceId", json, StringComparison.Ordinal);
+        Assert.Contains("ReviewReminderTime", json, StringComparison.Ordinal);
+        Assert.Contains("DefaultTempoWorkCategory", json, StringComparison.Ordinal);
+        Assert.Contains("AiEnabled", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("password", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("secret", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("slack", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("webhook", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("incoming webhook", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Saving_slack_webhook_records_only_its_credential_key_and_exposes_presence()
+    {
+        const string webhook = "https://hooks.slack.com/services/sentinel-webhook";
+        var credentials = new FakeCredentialStore();
+        var settings = new FakeSettingsStore(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" });
+        var state = new ConfigurationStateService(credentials, settings);
+        var viewModel = new SettingsViewModel(credentials, settings, state);
+
+        await viewModel.SaveAsync("https://jira.cgm.ag", null, null, webhook);
+
+        Assert.Equal([CredentialKeys.SlackWebhook], credentials.SavedKeys);
+        Assert.True(credentials.WasSaved(CredentialKeys.SlackWebhook, webhook));
+        Assert.True(viewModel.IsSlackWebhookConfigured);
+        Assert.DoesNotContain(
+            typeof(SettingsViewModel).GetProperties(),
+            property => property.PropertyType == typeof(string) && Equals(property.GetValue(viewModel), webhook));
+    }
+
+    [Fact]
+    public async Task Saving_non_secret_preferences_persists_validated_values()
+    {
+        var credentials = new FakeCredentialStore();
+        var settings = new FakeSettingsStore(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" });
+        var state = new ConfigurationStateService(credentials, settings);
+        var viewModel = new SettingsViewModel(credentials, settings, state)
+        {
+            ReviewReminderTime = "16:30",
+            DefaultTempoWorkCategory = "SUPPORT",
+            TogglWorkspaceId = 42,
+            AiEnabled = true
+        };
+
+        await viewModel.SaveAsync("https://jira.cgm.ag", null, null);
+
+        Assert.Equal("16:30", settings.Current.ReviewReminderTime);
+        Assert.Equal("SUPPORT", settings.Current.DefaultTempoWorkCategory);
+        Assert.Equal(42, settings.Current.TogglWorkspaceId);
+        Assert.True(settings.Current.AiEnabled);
+    }
+
+    [Fact]
+    public async Task Invalid_review_time_prevents_saving_credentials_or_settings()
+    {
+        var credentials = new FakeCredentialStore();
+        var initial = new UserSettings { JiraBaseUrl = "https://jira.cgm.ag", ReviewReminderTime = "16:00" };
+        var settings = new FakeSettingsStore(initial);
+        var state = new ConfigurationStateService(credentials, settings);
+        var viewModel = new SettingsViewModel(credentials, settings, state) { ReviewReminderTime = "4:30 pm" };
+
+        await Assert.ThrowsAsync<ArgumentException>(() => viewModel.SaveAsync("https://jira.cgm.ag", "toggl-token", null));
+
+        Assert.Empty(credentials.SavedKeys);
+        Assert.Equal(initial, settings.Current);
     }
     [Fact]
     public async Task Saving_tokens_uses_canonical_credential_keys_and_refreshes_configuration()
@@ -116,8 +188,13 @@ public sealed class DesktopConfigurationTests
         {
             keys.Add(key);
             SavedKeys.Add(key);
+            savedSecrets[key] = secret;
             return Task.CompletedTask;
         }
+
+        private readonly Dictionary<string, string> savedSecrets = [];
+
+        public bool WasSaved(string key, string secret) => savedSecrets.TryGetValue(key, out var value) && value == secret;
 
         public Task<string?> GetAsync(string key, CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
 

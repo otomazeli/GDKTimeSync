@@ -1,43 +1,41 @@
 <Window x:Class="GDK.TimeSync.Desktop.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="GDK TimeSync Settings" Width="560" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Loaded="OnLoaded">
-    <Grid Margin="26">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="12" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="12" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="12" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="22" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+        Title="GDK TimeSync Settings" Width="560" Height="700" MinHeight="540" WindowStartupLocation="CenterOwner" Loaded="OnLoaded">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="26">
+            <TextBlock Text="Settings" FontSize="22" FontWeight="SemiBold" />
+            <TextBlock Margin="0,6,0,18" Foreground="DimGray" Text="Credentials are stored in Windows Credential Manager and are never shown again." TextWrapping="Wrap" />
 
-        <StackPanel>
-            <TextBlock Text="Connections" FontSize="22" FontWeight="SemiBold" />
-            <TextBlock Margin="0,6,0,0" Foreground="DimGray" Text="Credentials are stored in Windows Credential Manager and are never shown again." TextWrapping="Wrap" />
-        </StackPanel>
-        <StackPanel Grid.Row="2">
             <TextBlock Text="Jira base URL" />
-            <TextBox x:Name="JiraBaseUrlTextBox" Margin="0,5,0,0" />
-        </StackPanel>
-        <StackPanel Grid.Row="4">
+            <TextBox x:Name="JiraBaseUrlTextBox" Margin="0,5,0,14" />
+            <TextBlock Text="Toggl workspace ID (optional)" />
+            <TextBox x:Name="TogglWorkspaceIdTextBox" Margin="0,5,0,14" />
+            <TextBlock Text="End-of-day review reminder (HH:mm)" />
+            <TextBox x:Name="ReviewReminderTimeTextBox" Margin="0,5,0,14" />
+            <TextBlock Text="Default Tempo work category" />
+            <TextBox x:Name="DefaultTempoWorkCategoryTextBox" Margin="0,5,0,14" />
+            <CheckBox x:Name="AiEnabledCheckBox" Margin="0,0,0,18" Content="Enable optional AI assistance" />
+
             <TextBlock Text="Toggl API token" />
-            <TextBlock x:Name="TogglConfiguredText" Margin="0,5,0,0" Text="Token configured ✓" Visibility="Collapsed" />
+            <TextBlock x:Name="TogglConfiguredText" Margin="0,5,0,0" Text="Configured ✓" Visibility="Collapsed" />
             <Button x:Name="TogglReplaceButton" Width="120" Margin="0,5,0,0" HorizontalAlignment="Left" Click="OnReplaceTogglClick" Visibility="Collapsed">Replace Token</Button>
-            <PasswordBox x:Name="TogglTokenPasswordBox" Margin="0,5,0,0" />
-        </StackPanel>
-        <StackPanel Grid.Row="6">
+            <PasswordBox x:Name="TogglTokenPasswordBox" Margin="0,5,0,14" />
+
             <TextBlock Text="CGM Jira personal access token" />
-            <TextBlock x:Name="JiraConfiguredText" Margin="0,5,0,0" Text="Token configured ✓" Visibility="Collapsed" />
+            <TextBlock x:Name="JiraConfiguredText" Margin="0,5,0,0" Text="Configured ✓" Visibility="Collapsed" />
             <Button x:Name="JiraReplaceButton" Width="120" Margin="0,5,0,0" HorizontalAlignment="Left" Click="OnReplaceJiraClick" Visibility="Collapsed">Replace Token</Button>
-            <PasswordBox x:Name="JiraTokenPasswordBox" Margin="0,5,0,0" />
+            <PasswordBox x:Name="JiraTokenPasswordBox" Margin="0,5,0,14" />
+
+            <TextBlock Text="GDK Slack Incoming Webhook" />
+            <TextBlock x:Name="SlackConfiguredText" Margin="0,5,0,0" Text="Configured ✓" Visibility="Collapsed" />
+            <Button x:Name="SlackReplaceButton" Width="140" Margin="0,5,0,0" HorizontalAlignment="Left" Click="OnReplaceSlackClick" Visibility="Collapsed">Replace Webhook</Button>
+            <PasswordBox x:Name="SlackWebhookPasswordBox" Margin="0,5,0,20" />
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Width="90" Margin="0,0,10,0" IsCancel="True">Cancel</Button>
+                <Button Width="90" IsDefault="True" Click="OnSaveClick">Save</Button>
+            </StackPanel>
         </StackPanel>
-        <StackPanel Grid.Row="8" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Width="90" Margin="0,0,10,0" IsCancel="True">Cancel</Button>
-            <Button Width="90" IsDefault="True" Click="OnSaveClick">Save</Button>
-        </StackPanel>
-    </Grid>
+    </ScrollViewer>
 </Window>
