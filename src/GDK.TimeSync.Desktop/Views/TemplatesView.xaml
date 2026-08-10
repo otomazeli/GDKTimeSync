@@ -4,7 +4,7 @@
     <DockPanel>
         <StackPanel DockPanel.Dock="Top">
         <TextBlock Text="Templates" FontSize="24" FontWeight="SemiBold" />
-        <TextBlock Margin="0,8,0,12" Text="Add a sample template to today's in-memory plan." Foreground="DimGray" />
+        <TextBlock Margin="0,8,0,12" Text="Add a template to today's local plan." Foreground="DimGray" />
         </StackPanel>
         <DataGrid ItemsSource="{Binding Templates}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
             <DataGrid.Columns>

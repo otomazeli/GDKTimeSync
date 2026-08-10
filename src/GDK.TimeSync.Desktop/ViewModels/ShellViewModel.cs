@@ -48,6 +48,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         _ => SelectedPage
     };
 
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        await templates.InitializeAsync(cancellationToken);
+        await today.InitializeAsync(cancellationToken);
+    }
+
     private void Navigate(object? page)
     {
         if (page is NavigationPage navigationPage)

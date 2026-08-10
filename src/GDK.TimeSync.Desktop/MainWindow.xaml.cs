@@ -6,15 +6,17 @@ namespace GDK.TimeSync.Desktop;
 public partial class MainWindow : Window
 {
     private readonly MainViewModel viewModel;
+    private readonly ShellViewModel shellViewModel;
 
     public MainWindow(MainViewModel viewModel, ShellViewModel shellViewModel)
     {
         this.viewModel = viewModel;
+        this.shellViewModel = shellViewModel;
         InitializeComponent();
         DataContext = shellViewModel;
     }
 
-    private async void OnLoaded(object sender, RoutedEventArgs e) => await viewModel.InitializeAsync();
+    private async void OnLoaded(object sender, RoutedEventArgs e) => await Task.WhenAll(viewModel.InitializeAsync(), shellViewModel.InitializeAsync());
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {

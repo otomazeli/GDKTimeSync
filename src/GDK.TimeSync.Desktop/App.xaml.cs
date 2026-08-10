@@ -1,7 +1,9 @@
 using System.Windows;
+using System.IO;
 using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
 using GDK.TimeSync.Desktop.ViewModels;
+using GDK.TimeSync.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GDK.TimeSync.Desktop;
@@ -18,6 +20,10 @@ public partial class App : System.Windows.Application
 
         var services = new ServiceCollection();
         services.AddTimeSyncCore();
+        services.AddTimeSyncPersistence(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "GDK TimeSync",
+            "timesync.db"));
         services.AddHttpClient();
         services.AddSingleton<UserSettingsService>();
         services.AddSingleton<IUserSettingsStore>(provider => provider.GetRequiredService<UserSettingsService>());
