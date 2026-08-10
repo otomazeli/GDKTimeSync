@@ -1,8 +1,25 @@
 <UserControl x:Class="GDK.TimeSync.Desktop.Views.TemplatesView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <StackPanel>
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Top">
         <TextBlock Text="Templates" FontSize="24" FontWeight="SemiBold" />
-        <TextBlock Margin="0,8,0,0" Text="Reusable time-entry templates will appear here." Foreground="DimGray" />
-    </StackPanel>
+        <TextBlock Margin="0,8,0,12" Text="Add a sample template to today's in-memory plan." Foreground="DimGray" />
+        </StackPanel>
+        <DataGrid ItemsSource="{Binding Templates}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Name" Binding="{Binding Name}" />
+                <DataGridTextColumn Header="Jira key" Binding="{Binding JiraIssueKey}" />
+                <DataGridTextColumn Header="Description" Binding="{Binding Description}" />
+                <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" />
+                <DataGridTextColumn Header="Toggl project" Binding="{Binding TogglProject}" />
+                <DataGridTextColumn Header="Tempo category" Binding="{Binding TempoCategory}" />
+                <DataGridTemplateColumn Header="">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate><Button Command="{Binding DataContext.AddTemplateCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">Add to Today</Button></DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
 </UserControl>

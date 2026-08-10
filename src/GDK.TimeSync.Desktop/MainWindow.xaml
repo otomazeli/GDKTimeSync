@@ -32,7 +32,7 @@
             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="20" /><RowDefinition Height="*" /></Grid.RowDefinitions>
             <TextBlock Text="Workspace" FontSize="28" FontWeight="SemiBold" />
             <Border Grid.Row="2" Padding="22" Background="#FFF7F7F7" BorderBrush="#FFE0E0E0" BorderThickness="1" CornerRadius="6">
-                <ContentControl Content="{Binding SelectedPage}">
+                <ContentControl Content="{Binding CurrentPageViewModel}">
                     <ContentControl.Style>
                         <Style TargetType="ContentControl">
                             <Style.Triggers>

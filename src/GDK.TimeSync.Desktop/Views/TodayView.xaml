@@ -1,8 +1,27 @@
 <UserControl x:Class="GDK.TimeSync.Desktop.Views.TodayView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <StackPanel>
-        <TextBlock Text="Today" FontSize="24" FontWeight="SemiBold" />
-        <TextBlock Margin="0,8,0,0" Text="Your time-sync overview will appear here." Foreground="DimGray" />
-    </StackPanel>
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Top">
+            <TextBlock Text="Today" FontSize="24" FontWeight="SemiBold" />
+            <TextBlock Margin="0,8,0,0" Text="{Binding PlannedSeconds, StringFormat=Planned: {0} seconds}" Foreground="DimGray" />
+            <TextBlock Margin="0,4,0,12" Text="Rows are in memory only. Nothing is posted externally." Foreground="DimGray" />
+            <Button Width="110" HorizontalAlignment="Left" Command="{Binding AddItemCommand}">Add item</Button>
+        </StackPanel>
+        <DataGrid Margin="0,16,0,0" ItemsSource="{Binding Items}" AutoGenerateColumns="False" CanUserAddRows="False">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Jira key" Binding="{Binding JiraIssueKey, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Description" Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Duration" Binding="{Binding Duration, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Toggl project" Binding="{Binding TogglProject, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Tempo category" Binding="{Binding TempoCategory, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTemplateColumn Header="">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate><Button Command="{Binding DataContext.RemoveItemCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">Remove</Button></DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
 </UserControl>

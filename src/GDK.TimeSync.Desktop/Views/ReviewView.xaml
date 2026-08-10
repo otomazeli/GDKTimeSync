@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <StackPanel>
         <TextBlock Text="End-of-day review" FontSize="24" FontWeight="SemiBold" />
-        <TextBlock Margin="0,8,0,0" Text="Review your day before submitting time." Foreground="DimGray" />
+        <TextBlock Margin="0,8,0,16" Text="{Binding PostAllExplanation}" TextWrapping="Wrap" Foreground="DimGray" />
+        <Button Width="100" HorizontalAlignment="Left" Command="{Binding PostAllCommand}" IsEnabled="{Binding CanPostAll}">Post all</Button>
     </StackPanel>
 </UserControl>
