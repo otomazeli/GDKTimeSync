@@ -7,11 +7,11 @@ public partial class MainWindow : Window
 {
     private readonly MainViewModel viewModel;
 
-    public MainWindow(MainViewModel viewModel)
+    public MainWindow(MainViewModel viewModel, ShellViewModel shellViewModel)
     {
         this.viewModel = viewModel;
         InitializeComponent();
-        DataContext = viewModel;
+        DataContext = shellViewModel;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e) => await viewModel.InitializeAsync();

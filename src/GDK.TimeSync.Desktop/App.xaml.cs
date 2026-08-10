@@ -25,6 +25,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ICredentialStore>(provider => provider.GetRequiredService<WindowsCredentialStore>());
         services.AddSingleton<IConfigurationStateService, ConfigurationStateService>();
         services.AddSingleton<MainViewModel>();
+        services.AddSingleton<ShellViewModel>();
         services.AddTransient<SettingsViewModel>();
         services.AddSingleton<MainWindow>();
         services.AddTransient<SettingsWindow>();

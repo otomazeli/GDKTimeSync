@@ -1,0 +1,8 @@
+<UserControl x:Class="GDK.TimeSync.Desktop.Views.TodayView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel>
+        <TextBlock Text="Today" FontSize="24" FontWeight="SemiBold" />
+        <TextBlock Margin="0,8,0,0" Text="Your time-sync overview will appear here." Foreground="DimGray" />
+    </StackPanel>
+</UserControl>

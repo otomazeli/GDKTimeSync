@@ -1,30 +1,51 @@
 <Window x:Class="GDK.TimeSync.Desktop.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:viewModels="clr-namespace:GDK.TimeSync.Desktop.ViewModels"
+        xmlns:views="clr-namespace:GDK.TimeSync.Desktop.Views"
         Title="GDK TimeSync" Height="420" Width="760" MinHeight="420" MinWidth="700"
         Closing="OnClosing" Loaded="OnLoaded">
-    <Grid Margin="28">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="20" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
-        <StackPanel>
-            <TextBlock Text="GDK TimeSync" FontSize="28" FontWeight="SemiBold" />
-            <TextBlock Margin="0,8,0,0" Text="Toggl → Jira → Tempo" Foreground="DimGray" FontSize="15" />
-        </StackPanel>
-        <Border Grid.Row="2" Padding="22" Background="#FFF7F7F7" BorderBrush="#FFE0E0E0" BorderThickness="1" CornerRadius="6">
+    <Window.Resources>
+        <DataTemplate x:Key="TodayTemplate"><views:TodayView /></DataTemplate>
+        <DataTemplate x:Key="TemplatesTemplate"><views:TemplatesView /></DataTemplate>
+        <DataTemplate x:Key="HistoryTemplate"><views:HistoryView /></DataTemplate>
+        <DataTemplate x:Key="SettingsTemplate"><views:SettingsView /></DataTemplate>
+        <DataTemplate x:Key="ReviewTemplate"><views:ReviewView /></DataTemplate>
+    </Window.Resources>
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="190" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Border Background="#FF1F2937" Padding="16">
             <StackPanel>
-                <TextBlock Text="Connection status" FontSize="18" FontWeight="SemiBold" />
-                <TextBlock Margin="0,16,0,0" FontSize="15" TextWrapping="Wrap" Text="{Binding StatusText}" />
-                <Separator Margin="0,22,0,18" />
-                <TextBlock Text="Tokens remain in Windows Credential Manager and are never displayed here." TextWrapping="Wrap" Foreground="DimGray" />
+                <TextBlock Text="GDK TimeSync" Foreground="White" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Margin="0,4,0,24" Text="Toggl → Jira → Tempo" Foreground="#FFD1D5DB" />
+                <Button Command="{Binding NavigateCommand}" CommandParameter="{x:Static viewModels:NavigationPage.Today}">Today</Button>
+                <Button Margin="0,8,0,0" Command="{Binding NavigateCommand}" CommandParameter="{x:Static viewModels:NavigationPage.Templates}">Templates</Button>
+                <Button Margin="0,8,0,0" Command="{Binding NavigateCommand}" CommandParameter="{x:Static viewModels:NavigationPage.History}">History</Button>
+                <Button Margin="0,8,0,0" Command="{Binding NavigateCommand}" CommandParameter="{x:Static viewModels:NavigationPage.Settings}">Settings</Button>
+                <Button Margin="0,8,0,0" Command="{Binding NavigateCommand}" CommandParameter="{x:Static viewModels:NavigationPage.Review}">End-of-day review</Button>
             </StackPanel>
         </Border>
-        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Width="100" Margin="0,0,10,0" Click="OnSettingsClick">Settings</Button>
-            <Button Width="100" Command="{Binding SyncNowCommand}">Sync Now</Button>
-        </StackPanel>
+        <Grid Grid.Column="1" Margin="28">
+            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="20" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+            <TextBlock Text="Workspace" FontSize="28" FontWeight="SemiBold" />
+            <Border Grid.Row="2" Padding="22" Background="#FFF7F7F7" BorderBrush="#FFE0E0E0" BorderThickness="1" CornerRadius="6">
+                <ContentControl Content="{Binding SelectedPage}">
+                    <ContentControl.Style>
+                        <Style TargetType="ContentControl">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedPage}" Value="{x:Static viewModels:NavigationPage.Today}"><Setter Property="ContentTemplate" Value="{StaticResource TodayTemplate}" /></DataTrigger>
+                                <DataTrigger Binding="{Binding SelectedPage}" Value="{x:Static viewModels:NavigationPage.Templates}"><Setter Property="ContentTemplate" Value="{StaticResource TemplatesTemplate}" /></DataTrigger>
+                                <DataTrigger Binding="{Binding SelectedPage}" Value="{x:Static viewModels:NavigationPage.History}"><Setter Property="ContentTemplate" Value="{StaticResource HistoryTemplate}" /></DataTrigger>
+                                <DataTrigger Binding="{Binding SelectedPage}" Value="{x:Static viewModels:NavigationPage.Settings}"><Setter Property="ContentTemplate" Value="{StaticResource SettingsTemplate}" /></DataTrigger>
+                                <DataTrigger Binding="{Binding SelectedPage}" Value="{x:Static viewModels:NavigationPage.Review}"><Setter Property="ContentTemplate" Value="{StaticResource ReviewTemplate}" /></DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ContentControl.Style>
+                </ContentControl>
+            </Border>
+        </Grid>
     </Grid>
 </Window>
