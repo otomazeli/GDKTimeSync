@@ -6,10 +6,12 @@ namespace GDK.TimeSync.Desktop;
 
 public partial class SettingsWindow : Window
 {
+    private readonly IUserSettingsStore settings;
     private readonly SettingsViewModel viewModel;
 
-    public SettingsWindow(SettingsViewModel viewModel)
+    public SettingsWindow(IUserSettingsStore settings, SettingsViewModel viewModel)
     {
+        this.settings = settings;
         this.viewModel = viewModel;
         InitializeComponent();
     }
@@ -17,12 +19,17 @@ public partial class SettingsWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         await viewModel.LoadAsync();
+        PopulateControls();
+        UpdateCredentialControls();
+    }
+
+    private void PopulateControls()
+    {
         JiraBaseUrlTextBox.Text = viewModel.JiraBaseUrl;
         TogglWorkspaceIdTextBox.Text = viewModel.TogglWorkspaceId?.ToString() ?? string.Empty;
         ReviewReminderTimeTextBox.Text = viewModel.ReviewReminderTime;
         DefaultTempoWorkCategoryTextBox.Text = viewModel.DefaultTempoWorkCategory;
         AiEnabledCheckBox.IsChecked = viewModel.AiEnabled;
-        UpdateCredentialControls();
     }
 
     private async void OnSaveClick(object sender, RoutedEventArgs e)
@@ -33,11 +40,15 @@ public partial class SettingsWindow : Window
             if (!long.TryParse(TogglWorkspaceIdTextBox.Text.Trim(), out var workspaceId) && !string.IsNullOrWhiteSpace(TogglWorkspaceIdTextBox.Text))
                 throw new ArgumentException("Enter a numeric Toggl workspace ID.");
 
-            viewModel.TogglWorkspaceId = string.IsNullOrWhiteSpace(TogglWorkspaceIdTextBox.Text) ? null : workspaceId;
-            viewModel.ReviewReminderTime = ReviewReminderTimeTextBox.Text.Trim();
-            viewModel.DefaultTempoWorkCategory = DefaultTempoWorkCategoryTextBox.Text.Trim();
-            viewModel.AiEnabled = AiEnabledCheckBox.IsChecked == true;
-            await viewModel.SaveAsync(JiraBaseUrlTextBox.Text.Trim(), TogglTokenPasswordBox.Password, JiraTokenPasswordBox.Password, SlackWebhookPasswordBox.Password);
+            var draftSettings = settings.Load() with
+            {
+                JiraBaseUrl = JiraBaseUrlTextBox.Text.Trim(),
+                TogglWorkspaceId = string.IsNullOrWhiteSpace(TogglWorkspaceIdTextBox.Text) ? null : workspaceId,
+                ReviewReminderTime = ReviewReminderTimeTextBox.Text.Trim(),
+                DefaultTempoWorkCategory = DefaultTempoWorkCategoryTextBox.Text.Trim(),
+                AiEnabled = AiEnabledCheckBox.IsChecked == true
+            };
+            await viewModel.SaveAsync(draftSettings, TogglTokenPasswordBox.Password, JiraTokenPasswordBox.Password, SlackWebhookPasswordBox.Password);
             TogglTokenPasswordBox.Password = string.Empty;
             JiraTokenPasswordBox.Password = string.Empty;
             SlackWebhookPasswordBox.Password = string.Empty;
@@ -45,20 +56,33 @@ public partial class SettingsWindow : Window
         }
         catch (SettingsSaveException exception)
         {
+            await ReloadPersistedSettingsAsync();
             System.Windows.MessageBox.Show(this, exception.Message, "GDK TimeSync", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         catch (ArgumentException exception)
         {
+            await ReloadPersistedSettingsAsync();
             System.Windows.MessageBox.Show(this, exception.Message, "GDK TimeSync", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         catch
         {
+            await ReloadPersistedSettingsAsync();
             System.Windows.MessageBox.Show(this, "Unable to save settings.", "GDK TimeSync", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
             IsEnabled = true;
         }
+    }
+
+    private async Task ReloadPersistedSettingsAsync()
+    {
+        await viewModel.LoadAsync();
+        PopulateControls();
+        UpdateCredentialControls();
+        TogglTokenPasswordBox.Password = string.Empty;
+        JiraTokenPasswordBox.Password = string.Empty;
+        SlackWebhookPasswordBox.Password = string.Empty;
     }
 
     private void OnReplaceTogglClick(object sender, RoutedEventArgs e)

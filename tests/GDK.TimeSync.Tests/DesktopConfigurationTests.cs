@@ -49,6 +49,27 @@ public sealed class DesktopConfigurationTests
         Assert.DoesNotContain(
             typeof(SettingsViewModel).GetProperties(),
             property => property.PropertyType == typeof(string) && Equals(property.GetValue(viewModel), webhook));
+
+        var storedJson = JsonSerializer.Serialize(settings.Current);
+        Assert.DoesNotContain(webhook, storedJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("slack", storedJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("webhook", storedJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("secret", storedJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Saving_a_draft_that_fails_does_not_replace_current_view_model_preferences()
+    {
+        var initial = new UserSettings { JiraBaseUrl = "https://jira.cgm.ag", ReviewReminderTime = "16:00" };
+        var credentials = new FakeCredentialStore();
+        var settings = new ThrowingSettingsStore(initial);
+        var state = new ConfigurationStateService(credentials, settings);
+        var viewModel = new SettingsViewModel(credentials, settings, state);
+        await viewModel.LoadAsync();
+
+        await Assert.ThrowsAsync<SettingsSaveException>(() => viewModel.SaveAsync(initial with { ReviewReminderTime = "17:00" }, null, null, null));
+
+        Assert.Equal("16:00", viewModel.ReviewReminderTime);
     }
 
     [Fact]
@@ -215,9 +236,11 @@ public sealed class DesktopConfigurationTests
 
         public void Save(UserSettings settings) => Current = settings;
     }
-    private sealed class ThrowingSettingsStore : IUserSettingsStore
+    private sealed class ThrowingSettingsStore(UserSettings? initial = null) : IUserSettingsStore
     {
-        public UserSettings Load() => new() { JiraBaseUrl = "https://jira.cgm.ag" };
+        private readonly UserSettings current = initial ?? new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" };
+
+        public UserSettings Load() => current;
 
         public void Save(UserSettings settings) => throw new IOException("Test-only write failure.");
     }

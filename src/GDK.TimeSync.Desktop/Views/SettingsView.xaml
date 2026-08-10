@@ -28,11 +28,23 @@
         <TextBlock Margin="0,20,0,8" Text="Credentials are presence-only and are never displayed." Foreground="DimGray" TextWrapping="Wrap" />
         <StackPanel Orientation="Horizontal">
             <TextBlock Text="Toggl: " />
-            <TextBlock Text="{Binding IsTogglTokenConfigured, StringFormat={}{0:Configured;Not configured}}" />
+            <TextBlock>
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock"><Setter Property="Text" Value="Not configured" /><Style.Triggers><DataTrigger Binding="{Binding IsTogglTokenConfigured}" Value="True"><Setter Property="Text" Value="Configured" /></DataTrigger></Style.Triggers></Style>
+                </TextBlock.Style>
+            </TextBlock>
             <TextBlock Margin="18,0,0,0" Text="Jira: " />
-            <TextBlock Text="{Binding IsJiraPatConfigured, StringFormat={}{0:Configured;Not configured}}" />
+            <TextBlock>
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock"><Setter Property="Text" Value="Not configured" /><Style.Triggers><DataTrigger Binding="{Binding IsJiraPatConfigured}" Value="True"><Setter Property="Text" Value="Configured" /></DataTrigger></Style.Triggers></Style>
+                </TextBlock.Style>
+            </TextBlock>
             <TextBlock Margin="18,0,0,0" Text="Slack: " />
-            <TextBlock Text="{Binding IsSlackWebhookConfigured, StringFormat={}{0:Configured;Not configured}}" />
+            <TextBlock>
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock"><Setter Property="Text" Value="Not configured" /><Style.Triggers><DataTrigger Binding="{Binding IsSlackWebhookConfigured}" Value="True"><Setter Property="Text" Value="Configured" /></DataTrigger></Style.Triggers></Style>
+                </TextBlock.Style>
+            </TextBlock>
         </StackPanel>
         <Button Margin="0,20,0,0" HorizontalAlignment="Left" Padding="14,6" Click="OnOpenSettingsClick">Edit settings and credentials</Button>
     </StackPanel>

@@ -80,18 +80,42 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         await UpdateCredentialStatusAsync(cancellationToken);
     }
 
-    public async Task SaveAsync(string jiraBaseUrl, string? newTogglToken, string? newJiraPat, CancellationToken cancellationToken = default)
-        => await SaveAsync(jiraBaseUrl, newTogglToken, newJiraPat, null, cancellationToken);
+    public Task SaveAsync(string jiraBaseUrl, string? newTogglToken, string? newJiraPat, CancellationToken cancellationToken = default)
+        => SaveAsync(settings.Load() with
+        {
+            JiraBaseUrl = jiraBaseUrl,
+            TogglWorkspaceId = TogglWorkspaceId,
+            ReviewReminderTime = ReviewReminderTime,
+            DefaultTempoWorkCategory = DefaultTempoWorkCategory,
+            AiEnabled = AiEnabled
+        }, newTogglToken, newJiraPat, null, cancellationToken);
 
-    public async Task SaveAsync(string jiraBaseUrl, string? newTogglToken, string? newJiraPat, string? newSlackWebhook, CancellationToken cancellationToken = default)
+    public Task SaveAsync(string jiraBaseUrl, string? newTogglToken, string? newJiraPat, string? newSlackWebhook, CancellationToken cancellationToken = default)
+        => SaveAsync(settings.Load() with
+        {
+            JiraBaseUrl = jiraBaseUrl,
+            TogglWorkspaceId = TogglWorkspaceId,
+            ReviewReminderTime = ReviewReminderTime,
+            DefaultTempoWorkCategory = DefaultTempoWorkCategory,
+            AiEnabled = AiEnabled
+        }, newTogglToken, newJiraPat, newSlackWebhook, cancellationToken);
+
+    public async Task SaveAsync(UserSettings proposedSettings, string? newTogglToken, string? newJiraPat, string? newSlackWebhook, CancellationToken cancellationToken = default)
     {
-        if (!Uri.TryCreate(jiraBaseUrl, UriKind.Absolute, out _))
-            throw new ArgumentException("Enter an absolute Jira base URL.", nameof(jiraBaseUrl));
-        if (!TimeOnly.TryParseExact(ReviewReminderTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var reviewTime))
-            throw new ArgumentException("Enter review reminder time as HH:mm.", nameof(ReviewReminderTime));
+        ArgumentNullException.ThrowIfNull(proposedSettings);
+        if (!Uri.TryCreate(proposedSettings.JiraBaseUrl, UriKind.Absolute, out _))
+            throw new ArgumentException("Enter an absolute Jira base URL.", nameof(proposedSettings));
+        if (!TimeOnly.TryParseExact(proposedSettings.ReviewReminderTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var reviewTime))
+            throw new ArgumentException("Enter review reminder time as HH:mm.", nameof(proposedSettings));
 
-        var normalizedJiraBaseUrl = jiraBaseUrl.Trim();
+        var normalizedJiraBaseUrl = proposedSettings.JiraBaseUrl.Trim();
         var normalizedReviewReminderTime = reviewTime.ToString("HH:mm", CultureInfo.InvariantCulture);
+        var normalizedSettings = proposedSettings with
+        {
+            JiraBaseUrl = normalizedJiraBaseUrl,
+            ReviewReminderTime = normalizedReviewReminderTime,
+            DefaultTempoWorkCategory = proposedSettings.DefaultTempoWorkCategory.Trim()
+        };
 
         IsSaving = true;
         try
@@ -116,20 +140,12 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
 
             try
             {
-                settings.Save(settings.Load() with
-                {
-                    JiraBaseUrl = normalizedJiraBaseUrl,
-                    TogglWorkspaceId = TogglWorkspaceId,
-                    ReviewReminderTime = normalizedReviewReminderTime,
-                    DefaultTempoWorkCategory = DefaultTempoWorkCategory.Trim(),
-                    AiEnabled = AiEnabled
-                });
+                settings.Save(normalizedSettings);
             }
             catch (Exception exception) { throw new SettingsSaveException("Credentials may have been saved, but non-secret settings could not be saved.", exception); }
             await configurationState.RefreshAsync(cancellationToken);
             await UpdateCredentialStatusAsync(cancellationToken);
-            JiraBaseUrl = normalizedJiraBaseUrl;
-            ReviewReminderTime = normalizedReviewReminderTime;
+            LoadNonSecretSettings(normalizedSettings);
         }
         finally
         {
