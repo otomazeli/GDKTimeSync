@@ -8,7 +8,9 @@ namespace GDK.TimeSync.Desktop.ViewModels;
 public sealed class TodayViewModel : INotifyPropertyChanged
 {
     private readonly IDailyPlanRepository? repository;
-    private readonly SemaphoreSlim persistenceGate = new(1, 1);
+    private readonly object persistenceLock = new();
+    private Task? pendingSave;
+    private bool saveRequested;
     private bool isInitialized;
     private string? persistenceError;
 
@@ -55,6 +57,12 @@ public sealed class TodayViewModel : INotifyPropertyChanged
         }
     }
 
+    public Task FlushAsync()
+    {
+        lock (persistenceLock)
+            return pendingSave ?? Task.CompletedTask;
+    }
+
     private void AddTemplate(object? template)
     {
         if (template is not RecurringTaskTemplateViewModel source) return;
@@ -89,27 +97,54 @@ public sealed class TodayViewModel : INotifyPropertyChanged
     private void SaveAfterUserAction()
     {
         if (repository is not null && isInitialized)
-            _ = PersistAsync();
+            QueueSave();
     }
 
-    private async Task PersistAsync()
+    private void QueueSave()
     {
-        await persistenceGate.WaitAsync();
-        try
+        lock (persistenceLock)
         {
-            var plan = DailyPlan.Create(Date, Items.Select(item => new PlannedWorkItem(
-                item.Id, Date, item.Start, item.End, item.Name, item.JiraIssueKey, item.Description,
-                item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable)).ToArray());
-            await repository!.SaveAsync(plan);
-            PersistenceError = null;
+            saveRequested = true;
+            pendingSave ??= PersistRequestedPlansAsync();
         }
-        catch
+    }
+
+    private async Task PersistRequestedPlansAsync()
+    {
+        await Task.Yield();
+        while (true)
         {
-            PersistenceError = "Could not save today's plan.";
-        }
-        finally
-        {
-            persistenceGate.Release();
+            lock (persistenceLock)
+            {
+                if (!saveRequested)
+                {
+                    pendingSave = null;
+                    return;
+                }
+
+                saveRequested = false;
+            }
+
+            try
+            {
+                var plan = DailyPlan.Create(Date, Items.Select(item => new PlannedWorkItem(
+                    item.Id, Date, item.Start, item.End, item.Name, item.JiraIssueKey, item.Description,
+                    item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable)).ToArray());
+                await repository!.SaveAsync(plan);
+                PersistenceError = null;
+            }
+            catch
+            {
+                PersistenceError = "Could not save today's plan.";
+                lock (persistenceLock)
+                {
+                    if (!saveRequested)
+                    {
+                        pendingSave = null;
+                        return;
+                    }
+                }
+            }
         }
     }
 

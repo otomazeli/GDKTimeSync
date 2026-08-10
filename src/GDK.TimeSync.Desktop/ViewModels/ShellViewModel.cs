@@ -54,6 +54,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         await today.InitializeAsync(cancellationToken);
     }
 
+    public Task FlushAsync() => Task.WhenAll(today.FlushAsync(), templates.FlushAsync());
+
     private void Navigate(object? page)
     {
         if (page is NavigationPage navigationPage)

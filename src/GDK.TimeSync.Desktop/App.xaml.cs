@@ -12,6 +12,7 @@ public partial class App : System.Windows.Application
 {
     private ServiceProvider? serviceProvider;
     private TrayIconService? trayIcon;
+    private bool isExiting;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -66,5 +67,11 @@ public partial class App : System.Windows.Application
         window.ShowDialog();
     }
 
-    private void ExitApplication() => Shutdown();
+    private async void ExitApplication()
+    {
+        if (isExiting) return;
+        isExiting = true;
+        await serviceProvider!.GetRequiredService<ShellViewModel>().FlushAsync();
+        Shutdown();
+    }
 }

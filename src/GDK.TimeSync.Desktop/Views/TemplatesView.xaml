@@ -4,16 +4,18 @@
     <DockPanel>
         <StackPanel DockPanel.Dock="Top">
         <TextBlock Text="Templates" FontSize="24" FontWeight="SemiBold" />
-        <TextBlock Margin="0,8,0,12" Text="Add a template to today's local plan." Foreground="DimGray" />
+        <TextBlock Margin="0,8,0,4" Text="Create or edit a template; changes are saved locally." Foreground="DimGray" />
+        <TextBlock Margin="0,0,0,8" Text="{Binding StatusMessage}" Foreground="DarkRed" TextWrapping="Wrap" />
+        <Button Width="120" HorizontalAlignment="Left" Command="{Binding NewTemplateCommand}">New template</Button>
         </StackPanel>
-        <DataGrid ItemsSource="{Binding Templates}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
+        <DataGrid ItemsSource="{Binding Templates}" AutoGenerateColumns="False" CanUserAddRows="False">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Name" Binding="{Binding Name}" />
-                <DataGridTextColumn Header="Jira key" Binding="{Binding JiraIssueKey}" />
-                <DataGridTextColumn Header="Description" Binding="{Binding Description}" />
-                <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" />
-                <DataGridTextColumn Header="Toggl project" Binding="{Binding TogglProject}" />
-                <DataGridTextColumn Header="Tempo category" Binding="{Binding TempoCategory}" />
+                <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Jira key" Binding="{Binding JiraIssueKey, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Description" Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Duration" Binding="{Binding Duration, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Toggl project" Binding="{Binding TogglProject, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Tempo category" Binding="{Binding TempoCategory, UpdateSourceTrigger=PropertyChanged}" />
                 <DataGridTemplateColumn Header="">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate><Button Command="{Binding DataContext.AddTemplateCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">Add to Today</Button></DataTemplate>
