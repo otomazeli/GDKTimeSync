@@ -16,10 +16,11 @@ public sealed class IntegrationClientFactory(
     public const string JiraHttpClientName = "GDK.TimeSync.Jira";
     public const string TempoHttpClientName = "GDK.TimeSync.Tempo";
 
-    public async Task<ITogglClient> CreateTogglAsync(CancellationToken cancellationToken = default) =>
-        new TogglClient(
-            httpClientFactory.CreateClient(TogglHttpClientName),
-            new TogglOptions { ApiToken = await GetRequiredCredentialAsync(CredentialKeys.TogglApiToken, "Toggl", cancellationToken) });
+    public async Task<ITogglClient> CreateTogglAsync(CancellationToken cancellationToken = default)
+    {
+        var apiToken = await GetRequiredCredentialAsync(CredentialKeys.TogglApiToken, "Toggl", cancellationToken);
+        return new TogglClient(httpClientFactory.CreateClient(TogglHttpClientName), new TogglOptions { ApiToken = apiToken });
+    }
 
     public async Task<JiraClient> CreateJiraAsync(CancellationToken cancellationToken = default)
     {

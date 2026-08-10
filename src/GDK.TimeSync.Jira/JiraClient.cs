@@ -4,7 +4,7 @@ using GDK.TimeSync.Core;
 
 namespace GDK.TimeSync.Jira;
 
-public sealed class JiraClient
+public sealed class JiraClient : IDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly HttpClient httpClient;
@@ -46,6 +46,8 @@ public sealed class JiraClient
 
         return GetAsync<JiraIssue>($"rest/api/2/issue/{Uri.EscapeDataString(issueKey)}", cancellationToken);
     }
+
+    public void Dispose() => httpClient.Dispose();
 
     private async Task<T> GetAsync<T>(string requestUri, CancellationToken cancellationToken)
     {

@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace GDK.TimeSync.Tempo;
 
-public sealed class TempoClient
+public sealed class TempoClient : IDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly HttpClient httpClient;
@@ -54,6 +54,8 @@ public sealed class TempoClient
         using var response = await SendAsync(() => httpClient.PostAsJsonAsync("rest/tempo-timesheets/4/worklogs", payload, JsonOptions, cancellationToken));
         return await ReadJsonAsync(response, cancellationToken);
     }
+
+    public void Dispose() => httpClient.Dispose();
 
     private async Task<HttpResponseMessage> SendAsync(Func<Task<HttpResponseMessage>> send)
     {

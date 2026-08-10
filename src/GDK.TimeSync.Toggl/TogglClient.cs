@@ -19,6 +19,8 @@ public sealed class TogglClient : ITogglClient
 
     private HttpClient HttpClient { get; }
 
+    public void Dispose() => HttpClient.Dispose();
+
     public async Task<IReadOnlyList<TogglTimeEntry>> GetTimeEntriesAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default)
     {
         if (endDate < startDate)
