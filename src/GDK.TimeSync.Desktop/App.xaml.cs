@@ -25,11 +25,14 @@ public partial class App : System.Windows.Application
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "GDK TimeSync",
             "timesync.db"));
-        services.AddHttpClient();
+        services.AddHttpClient(IntegrationClientFactory.TogglHttpClientName);
+        services.AddHttpClient(IntegrationClientFactory.JiraHttpClientName);
+        services.AddHttpClient(IntegrationClientFactory.TempoHttpClientName);
         services.AddSingleton<UserSettingsService>();
         services.AddSingleton<IUserSettingsStore>(provider => provider.GetRequiredService<UserSettingsService>());
         services.AddSingleton<WindowsCredentialStore>();
         services.AddSingleton<ICredentialStore>(provider => provider.GetRequiredService<WindowsCredentialStore>());
+        services.AddSingleton<IIntegrationClientFactory, IntegrationClientFactory>();
         services.AddSingleton<IConfigurationStateService, ConfigurationStateService>();
         services.AddSingleton<MainViewModel>();
         services.AddSingleton<TodayViewModel>();
