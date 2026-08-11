@@ -7,6 +7,29 @@ public sealed class SqliteDeliveryAttemptRepository(SqliteDatabase database) : I
     public async Task<DeliveryAttempt?> GetAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default)
     {
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        return await GetAsync(connection, plannedWorkItemId, cancellationToken);
+    }
+
+    public async Task<DeliveryAttemptClaim> ClaimAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await database.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO delivery_attempts(planned_work_item_id, toggl_entry_id, tempo_worklog_id, status, failure_code, slack_state)
+            VALUES ($id, NULL, NULL, $status, NULL, $slackState)
+            ON CONFLICT(planned_work_item_id) DO NOTHING
+            """;
+        command.Parameters.AddWithValue("$id", plannedWorkItemId.ToString("D"));
+        command.Parameters.AddWithValue("$status", (int)DeliveryAttemptStatus.InProgress);
+        command.Parameters.AddWithValue("$slackState", (int)SlackDeliveryState.NotSupported);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) == 1)
+            return new DeliveryAttemptClaim(new DeliveryAttempt(plannedWorkItemId, null, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported), true);
+
+        return new DeliveryAttemptClaim((await GetAsync(connection, plannedWorkItemId, cancellationToken))!, false);
+    }
+
+    private static async Task<DeliveryAttempt?> GetAsync(Microsoft.Data.Sqlite.SqliteConnection connection, Guid plannedWorkItemId, CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT toggl_entry_id, tempo_worklog_id, status, failure_code, slack_state

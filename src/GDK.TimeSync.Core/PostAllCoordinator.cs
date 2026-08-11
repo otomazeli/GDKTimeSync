@@ -49,31 +49,59 @@ public sealed class PostAllCoordinator(
 
     private async Task<DeliveryAttempt> PostItemAsync(PlannedWorkItem item, CancellationToken cancellationToken)
     {
-        var current = await attempts.GetAsync(item.Id, cancellationToken);
-        if (current?.Status == DeliveryAttemptStatus.Succeeded)
-            return current;
-
-        var togglEntryId = current?.TogglEntryId;
-        if (togglEntryId is null)
+        DeliveryAttempt? current;
+        try
         {
-            try
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                togglEntryId = await toggl.CreateAsync(item, cancellationToken);
-                current = await SaveAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.InProgress, null);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                return await SaveAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
-            }
-            catch (Exception)
-            {
-                return await SaveAsync(item.Id, null, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed);
-            }
+            current = await attempts.GetAsync(item.Id, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return await RecordCancellationBeforeWriteAsync(item.Id);
+        }
+        catch (Exception)
+        {
+            return PersistenceFailure(item.Id, null, null);
         }
 
+        if (current is not null)
+            return current;
+
+        DeliveryAttemptClaim claim;
+        try
+        {
+            claim = await attempts.ClaimAsync(item.Id, CancellationToken.None);
+        }
+        catch (Exception)
+        {
+            return PersistenceFailure(item.Id, null, null);
+        }
+
+        if (!claim.IsAcquired)
+            return claim.Attempt;
+
         if (cancellationToken.IsCancellationRequested)
-            return await SaveAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
+            return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
+
+        long togglEntryId;
+        try
+        {
+            togglEntryId = await toggl.CreateAsync(item, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
+        }
+        catch (Exception)
+        {
+            return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed);
+        }
+
+        current = await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.InProgress, null);
+        if (current.FailureCode == DeliveryFailureCode.PersistenceFailed)
+            return current;
+
+        if (cancellationToken.IsCancellationRequested)
+            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
 
         string? jiraIssueId;
         try
@@ -82,33 +110,48 @@ public sealed class PostAllCoordinator(
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return await SaveAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
+            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
         }
         catch (Exception)
         {
-            return await SaveAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.JiraFailed);
+            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.JiraFailed);
         }
 
         if (string.IsNullOrWhiteSpace(jiraIssueId))
-            return await SaveAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.JiraIssueNotFound);
+            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.JiraIssueNotFound);
 
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             var tempoWorklogId = await tempo.CreateAsync(item, jiraIssueId, cancellationToken);
-            return await SaveAsync(item.Id, togglEntryId, tempoWorklogId, DeliveryAttemptStatus.Succeeded, null);
+            return await PersistAsync(item.Id, togglEntryId, tempoWorklogId, DeliveryAttemptStatus.Succeeded, null);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return await SaveAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
+            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
         }
         catch (Exception)
         {
-            return await SaveAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TempoFailed);
+            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TempoFailed);
         }
     }
 
-    private async Task<DeliveryAttempt> SaveAsync(
+    private async Task<DeliveryAttempt> RecordCancellationBeforeWriteAsync(Guid itemId)
+    {
+        try
+        {
+            var claim = await attempts.ClaimAsync(itemId, CancellationToken.None);
+            return claim.IsAcquired
+                ? await PersistAsync(itemId, null, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled)
+                : claim.Attempt;
+        }
+        catch (Exception)
+        {
+            return PersistenceFailure(itemId, null, null);
+        }
+    }
+
+    private async Task<DeliveryAttempt> PersistAsync(
         Guid itemId,
         long? togglEntryId,
         long? tempoWorklogId,
@@ -116,7 +159,26 @@ public sealed class PostAllCoordinator(
         DeliveryFailureCode? failureCode)
     {
         var attempt = new DeliveryAttempt(itemId, togglEntryId, tempoWorklogId, status, failureCode, SlackDeliveryState.NotSupported);
-        await attempts.SaveAsync(attempt, CancellationToken.None);
-        return attempt;
+        try
+        {
+            await attempts.SaveAsync(attempt, CancellationToken.None);
+            return attempt;
+        }
+        catch (Exception)
+        {
+            var persistenceFailure = PersistenceFailure(itemId, togglEntryId, tempoWorklogId);
+            try
+            {
+                await attempts.SaveAsync(persistenceFailure, CancellationToken.None);
+            }
+            catch (Exception)
+            {
+            }
+
+            return persistenceFailure;
+        }
     }
+
+    private static DeliveryAttempt PersistenceFailure(Guid itemId, long? togglEntryId, long? tempoWorklogId) =>
+        new(itemId, togglEntryId, tempoWorklogId, DeliveryAttemptStatus.Failed, DeliveryFailureCode.PersistenceFailed, SlackDeliveryState.NotSupported);
 }

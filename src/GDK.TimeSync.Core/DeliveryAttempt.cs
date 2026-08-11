@@ -14,6 +14,7 @@ public enum DeliveryFailureCode
     JiraFailed,
     JiraIssueNotFound,
     TempoFailed,
+    PersistenceFailed,
     Cancelled
 }
 
@@ -30,8 +31,11 @@ public sealed record DeliveryAttempt(
     DeliveryFailureCode? FailureCode,
     SlackDeliveryState SlackState);
 
+public sealed record DeliveryAttemptClaim(DeliveryAttempt Attempt, bool IsAcquired);
+
 public interface IDeliveryAttemptRepository
 {
     Task<DeliveryAttempt?> GetAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default);
+    Task<DeliveryAttemptClaim> ClaimAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default);
     Task SaveAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default);
 }
