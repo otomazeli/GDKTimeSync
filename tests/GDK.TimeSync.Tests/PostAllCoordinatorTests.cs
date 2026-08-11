@@ -85,7 +85,28 @@ public sealed class PostAllCoordinatorTests
 
         Assert.Equal(1, toggl.CreateCount);
         Assert.Equal(DeliveryAttemptStatus.Succeeded, Assert.Single(completed.Attempts).Status);
-        Assert.Equal(DeliveryAttemptStatus.InProgress, Assert.Single(second.Attempts).Status);
+        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, Assert.Single(second.Attempts).Status);
+    }
+
+    [Fact]
+    public async Task PostAsync_RequiresManualReconciliationForAnExistingInProgressClaim()
+    {
+        var item = CreateItem();
+        var attempts = new InMemoryDeliveryAttemptRepository();
+        await attempts.SaveAsync(new(item.Id, null, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported));
+        var toggl = new RecordingTogglClient([]);
+        var jira = new RecordingJiraClient([]);
+        var tempo = new RecordingTempoClient([]);
+        var coordinator = new PostAllCoordinator(toggl, jira, tempo, attempts);
+
+        var result = await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]));
+
+        var attempt = Assert.Single(result.Attempts);
+        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, attempt.Status);
+        Assert.Equal(DeliveryFailureCode.PersistenceFailed, attempt.FailureCode);
+        Assert.Equal(0, toggl.CreateCount);
+        Assert.Equal(0, jira.LookupCount);
+        Assert.Equal(0, tempo.CreateCount);
     }
 
     [Fact]
@@ -107,7 +128,7 @@ public sealed class PostAllCoordinatorTests
 
         var attempt = Assert.Single(result.Attempts);
         Assert.Equal(101, attempt.TogglEntryId);
-        Assert.Equal(DeliveryAttemptStatus.Failed, attempt.Status);
+        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, attempt.Status);
         Assert.Equal(DeliveryFailureCode.PersistenceFailed, attempt.FailureCode);
         Assert.Equal(1, toggl.CreateCount);
         Assert.Equal(0, jira.LookupCount);
@@ -136,7 +157,7 @@ public sealed class PostAllCoordinatorTests
         var attempt = Assert.Single(result.Attempts);
         Assert.Equal(101, attempt.TogglEntryId);
         Assert.Equal(201, attempt.TempoWorklogId);
-        Assert.Equal(DeliveryAttemptStatus.Failed, attempt.Status);
+        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, attempt.Status);
         Assert.Equal(DeliveryFailureCode.PersistenceFailed, attempt.FailureCode);
         Assert.Equal(1, toggl.CreateCount);
         Assert.Equal(1, jira.LookupCount);
@@ -159,6 +180,66 @@ public sealed class PostAllCoordinatorTests
         Assert.Equal(DeliveryAttemptStatus.Cancelled, attempt.Status);
         Assert.Equal(DeliveryFailureCode.Cancelled, attempt.FailureCode);
         Assert.Equal(attempt, await attempts.GetAsync(item.Id));
+    }
+
+    [Fact]
+    public async Task PostAsync_KeepsTogglIdForLaterReconciliationWhenBothPersistenceWritesFail()
+    {
+        var item = CreateItem();
+        var attempts = new InMemoryDeliveryAttemptRepository
+        {
+            FailuresRemaining = 2,
+            FailWhen = attempt => attempt.TogglEntryId is not null && attempt.TempoWorklogId is null
+        };
+        var toggl = new RecordingTogglClient([]);
+        var jira = new RecordingJiraClient([]);
+        var tempo = new RecordingTempoClient([]);
+        var coordinator = new PostAllCoordinator(toggl, jira, tempo, attempts);
+
+        var unavailable = await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]));
+
+        var pending = Assert.Single(unavailable.Attempts);
+        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, pending.Status);
+        Assert.Equal(DeliveryFailureCode.PersistenceFailed, pending.FailureCode);
+        Assert.Equal(101, pending.TogglEntryId);
+        Assert.Equal(
+            new DeliveryAttempt(item.Id, null, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported),
+            await attempts.GetAsync(item.Id));
+        var recovered = await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]));
+        Assert.Equal(pending, Assert.Single(recovered.Attempts));
+        Assert.Equal(pending, await attempts.GetAsync(item.Id));
+        Assert.Equal(1, toggl.CreateCount);
+        Assert.Equal(0, jira.LookupCount);
+        Assert.Equal(0, tempo.CreateCount);
+    }
+
+    [Fact]
+    public async Task PostAsync_KeepsKnownIdWhenCancellationPersistenceFails()
+    {
+        var item = CreateItem();
+        using var cancellation = new CancellationTokenSource();
+        var attempts = new InMemoryDeliveryAttemptRepository
+        {
+            FailuresRemaining = 2,
+            FailWhen = attempt => attempt.TogglEntryId is not null
+        };
+        var toggl = new RecordingTogglClient([], onCreated: cancellation.Cancel);
+        var jira = new RecordingJiraClient([]);
+        var tempo = new RecordingTempoClient([]);
+        var coordinator = new PostAllCoordinator(toggl, jira, tempo, attempts);
+
+        var unavailable = await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]), cancellation.Token);
+        var recovered = await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]));
+
+        var pending = Assert.Single(unavailable.Attempts);
+        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, pending.Status);
+        Assert.Equal(DeliveryFailureCode.PersistenceFailed, pending.FailureCode);
+        Assert.Equal(101, pending.TogglEntryId);
+        Assert.Equal(pending, Assert.Single(recovered.Attempts));
+        Assert.Equal(pending, await attempts.GetAsync(item.Id));
+        Assert.Equal(1, toggl.CreateCount);
+        Assert.Equal(0, jira.LookupCount);
+        Assert.Equal(0, tempo.CreateCount);
     }
 
     [Fact]
@@ -289,7 +370,7 @@ public sealed class PostAllCoordinatorTests
         }
     }
 
-    private sealed class RecordingTogglClient(List<string> events, Action? onCreate = null) : IPlannedItemTogglClient
+    private sealed class RecordingTogglClient(List<string> events, Action? onCreate = null, Action? onCreated = null) : IPlannedItemTogglClient
     {
         public int CreateCount { get; private set; }
         public Exception? Failure { get; init; }
@@ -302,6 +383,7 @@ public sealed class PostAllCoordinatorTests
             cancellationToken.ThrowIfCancellationRequested();
             if (Failure is not null)
                 throw Failure;
+            onCreated?.Invoke();
             return Task.FromResult(101L);
         }
     }
@@ -392,6 +474,18 @@ public sealed class SqliteDeliveryAttemptRepositoryTests : IAsyncLifetime
         await repository.GetAsync(Guid.NewGuid());
 
         var claims = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => repository.ClaimAsync(itemId)));
+
+        Assert.Equal(1, claims.Count(claim => claim.IsAcquired));
+        Assert.All(claims, claim => Assert.Equal(itemId, claim.Attempt.PlannedWorkItemId));
+    }
+
+    [Fact]
+    public async Task ClaimAsync_InitializesSchemaAndClaimsOnceUnderConcurrentFirstUse()
+    {
+        var itemId = Guid.NewGuid();
+
+        var claims = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ =>
+            new SqliteDeliveryAttemptRepository(new SqliteDatabase(databasePath)).ClaimAsync(itemId)));
 
         Assert.Equal(1, claims.Count(claim => claim.IsAcquired));
         Assert.All(claims, claim => Assert.Equal(itemId, claim.Attempt.PlannedWorkItemId));

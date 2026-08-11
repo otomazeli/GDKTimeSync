@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace GDK.TimeSync.Core;
 
 public interface IPlannedItemTogglClient
@@ -28,6 +30,8 @@ public sealed class PostAllCoordinator(
     IPlannedItemTempoClient tempo,
     IDeliveryAttemptRepository attempts) : IPostAllCoordinator
 {
+    private readonly ConcurrentDictionary<Guid, DeliveryAttempt> pendingReconciliation = [];
+
     public async Task<PostAllResult> PostAsync(DailyPlan plan, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -49,6 +53,9 @@ public sealed class PostAllCoordinator(
 
     private async Task<DeliveryAttempt> PostItemAsync(PlannedWorkItem item, CancellationToken cancellationToken)
     {
+        if (pendingReconciliation.TryGetValue(item.Id, out var pending))
+            return await RecoverPendingAsync(pending);
+
         DeliveryAttempt? current;
         try
         {
@@ -64,7 +71,9 @@ public sealed class PostAllCoordinator(
         }
 
         if (current is not null)
-            return current;
+            return current.Status == DeliveryAttemptStatus.InProgress
+                ? RequiresManualReconciliation(current)
+                : current;
 
         DeliveryAttemptClaim claim;
         try
@@ -162,23 +171,43 @@ public sealed class PostAllCoordinator(
         try
         {
             await attempts.SaveAsync(attempt, CancellationToken.None);
+            pendingReconciliation.TryRemove(itemId, out _);
             return attempt;
         }
         catch (Exception)
         {
-            var persistenceFailure = PersistenceFailure(itemId, togglEntryId, tempoWorklogId);
+            var persistenceFailure = RequiresManualReconciliation(attempt);
             try
             {
                 await attempts.SaveAsync(persistenceFailure, CancellationToken.None);
+                pendingReconciliation.TryRemove(itemId, out _);
             }
             catch (Exception)
             {
+                pendingReconciliation[itemId] = persistenceFailure;
             }
 
             return persistenceFailure;
         }
     }
 
+    private async Task<DeliveryAttempt> RecoverPendingAsync(DeliveryAttempt attempt)
+    {
+        try
+        {
+            await attempts.SaveAsync(attempt, CancellationToken.None);
+            pendingReconciliation.TryRemove(attempt.PlannedWorkItemId, out _);
+        }
+        catch (Exception)
+        {
+        }
+
+        return attempt;
+    }
+
+    private static DeliveryAttempt RequiresManualReconciliation(DeliveryAttempt attempt) =>
+        attempt with { Status = DeliveryAttemptStatus.ReconciliationRequired, FailureCode = DeliveryFailureCode.PersistenceFailed };
+
     private static DeliveryAttempt PersistenceFailure(Guid itemId, long? togglEntryId, long? tempoWorklogId) =>
-        new(itemId, togglEntryId, tempoWorklogId, DeliveryAttemptStatus.Failed, DeliveryFailureCode.PersistenceFailed, SlackDeliveryState.NotSupported);
+        RequiresManualReconciliation(new(itemId, togglEntryId, tempoWorklogId, DeliveryAttemptStatus.Failed, null, SlackDeliveryState.NotSupported));
 }

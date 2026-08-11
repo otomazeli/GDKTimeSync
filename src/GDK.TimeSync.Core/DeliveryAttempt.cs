@@ -5,7 +5,8 @@ public enum DeliveryAttemptStatus
     InProgress,
     Succeeded,
     Failed,
-    Cancelled
+    Cancelled,
+    ReconciliationRequired
 }
 
 public enum DeliveryFailureCode

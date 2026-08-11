@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Data.Sqlite;
 
 namespace GDK.TimeSync.Persistence;
@@ -38,6 +39,7 @@ public sealed class SqliteDatabase
         """;
 
     private readonly string connectionString;
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> InitializationLocks = new(StringComparer.OrdinalIgnoreCase);
 
     public SqliteDatabase(string databasePath)
     {
@@ -54,19 +56,28 @@ public sealed class SqliteDatabase
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
 
-        var connection = new SqliteConnection(connectionString);
+        var initializationLock = InitializationLocks.GetOrAdd(DatabasePath, _ => new SemaphoreSlim(1, 1));
+        await initializationLock.WaitAsync(cancellationToken);
         try
         {
-            await connection.OpenAsync(cancellationToken);
-            await using var command = connection.CreateCommand();
-            command.CommandText = Schema;
-            await command.ExecuteNonQueryAsync(cancellationToken);
-            return connection;
+            var connection = new SqliteConnection(connectionString);
+            try
+            {
+                await connection.OpenAsync(cancellationToken);
+                await using var command = connection.CreateCommand();
+                command.CommandText = Schema;
+                await command.ExecuteNonQueryAsync(cancellationToken);
+                return connection;
+            }
+            catch
+            {
+                await connection.DisposeAsync();
+                throw;
+            }
         }
-        catch
+        finally
         {
-            await connection.DisposeAsync();
-            throw;
+            initializationLock.Release();
         }
     }
 }
