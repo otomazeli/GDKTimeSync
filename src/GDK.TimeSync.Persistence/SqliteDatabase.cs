@@ -28,6 +28,13 @@ public sealed class SqliteDatabase
             toggl_project TEXT NOT NULL,
             tempo_category TEXT NOT NULL,
             is_billable INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS delivery_attempts (
+            planned_work_item_id TEXT PRIMARY KEY,
+            toggl_entry_id INTEGER NULL,
+            tempo_worklog_id INTEGER NULL,
+            status INTEGER NOT NULL,
+            failure_code INTEGER NULL,
+            slack_state INTEGER NOT NULL);
         """;
 
     private readonly string connectionString;
