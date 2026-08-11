@@ -1,9 +1,11 @@
+using System.Net;
 using System.Net.Http.Headers;
+using System.Globalization;
 using System.Text.Json;
 
 namespace GDK.TimeSync.Tempo;
 
-public sealed class TempoClient : IDisposable
+public sealed class TempoClient : ITempoClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly HttpClient httpClient;
@@ -28,64 +30,125 @@ public sealed class TempoClient : IDisposable
         this.httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.PersonalAccessToken);
     }
 
-    public async Task<JsonElement> GetWorkAttributesAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<TempoAttribute>> GetWorkAttributesAsync(CancellationToken cancellationToken = default)
     {
         using var response = await SendAsync(() => httpClient.GetAsync("rest/tempo-core/1/work-attribute", cancellationToken));
-        return await ReadJsonAsync(response, cancellationToken);
+        return await ReadJsonAsync<List<TempoAttribute>>(response, cancellationToken) ?? [];
     }
 
-    public async Task<JsonElement> CreateWorklogAsync(TempoWorklogCreateRequest request, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<TempoWorklog>> GetExistingWorklogsAsync(string originTaskId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(originTaskId);
+
+        using var response = await SendAsync(() => httpClient.GetAsync($"rest/tempo-timesheets/4/worklogs?originTaskId={Uri.EscapeDataString(originTaskId)}", cancellationToken));
+        return await ReadJsonAsync<List<TempoWorklog>>(response, cancellationToken) ?? [];
+    }
+
+    public async Task<TempoWorklog> CreateWorklogAsync(TempoWorklogRequest request, CancellationToken cancellationToken = default)
+    {
+        Validate(request);
+
+        using var response = await SendAsync(() => httpClient.PostAsJsonAsync("rest/tempo-timesheets/4/worklogs", CreatePayload(request), JsonOptions, cancellationToken));
+        return await ReadRequiredJsonAsync(response, cancellationToken);
+    }
+
+    public async Task<TempoWorklog?> GetWorklogAsync(long worklogId, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(worklogId);
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await httpClient.GetAsync($"rest/tempo-timesheets/4/worklogs/{worklogId}", cancellationToken);
+        }
+        catch (HttpRequestException)
+        {
+            throw new TempoApiException("Unable to reach Tempo.");
+        }
+
+        using (response)
+        {
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new TempoApiException("Tempo returned an unsuccessful response.", response.StatusCode);
+            }
+
+            return await ReadRequiredJsonAsync(response, cancellationToken);
+        }
+    }
+
+    public async Task<TempoWorklog> UpdateWorklogAsync(long worklogId, TempoWorklogRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(worklogId);
+        Validate(request);
+
+        using var response = await SendAsync(() => httpClient.PutAsJsonAsync($"rest/tempo-timesheets/4/worklogs/{worklogId}", CreatePayload(request), JsonOptions, cancellationToken));
+        return await ReadRequiredJsonAsync(response, cancellationToken);
+    }
+
+    public Task<TempoWorklog> CreateWorklogAsync(TempoWorklogCreateRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return CreateWorklogAsync(new TempoWorklogRequest(request.Worker, request.OriginTaskId, request.Started, request.TimeSpentSeconds, request.Comment), cancellationToken);
+    }
+
+    public void Dispose() => httpClient.Dispose();
+
+    private static void Validate(TempoWorklogRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Worker);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.OriginTaskId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Comment);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(request.TimeSpentSeconds);
-
-        var payload = new
-        {
-            worker = request.Worker,
-            originTaskId = request.OriginTaskId,
-            started = request.Started.ToString("yyyy-MM-dd'T'HH:mm:ss.fff"),
-            timeSpentSeconds = request.TimeSpentSeconds,
-            comment = request.Comment
-        };
-
-        using var response = await SendAsync(() => httpClient.PostAsJsonAsync("rest/tempo-timesheets/4/worklogs", payload, JsonOptions, cancellationToken));
-        return await ReadJsonAsync(response, cancellationToken);
     }
 
-    public void Dispose() => httpClient.Dispose();
+    private static object CreatePayload(TempoWorklogRequest request) => new
+    {
+        worker = request.Worker,
+        originTaskId = request.OriginTaskId,
+        started = request.Started.ToString("yyyy-MM-dd'T'HH:mm:ss.fff", CultureInfo.InvariantCulture),
+        timeSpentSeconds = request.TimeSpentSeconds,
+        comment = request.Comment
+    };
 
-    private async Task<HttpResponseMessage> SendAsync(Func<Task<HttpResponseMessage>> send)
+    private static async Task<TempoWorklog> ReadRequiredJsonAsync(HttpResponseMessage response, CancellationToken cancellationToken) =>
+        await ReadJsonAsync<TempoWorklog>(response, cancellationToken)
+        ?? throw new TempoApiException("Tempo returned an empty response.", response.StatusCode);
+
+    private static async Task<T?> ReadJsonAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken);
+        }
+        catch (JsonException)
+        {
+            throw new TempoApiException("Tempo returned an invalid response.", response.StatusCode);
+        }
+    }
+
+    private static async Task<HttpResponseMessage> SendAsync(Func<Task<HttpResponseMessage>> send)
     {
         try
         {
             var response = await send();
-            if (!response.IsSuccessStatusCode)
+            if (response.IsSuccessStatusCode)
             {
-                response.Dispose();
-                throw new TempoApiException("Tempo returned an unsuccessful response.", response.StatusCode);
+                return response;
             }
 
-            return response;
+            response.Dispose();
+            throw new TempoApiException("Tempo returned an unsuccessful response.", response.StatusCode);
         }
-        catch (HttpRequestException exception)
+        catch (HttpRequestException)
         {
-            throw new TempoApiException("Unable to reach Tempo.", innerException: exception);
-        }
-    }
-
-    private static async Task<JsonElement> ReadJsonAsync(HttpResponseMessage response, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var result = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, cancellationToken);
-            return result.Clone();
-        }
-        catch (JsonException exception)
-        {
-            throw new TempoApiException("Tempo returned an invalid response.", response.StatusCode, exception);
+            throw new TempoApiException("Unable to reach Tempo.");
         }
     }
 }

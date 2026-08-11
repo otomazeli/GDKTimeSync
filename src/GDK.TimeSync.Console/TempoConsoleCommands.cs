@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using GDK.TimeSync.Jira;
 using GDK.TimeSync.Tempo;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,7 +12,7 @@ internal static class TempoConsoleCommands
 
         if (args is ["tempo-discover"])
         {
-            Console.WriteLine((await tempo.GetWorkAttributesAsync()).GetRawText());
+            Console.WriteLine(JsonSerializer.Serialize(await tempo.GetWorkAttributesAsync()));
             return;
         }
 
@@ -32,7 +33,7 @@ internal static class TempoConsoleCommands
                 int.Parse(duration, CultureInfo.InvariantCulture),
                 comment);
 
-            Console.WriteLine((await tempo.CreateWorklogAsync(request)).GetRawText());
+            Console.WriteLine(JsonSerializer.Serialize(await tempo.CreateWorklogAsync(request)));
             return;
         }
 

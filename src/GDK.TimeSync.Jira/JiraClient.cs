@@ -56,9 +56,9 @@ public sealed class JiraClient : IDisposable
         {
             response = await httpClient.GetAsync(requestUri, cancellationToken);
         }
-        catch (HttpRequestException exception)
+        catch (HttpRequestException)
         {
-            throw new JiraApiException("Unable to reach Jira.", innerException: exception);
+            throw new JiraApiException("Unable to reach Jira.");
         }
 
         using (response)
@@ -73,9 +73,9 @@ public sealed class JiraClient : IDisposable
                 return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken)
                     ?? throw new JiraApiException("Jira returned an empty response.", response.StatusCode);
             }
-            catch (JsonException exception)
+            catch (JsonException)
             {
-                throw new JiraApiException("Jira returned an invalid response.", response.StatusCode, exception);
+                throw new JiraApiException("Jira returned an invalid response.", response.StatusCode);
             }
         }
     }
