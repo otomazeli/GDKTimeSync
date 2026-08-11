@@ -1,7 +1,8 @@
 namespace GDK.TimeSync.Jira;
 
-public sealed record JiraIssue(string? Id, string Key, JiraIssueFields Fields)
+public sealed record JiraIssue(string Key, JiraIssueFields Fields)
 {
+    public string? Id { get; init; }
     public string? Summary => Fields.Summary;
 }
 

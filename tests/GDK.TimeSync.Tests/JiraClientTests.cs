@@ -9,6 +9,16 @@ namespace GDK.TimeSync.Tests;
 public sealed class JiraClientTests
 {
     [Fact]
+    public void JiraIssue_retains_the_original_constructor_and_allows_the_api_id_to_be_mapped()
+    {
+        var issue = new JiraIssue("CGMFRAVII-2767", new JiraIssueFields("Knowledge Transfer")) { Id = "12345" };
+
+        Assert.Equal("CGMFRAVII-2767", issue.Key);
+        Assert.Equal("Knowledge Transfer", issue.Summary);
+        Assert.Equal("12345", issue.Id);
+    }
+
+    [Fact]
     public async Task GetMyselfAsync_sends_a_bearer_token_to_the_expected_endpoint()
     {
         var handler = new StubHttpMessageHandler(_ => JsonResponse("""{"name":"odimar","displayName":"Odimar","emailAddress":"odimar@example.com"}"""));

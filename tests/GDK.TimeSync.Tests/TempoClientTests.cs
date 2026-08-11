@@ -41,6 +41,62 @@ public sealed class TempoClientTests
     }
 
     [Fact]
+    public async Task GetExistingWorklogsAsync_escapes_the_issue_identifier_query_value()
+    {
+        var handler = new StubHttpMessageHandler(_ => JsonResponse("[]"));
+        using var httpClient = CreateHttpClient(handler);
+        using ITempoClient client = CreateClient(httpClient);
+
+        await client.GetExistingWorklogsAsync("issue id/?");
+
+        Assert.Equal("originTaskId=issue%20id%2F%3F", handler.LastRequest!.RequestUri!.Query.TrimStart('?'));
+    }
+
+    [Fact]
+    public async Task GetExistingWorklogsAsync_returns_a_safe_exception_for_an_unsuccessful_response()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.BadGateway));
+        using var httpClient = CreateHttpClient(handler);
+        using ITempoClient client = CreateClient(httpClient);
+
+        var exception = await Assert.ThrowsAsync<TempoApiException>(() => client.GetExistingWorklogsAsync("12345"));
+
+        Assert.Equal(HttpStatusCode.BadGateway, exception.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetExistingWorklogsAsync_returns_a_safe_exception_for_malformed_json()
+    {
+        var handler = new StubHttpMessageHandler(_ => JsonResponse("{"));
+        using var httpClient = CreateHttpClient(handler);
+        using ITempoClient client = CreateClient(httpClient);
+
+        var exception = await Assert.ThrowsAsync<TempoApiException>(() => client.GetExistingWorklogsAsync("12345"));
+
+        Assert.Equal(HttpStatusCode.OK, exception.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetExistingWorklogsAsync_wraps_transport_errors_and_propagates_cancellation()
+    {
+        var transportHandler = new ThrowingHttpMessageHandler(new HttpRequestException("unreachable"));
+        using var transportHttpClient = CreateHttpClient(transportHandler);
+        using ITempoClient transportClient = CreateClient(transportHttpClient);
+
+        await Assert.ThrowsAsync<TempoApiException>(() => transportClient.GetExistingWorklogsAsync("12345"));
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var cancellingHandler = new CancellingHttpMessageHandler();
+        using var cancellingHttpClient = CreateHttpClient(cancellingHandler);
+        using ITempoClient cancellingClient = CreateClient(cancellingHttpClient);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancellingClient.GetExistingWorklogsAsync("12345", cancellation.Token));
+
+        Assert.True(cancellingHandler.LastCancellationToken.IsCancellationRequested);
+    }
+
+    [Fact]
     public async Task CreateWorklogAsync_posts_a_typed_tempo_worklog()
     {
         string? body = null;
@@ -65,7 +121,8 @@ public sealed class TempoClientTests
     [Fact]
     public async Task GetWorklogAsync_returns_null_when_the_worklog_is_missing()
     {
-        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        var content = new TrackingContent("{}");
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound) { Content = content });
         using var httpClient = CreateHttpClient(handler);
         using ITempoClient client = CreateClient(httpClient);
 
@@ -73,6 +130,44 @@ public sealed class TempoClientTests
 
         Assert.Null(result);
         Assert.Equal("/rest/tempo-timesheets/4/worklogs/9", handler.LastRequest!.RequestUri!.AbsolutePath);
+        Assert.True(content.WasDisposed);
+    }
+
+    [Fact]
+    public async Task GetWorklogAsync_throws_for_other_unsuccessful_responses_and_disposes_them()
+    {
+        var content = new TrackingContent("{}");
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = content });
+        using var httpClient = CreateHttpClient(handler);
+        using ITempoClient client = CreateClient(httpClient);
+
+        var exception = await Assert.ThrowsAsync<TempoApiException>(() => client.GetWorklogAsync(9));
+
+        Assert.Equal(HttpStatusCode.Forbidden, exception.StatusCode);
+        Assert.True(content.WasDisposed);
+    }
+
+    [Fact]
+    public async Task GetWorklogAsync_returns_safe_errors_for_malformed_json_transport_and_cancellation()
+    {
+        var malformedHandler = new StubHttpMessageHandler(_ => JsonResponse("{"));
+        using var malformedHttpClient = CreateHttpClient(malformedHandler);
+        using ITempoClient malformedClient = CreateClient(malformedHttpClient);
+        var malformed = await Assert.ThrowsAsync<TempoApiException>(() => malformedClient.GetWorklogAsync(9));
+        Assert.Equal(HttpStatusCode.OK, malformed.StatusCode);
+
+        var transportHandler = new ThrowingHttpMessageHandler(new HttpRequestException("unreachable"));
+        using var transportHttpClient = CreateHttpClient(transportHandler);
+        using ITempoClient transportClient = CreateClient(transportHttpClient);
+        await Assert.ThrowsAsync<TempoApiException>(() => transportClient.GetWorklogAsync(9));
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var cancellingHandler = new CancellingHttpMessageHandler();
+        using var cancellingHttpClient = CreateHttpClient(cancellingHandler);
+        using ITempoClient cancellingClient = CreateClient(cancellingHttpClient);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancellingClient.GetWorklogAsync(9, cancellation.Token));
+        Assert.True(cancellingHandler.LastCancellationToken.IsCancellationRequested);
     }
 
     [Fact]
@@ -87,6 +182,47 @@ public sealed class TempoClientTests
         Assert.Equal(900, result.TimeSpentSeconds);
         Assert.Equal(HttpMethod.Put, handler.LastRequest!.Method);
         Assert.Equal("/rest/tempo-timesheets/4/worklogs/9", handler.LastRequest.RequestUri!.AbsolutePath);
+    }
+
+    [Fact]
+    public async Task UpdateWorklogAsync_returns_a_safe_exception_for_an_unsuccessful_response()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.Conflict));
+        using var httpClient = CreateHttpClient(handler);
+        using ITempoClient client = CreateClient(httpClient);
+
+        var exception = await Assert.ThrowsAsync<TempoApiException>(() => client.UpdateWorklogAsync(9, ValidRequest()));
+
+        Assert.Equal(HttpStatusCode.Conflict, exception.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateWorklogAsync_returns_a_safe_exception_for_malformed_json()
+    {
+        var handler = new StubHttpMessageHandler(_ => JsonResponse("{"));
+        using var httpClient = CreateHttpClient(handler);
+        using ITempoClient client = CreateClient(httpClient);
+
+        var exception = await Assert.ThrowsAsync<TempoApiException>(() => client.UpdateWorklogAsync(9, ValidRequest()));
+
+        Assert.Equal(HttpStatusCode.OK, exception.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateWorklogAsync_wraps_transport_errors_and_propagates_cancellation()
+    {
+        var transportHandler = new ThrowingHttpMessageHandler(new HttpRequestException("unreachable"));
+        using var transportHttpClient = CreateHttpClient(transportHandler);
+        using ITempoClient transportClient = CreateClient(transportHttpClient);
+        await Assert.ThrowsAsync<TempoApiException>(() => transportClient.UpdateWorklogAsync(9, ValidRequest()));
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var cancellingHandler = new CancellingHttpMessageHandler();
+        using var cancellingHttpClient = CreateHttpClient(cancellingHandler);
+        using ITempoClient cancellingClient = CreateClient(cancellingHttpClient);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancellingClient.UpdateWorklogAsync(9, ValidRequest(), cancellation.Token));
+        Assert.True(cancellingHandler.LastCancellationToken.IsCancellationRequested);
     }
 
     [Fact]
@@ -188,6 +324,17 @@ public sealed class TempoClientTests
         {
             LastCancellationToken = cancellationToken;
             return Task.FromCanceled<HttpResponseMessage>(cancellationToken);
+        }
+    }
+
+    private sealed class TrackingContent(string content) : StringContent(content, Encoding.UTF8, "application/json")
+    {
+        public bool WasDisposed { get; private set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            WasDisposed = true;
+            base.Dispose(disposing);
         }
     }
 }

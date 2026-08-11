@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\GDK.TimeSync.Desktop\GDK.TimeSync.Desktop.csproj" />
     <ProjectReference Include="..\..\src\GDK.TimeSync.Core\GDK.TimeSync.Core.csproj" />
+    <ProjectReference Include="..\..\src\GDK.TimeSync.Console\GDK.TimeSync.Console.csproj" />
     <ProjectReference Include="..\..\src\GDK.TimeSync.Jira\GDK.TimeSync.Jira.csproj" />
     <ProjectReference Include="..\..\src\GDK.TimeSync.Persistence\GDK.TimeSync.Persistence.csproj" />
     <ProjectReference Include="..\..\src\GDK.TimeSync.Tempo\GDK.TimeSync.Tempo.csproj" />
