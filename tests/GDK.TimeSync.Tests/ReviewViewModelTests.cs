@@ -1,5 +1,7 @@
 using GDK.TimeSync.Core;
+using GDK.TimeSync.Desktop;
 using GDK.TimeSync.Desktop.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace GDK.TimeSync.Tests;
 
@@ -11,7 +13,7 @@ public sealed class ReviewViewModelTests
         var plan = DailyPlan.Create(DateOnly.FromDateTime(DateTime.Today), [
             PlannedWorkItem.Create(DateOnly.FromDateTime(DateTime.Today), jiraIssueKey: "CGMFRAVII-1", duration: TimeSpan.FromMinutes(30))
         ]);
-        var review = new ReviewViewModel(new GuardedPlanSnapshotProvider(plan));
+        var review = new ReviewViewModel(new FixedPlanSnapshotProvider(plan));
 
         review.DryRunCommand.Execute(null);
 
@@ -37,7 +39,7 @@ public sealed class ReviewViewModelTests
         var plan = DailyPlan.Create(DateOnly.FromDateTime(DateTime.Today), [
             PlannedWorkItem.Create(DateOnly.FromDateTime(DateTime.Today), jiraIssueKey: "", duration: TimeSpan.Zero, start: new TimeOnly(10, 0), end: new TimeOnly(9, 0))
         ]);
-        var review = new ReviewViewModel(new GuardedPlanSnapshotProvider(plan));
+        var review = new ReviewViewModel(new FixedPlanSnapshotProvider(plan));
 
         review.DryRunCommand.Execute(null);
 
@@ -54,51 +56,58 @@ public sealed class ReviewViewModelTests
     }
 
     [Fact]
-    public void DryRun_OnlyReadsSnapshotWithoutWritingOrDelivering()
+    public void DryRun_WithTodaySnapshot_DoesNotReadOrWritePersistence()
     {
         var plan = DailyPlan.Create(DateOnly.FromDateTime(DateTime.Today), [
             PlannedWorkItem.Create(DateOnly.FromDateTime(DateTime.Today), jiraIssueKey: "CGMFRAVII-1", duration: TimeSpan.FromMinutes(30))
         ]);
-        var source = new GuardedPlanSnapshotProvider(plan);
-        var review = new ReviewViewModel(source);
+        var repository = new ThrowingDailyPlanRepository();
+        var today = new TodayViewModel(repository);
+        today.Items.Add(new PlannedWorkItemViewModel("Work", "CGMFRAVII-1", duration: TimeSpan.FromMinutes(30)));
+        var review = new ReviewViewModel(today);
 
         review.DryRunCommand.Execute(null);
 
-        Assert.Equal(1, source.ReadCount);
-        Assert.Equal(0, source.Persistence.SaveCount);
-        Assert.Equal(0, source.Delivery.DeliverCount);
+        Assert.Equal(0, repository.GetCount);
+        Assert.Equal(0, repository.SaveCount);
+        Assert.True(today.FlushAsync().IsCompletedSuccessfully);
+        Assert.False(review.PostAllCommand.CanExecute(null));
     }
 
-    private sealed class GuardedPlanSnapshotProvider(DailyPlan plan) : ILocalPlanSnapshotProvider
+    [Fact]
+    public void Review_ConstructionAndRegistration_UseOnlyLocalPlanSnapshotProvider()
     {
-        public int ReadCount { get; private set; }
-        public ThrowingPersistence Persistence { get; } = new();
-        public ThrowingDelivery Delivery { get; } = new();
+        var constructor = Assert.Single(typeof(ReviewViewModel).GetConstructors());
+        Assert.Equal([typeof(ILocalPlanSnapshotProvider)], constructor.GetParameters().Select(parameter => parameter.ParameterType));
 
-        public DailyPlan GetSnapshot()
-        {
-            ReadCount++;
-            return plan;
-        }
+        var services = new ServiceCollection();
+        services.AddSingleton(new TodayViewModel(new ThrowingDailyPlanRepository()));
+        App.RegisterReviewServices(services);
+        using var provider = services.BuildServiceProvider();
+
+        Assert.IsType<ReviewViewModel>(provider.GetRequiredService<ReviewViewModel>());
     }
 
-    private sealed class ThrowingPersistence
+    private sealed class FixedPlanSnapshotProvider(DailyPlan plan) : ILocalPlanSnapshotProvider
     {
+        public DailyPlan GetSnapshot() => plan;
+    }
+
+    private sealed class ThrowingDailyPlanRepository : IDailyPlanRepository
+    {
+        public int GetCount { get; private set; }
         public int SaveCount { get; private set; }
-        public void Save()
+
+        public Task<DailyPlan?> GetAsync(DateOnly date, CancellationToken cancellationToken = default)
+        {
+            GetCount++;
+            throw new InvalidOperationException("Dry Run must not read persistence.");
+        }
+
+        public Task SaveAsync(DailyPlan plan, CancellationToken cancellationToken = default)
         {
             SaveCount++;
             throw new InvalidOperationException("Dry Run must not write persistence.");
-        }
-    }
-
-    private sealed class ThrowingDelivery
-    {
-        public int DeliverCount { get; private set; }
-        public void Deliver()
-        {
-            DeliverCount++;
-            throw new InvalidOperationException("Dry Run must not deliver.");
         }
     }
 }
