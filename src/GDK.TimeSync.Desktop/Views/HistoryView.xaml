@@ -3,6 +3,29 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <StackPanel>
         <TextBlock Text="History" FontSize="24" FontWeight="SemiBold" />
-        <TextBlock Margin="0,8,0,0" Text="Past synchronization activity will appear here." Foreground="DimGray" />
+        <TextBlock Margin="0,8,0,0" Text="{Binding LoadError}" Foreground="Firebrick" TextWrapping="Wrap" />
+        <TextBlock Margin="0,8,0,0" Text="No delivery history yet." Foreground="DimGray">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsEmpty}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+        <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding Items}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Margin="0,0,0,8">
+                        <TextBlock Text="{Binding StatusText}" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding PlannedWorkItemId}" Foreground="DimGray" />
+                        <TextBlock Text="{Binding FailureText}" Foreground="Firebrick" />
+                    </StackPanel>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
     </StackPanel>
 </UserControl>

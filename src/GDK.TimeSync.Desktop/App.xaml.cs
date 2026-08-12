@@ -37,7 +37,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<MainViewModel>();
         services.AddSingleton<TodayViewModel>();
         services.AddSingleton<TemplatesViewModel>();
-        services.AddSingleton<ReviewViewModel>();
+        services.AddSingleton<ReviewViewModel>(provider => new ReviewViewModel(provider.GetRequiredService<TodayViewModel>().CreatePlanSnapshot));
+        services.AddSingleton<HistoryViewModel>();
         services.AddSingleton<ShellViewModel>();
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<MainWindow>();

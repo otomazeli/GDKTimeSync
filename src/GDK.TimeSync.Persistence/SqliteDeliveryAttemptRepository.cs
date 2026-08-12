@@ -10,6 +10,28 @@ public sealed class SqliteDeliveryAttemptRepository(SqliteDatabase database) : I
         return await GetAsync(connection, plannedWorkItemId, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<DeliveryAttempt>> ListAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await database.OpenReadOnlyConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT planned_work_item_id, toggl_entry_id, tempo_worklog_id, status, failure_code, slack_state
+            FROM delivery_attempts
+            ORDER BY planned_work_item_id
+            """;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var attempts = new List<DeliveryAttempt>();
+        while (await reader.ReadAsync(cancellationToken))
+            attempts.Add(new DeliveryAttempt(
+                Guid.Parse(reader.GetString(0)),
+                reader.IsDBNull(1) ? null : reader.GetInt64(1),
+                reader.IsDBNull(2) ? null : reader.GetInt64(2),
+                (DeliveryAttemptStatus)reader.GetInt32(3),
+                reader.IsDBNull(4) ? null : (DeliveryFailureCode)reader.GetInt32(4),
+                (SlackDeliveryState)reader.GetInt32(5)));
+        return attempts;
+    }
+
     public async Task<DeliveryAttemptClaim> ClaimAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default)
     {
         await using var connection = await database.OpenConnectionAsync(cancellationToken);

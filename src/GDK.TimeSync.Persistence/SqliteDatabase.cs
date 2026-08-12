@@ -39,6 +39,7 @@ public sealed class SqliteDatabase
         """;
 
     private readonly string connectionString;
+    private readonly string readOnlyConnectionString;
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> InitializationLocks = new(StringComparer.OrdinalIgnoreCase);
 
     public SqliteDatabase(string databasePath)
@@ -46,6 +47,7 @@ public sealed class SqliteDatabase
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         DatabasePath = databasePath;
         connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath, ForeignKeys = true, Pooling = false }.ToString();
+        readOnlyConnectionString = new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, ForeignKeys = true, Pooling = false }.ToString();
     }
 
     public string DatabasePath { get; }
@@ -78,6 +80,21 @@ public sealed class SqliteDatabase
         finally
         {
             initializationLock.Release();
+        }
+    }
+
+    public async Task<SqliteConnection> OpenReadOnlyConnectionAsync(CancellationToken cancellationToken = default)
+    {
+        var connection = new SqliteConnection(readOnlyConnectionString);
+        try
+        {
+            await connection.OpenAsync(cancellationToken);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync();
+            throw;
         }
     }
 }

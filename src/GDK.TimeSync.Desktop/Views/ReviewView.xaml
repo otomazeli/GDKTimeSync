@@ -3,6 +3,28 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <StackPanel>
         <TextBlock Text="End-of-day review" FontSize="24" FontWeight="SemiBold" />
+        <TextBlock Margin="0,8,0,0" Text="{Binding DryRunSummary}" TextWrapping="Wrap" />
+        <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding DryRunBlockers}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock Text="{Binding}" Foreground="Firebrick" TextWrapping="Wrap" />
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <Button Width="100" Margin="0,12,0,0" HorizontalAlignment="Left" Command="{Binding DryRunCommand}">Dry Run</Button>
+        <Button Width="130" Margin="0,8,0,0" HorizontalAlignment="Left" Command="{Binding ConfirmReviewCommand}">Confirm preview</Button>
+        <TextBlock Margin="0,8,0,0" Text="Preview confirmed. Posting remains unavailable." Foreground="DimGray">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsConfirmationVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
         <TextBlock Margin="0,8,0,16" Text="{Binding PostAllExplanation}" TextWrapping="Wrap" Foreground="DimGray" />
         <Button Width="100" HorizontalAlignment="Left" Command="{Binding PostAllCommand}" IsEnabled="{Binding CanPostAll}">Post all</Button>
     </StackPanel>

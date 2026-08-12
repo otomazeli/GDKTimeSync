@@ -327,6 +327,12 @@ public sealed class PostAllCoordinatorTests
                 return Task.FromResult(attempts.GetValueOrDefault(plannedWorkItemId));
         }
 
+        public Task<IReadOnlyList<DeliveryAttempt>> ListAsync(CancellationToken cancellationToken = default)
+        {
+            lock (gate)
+                return Task.FromResult<IReadOnlyList<DeliveryAttempt>>(attempts.Values.OrderBy(attempt => attempt.PlannedWorkItemId).ToArray());
+        }
+
         public Task<DeliveryAttemptClaim> ClaimAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default)
         {
             lock (gate)
@@ -436,6 +442,20 @@ public sealed class SqliteDeliveryAttemptRepositoryTests : IAsyncLifetime
         var attempt = await repository.GetAsync(itemId);
 
         Assert.Equal(new DeliveryAttempt(itemId, 101, 201, DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported), attempt);
+    }
+
+    [Fact]
+    public async Task ListAsync_ReturnsAttemptsOrderedByStableItemId()
+    {
+        var repository = new SqliteDeliveryAttemptRepository(new SqliteDatabase(databasePath));
+        var first = new Guid("00000000-0000-0000-0000-000000000001");
+        var second = new Guid("00000000-0000-0000-0000-000000000002");
+        await repository.SaveAsync(new(second, 102, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.JiraFailed, SlackDeliveryState.NotSupported));
+        await repository.SaveAsync(new(first, 101, 201, DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported));
+
+        var attempts = await repository.ListAsync();
+
+        Assert.Equal([first, second], attempts.Select(attempt => attempt.PlannedWorkItemId));
     }
 
     [Fact]

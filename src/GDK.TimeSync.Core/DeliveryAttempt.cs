@@ -37,6 +37,7 @@ public sealed record DeliveryAttemptClaim(DeliveryAttempt Attempt, bool IsAcquir
 public interface IDeliveryAttemptRepository
 {
     Task<DeliveryAttempt?> GetAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<DeliveryAttempt>> ListAsync(CancellationToken cancellationToken = default);
     Task<DeliveryAttemptClaim> ClaimAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default);
     Task SaveAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default);
 }

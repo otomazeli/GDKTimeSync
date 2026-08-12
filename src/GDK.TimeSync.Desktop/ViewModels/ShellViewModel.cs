@@ -11,19 +11,22 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     private readonly TemplatesViewModel templates;
     private readonly ReviewViewModel review;
     private readonly SettingsViewModel? settings;
+    private readonly HistoryViewModel? history;
 
     public ShellViewModel(
         IConfigurationStateService configurationState,
         TodayViewModel? today = null,
         TemplatesViewModel? templates = null,
         ReviewViewModel? review = null,
-        SettingsViewModel? settings = null)
+        SettingsViewModel? settings = null,
+        HistoryViewModel? history = null)
     {
         _ = configurationState;
         this.today = today ?? new TodayViewModel();
         this.templates = templates ?? new TemplatesViewModel(this.today);
         this.review = review ?? new ReviewViewModel();
         this.settings = settings;
+        this.history = history;
         NavigateCommand = new RelayCommand(Navigate);
     }
 
@@ -47,6 +50,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     {
         NavigationPage.Today => today,
         NavigationPage.Templates => templates,
+        NavigationPage.History when history is not null => history,
         NavigationPage.Review => review,
         NavigationPage.Settings when settings is not null => settings,
         _ => SelectedPage
@@ -64,6 +68,10 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     private void Navigate(object? page)
     {
         if (page is NavigationPage navigationPage)
+        {
             SelectedPage = navigationPage;
+            if (navigationPage == NavigationPage.History)
+                _ = history?.LoadAsync();
+        }
     }
 }
