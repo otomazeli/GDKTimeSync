@@ -7,11 +7,11 @@ namespace GDK.TimeSync.Desktop.ViewModels;
 
 public sealed class ReviewViewModel : INotifyPropertyChanged
 {
-    private readonly Func<DailyPlan>? planProvider;
+    private readonly ILocalPlanSnapshotProvider? planProvider;
     private string dryRunSummary = "Run Dry Run to validate the current local plan.";
     private bool isConfirmationVisible;
 
-    public ReviewViewModel(Func<DailyPlan>? planProvider = null)
+    public ReviewViewModel(ILocalPlanSnapshotProvider? planProvider = null)
     {
         this.planProvider = planProvider;
         DryRunCommand = new RelayCommand(_ => RunDryRun());
@@ -33,7 +33,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     private void RunDryRun()
     {
         DryRunBlockers.Clear();
-        var plan = planProvider?.Invoke();
+        var plan = planProvider?.GetSnapshot();
         if (plan is null)
         {
             DryRunBlockers.Add("No local plan is available to review.");

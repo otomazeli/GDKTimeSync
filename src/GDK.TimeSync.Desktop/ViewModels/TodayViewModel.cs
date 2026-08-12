@@ -5,7 +5,7 @@ using GDK.TimeSync.Core;
 
 namespace GDK.TimeSync.Desktop.ViewModels;
 
-public sealed class TodayViewModel : INotifyPropertyChanged
+public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotProvider
 {
     private readonly IDailyPlanRepository? repository;
     private readonly object persistenceLock = new();
@@ -66,7 +66,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged
             return pendingSave ?? Task.CompletedTask;
     }
 
-    public DailyPlan CreatePlanSnapshot() => DailyPlan.Create(Date, Items.Select(item => new PlannedWorkItem(
+    public DailyPlan GetSnapshot() => DailyPlan.Create(Date, Items.Select(item => new PlannedWorkItem(
         item.Id, Date, item.Start, item.End, item.Name, item.JiraIssueKey, item.Description,
         item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable)).ToArray());
 
