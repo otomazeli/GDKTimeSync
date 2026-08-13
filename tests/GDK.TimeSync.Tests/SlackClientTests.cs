@@ -77,13 +77,18 @@ public sealed class SlackClientTests
     }
 
     [Fact]
-    public async Task PostAsync_PreservesSafeHandlerFailure()
+    public async Task PostAsync_InjectedSlackException_IsSanitized()
     {
-        using var client = CreateClient(new ThrowingHttpMessageHandler(new SlackApiException("Slack returned an invalid response.", SlackFailureCode.InvalidResponse)));
+        const string sentinel = "https://hooks.slack.com/services/sentinel {\"text\":\"payload-sentinel\"}";
+        var injected = new SlackApiException(sentinel, SlackFailureCode.InvalidResponse);
+        using var client = CreateClient(new ThrowingHttpMessageHandler(injected));
 
         var exception = await Assert.ThrowsAsync<SlackApiException>(() => client.PostAsync(new SlackDailyUpdate(new DateOnly(2026, 8, 13), "Daily update")));
 
-        Assert.Equal(SlackFailureCode.InvalidResponse, exception.FailureCode);
+        Assert.NotSame(injected, exception);
+        Assert.Equal(SlackFailureCode.Transport, exception.FailureCode);
+        Assert.Null(exception.InnerException);
+        Assert.DoesNotContain(sentinel, exception.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

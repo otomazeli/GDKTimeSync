@@ -17,18 +17,22 @@ public sealed class SlackClient : ISlackClient
     public async Task PostAsync(SlackDailyUpdate update, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(update);
+        SlackFailureCode? failureCode = null;
+        System.Net.HttpStatusCode? statusCode = null;
         try
         {
             using var response = await httpClient.PostAsJsonAsync("", new { text = update.Text }, cancellationToken);
             if (!response.IsSuccessStatusCode)
-                throw new SlackApiException("Slack returned an unsuccessful response.", SlackFailureCode.UnsuccessfulResponse, response.StatusCode);
+            {
+                failureCode = SlackFailureCode.UnsuccessfulResponse;
+                statusCode = response.StatusCode;
+            }
 
-            if (!string.Equals((await response.Content.ReadAsStringAsync(cancellationToken)).Trim(), "ok", StringComparison.Ordinal))
-                throw new SlackApiException("Slack returned an invalid response.", SlackFailureCode.InvalidResponse, response.StatusCode);
-        }
-        catch (SlackApiException)
-        {
-            throw;
+            else if (!string.Equals((await response.Content.ReadAsStringAsync(cancellationToken)).Trim(), "ok", StringComparison.Ordinal))
+            {
+                failureCode = SlackFailureCode.InvalidResponse;
+                statusCode = response.StatusCode;
+            }
         }
         catch (HttpRequestException)
         {
@@ -42,6 +46,12 @@ public sealed class SlackClient : ISlackClient
         {
             throw new SlackApiException("Unable to reach Slack.", SlackFailureCode.Transport);
         }
+
+        if (failureCode is { } localFailureCode)
+            throw new SlackApiException(
+                localFailureCode == SlackFailureCode.UnsuccessfulResponse ? "Slack returned an unsuccessful response." : "Slack returned an invalid response.",
+                localFailureCode,
+                statusCode);
     }
 
     public void Dispose() => httpClient.Dispose();
