@@ -1,6 +1,7 @@
 using GDK.TimeSync.Core;
 using GDK.TimeSync.Persistence;
 using Microsoft.Data.Sqlite;
+using System.Diagnostics;
 
 namespace GDK.TimeSync.Tests;
 
@@ -121,6 +122,29 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task InvalidPersistedWorkStatus_IsNormalizedOnDiskDuringMigration()
+    {
+        var databasePath = CreateDatabasePath();
+        await CreateDatabaseWithInvalidWorkStatusAsync(databasePath);
+
+        await using (var connection = await new SqliteDatabase(databasePath).OpenConnectionAsync())
+        {
+        }
+
+        await using var rawConnection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString());
+        await rawConnection.OpenAsync();
+        await using var command = rawConnection.CreateCommand();
+        command.CommandText = "SELECT work_status FROM planned_work_items UNION ALL SELECT work_status FROM recurring_task_templates";
+        await using var reader = await command.ExecuteReaderAsync();
+        var statuses = new List<int>();
+
+        while (await reader.ReadAsync())
+            statuses.Add(reader.GetInt32(0));
+
+        Assert.Equal([(int)WorkStatus.InProgress, (int)WorkStatus.InProgress], statuses);
+    }
+
+    [Fact]
     public async Task SaveAsync_RejectsUndefinedPlanWorkStatus()
     {
         var repository = CreatePlanRepository();
@@ -140,17 +164,51 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task NewSchema_RejectsInvalidWorkStatus()
+    public async Task NewSchema_RejectsInvalidWorkStatuses()
     {
         var database = new SqliteDatabase(CreateDatabasePath());
         await using var connection = await database.OpenConnectionAsync();
         await using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO daily_plans(plan_date) VALUES ('2026-08-13'); INSERT INTO planned_work_items(id, plan_date, start_time, end_time, name, jira_issue_key, comment, duration_seconds, toggl_project, tempo_category, is_billable, work_status) VALUES ('00000000-0000-0000-0000-000000000001', '2026-08-13', NULL, NULL, 'Knowledge transfer', 'CGMFRAVII-2767', 'Knowledge transfer', 1800, 'CGM', 'DEVELOPMENT', 1, 999);";
+
+        await Assert.ThrowsAsync<SqliteException>(() => command.ExecuteNonQueryAsync());
+
         command.CommandText = """
             INSERT INTO recurring_task_templates(id, name, jira_issue_key, description, duration_seconds, toggl_project, tempo_category, is_billable, work_status)
             VALUES ('00000000-0000-0000-0000-000000000002', 'Knowledge transfer', 'CGMFRAVII-2767', 'Knowledge transfer', 1800, 'CGM', 'DEVELOPMENT', 1, 999)
             """;
 
         await Assert.ThrowsAsync<SqliteException>(() => command.ExecuteNonQueryAsync());
+    }
+
+    [Fact]
+    public async Task SeparateProcessInitializers_MigrateTheSameLegacyDatabase()
+    {
+        var databasePath = CreateDatabasePath();
+        await CreateLegacyPlanDatabaseAsync(databasePath);
+        var readyPath = CreateTemporaryPath();
+        var startPath = CreateTemporaryPath();
+        using var probe = StartMigrationProbe(databasePath, readyPath, startPath);
+
+        try
+        {
+            await WaitForFileAsync(readyPath);
+            var parentOpen = Task.Run(() => new SqliteDatabase(databasePath).OpenConnectionAsync());
+            await File.WriteAllTextAsync(startPath, "start");
+            await using var parentConnection = await parentOpen;
+            await probe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(0, probe.ExitCode);
+            var plan = await new SqliteDailyPlanRepository(new SqliteDatabase(databasePath)).GetAsync(new DateOnly(2026, 8, 13));
+            var template = Assert.Single(await new SqliteTemplateRepository(new SqliteDatabase(databasePath)).ListAsync());
+            Assert.Equal(WorkStatus.InProgress, Assert.Single(plan!.Items).Status);
+            Assert.Equal(WorkStatus.InProgress, template.Status);
+        }
+        finally
+        {
+            if (!probe.HasExited)
+                probe.Kill(entireProcessTree: true);
+        }
     }
 
     [Fact]
@@ -199,6 +257,33 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
         var path = Path.Combine(Path.GetTempPath(), $"GDK.TimeSync.Tests.{Guid.NewGuid():N}.db");
         databasePaths.Add(path);
         return path;
+    }
+
+    private string CreateTemporaryPath()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"GDK.TimeSync.Tests.{Guid.NewGuid():N}.signal");
+        databasePaths.Add(path);
+        return path;
+    }
+
+    private static Process StartMigrationProbe(string databasePath, string readyPath, string startPath)
+    {
+        var startInfo = new ProcessStartInfo("dotnet") { UseShellExecute = false, CreateNoWindow = true };
+        startInfo.ArgumentList.Add(typeof(MigrationProbeProgram).Assembly.Location);
+        startInfo.ArgumentList.Add("--migration-probe");
+        startInfo.ArgumentList.Add(databasePath);
+        startInfo.ArgumentList.Add(readyPath);
+        startInfo.ArgumentList.Add(startPath);
+        return Process.Start(startInfo)!;
+    }
+
+    private static async Task WaitForFileAsync(string path)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!File.Exists(path) && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
+
+        Assert.True(File.Exists(path), "Migration probe did not signal readiness.");
     }
 
     private static async Task CreateLegacyPlanDatabaseAsync(string databasePath)

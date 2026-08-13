@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <StartupObject>GDK.TimeSync.Tests.MigrationProbeProgram</StartupObject>
   </PropertyGroup>
 
   <ItemGroup>

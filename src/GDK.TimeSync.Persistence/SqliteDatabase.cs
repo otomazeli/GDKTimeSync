@@ -141,7 +141,7 @@ public sealed class SqliteDatabase
         }
 
         await using var update = connection.CreateCommand();
-        update.CommandText = $"UPDATE {tableName} SET work_status = 0 WHERE work_status IS NULL";
+        update.CommandText = $"UPDATE {tableName} SET work_status = 0 WHERE work_status IS NULL OR work_status NOT IN (0, 1, 2, 3, 4)";
         await update.ExecuteNonQueryAsync(cancellationToken);
     }
 
