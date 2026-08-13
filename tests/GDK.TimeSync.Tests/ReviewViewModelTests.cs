@@ -150,7 +150,7 @@ public sealed class ReviewViewModelTests
         {
             Directory.CreateDirectory(directory);
             var path = Path.Combine(directory, "settings.json");
-            const string sentinel = "https://hooks.slack.com/services%2FT000%2FB000%2Fsentinel-webhook";
+            const string sentinel = "https://hooks.slack.com/services%25252525252FT000%25252525252FB000%25252525252Fsentinel-webhook";
             File.WriteAllText(path, $$"""{"SlackTitle":"{{sentinel}}"}""");
             var date = new DateOnly(2026, 8, 13);
             var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
@@ -183,6 +183,24 @@ public sealed class ReviewViewModelTests
         Assert.False(review.CanConfirmSlack);
         Assert.Equal(0, deliveries.ClaimCalls);
         Assert.Equal(0, slack.CreateCalls);
+    }
+
+    [Fact]
+    public async Task Invalid_final_slack_configuration_is_validated_before_claim_or_reconciliation()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var slack = new InvalidSlackFactory();
+        var deliveries = new DailyDeliveryRepository();
+        var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)), slackFactory: slack, dailyDeliveries: deliveries);
+
+        await review.ComposeSlackPreviewAsync();
+        await review.ConfirmSlackAsync();
+
+        Assert.Equal(1, slack.GetCalls);
+        Assert.Equal(0, deliveries.ClaimCalls);
+        Assert.Equal(0, deliveries.SaveCalls);
+        Assert.Equal("Slack is not configured.", review.SlackDeliveryError);
     }
 
     [Fact]
@@ -304,6 +322,7 @@ public sealed class ReviewViewModelTests
     {
         private DailySlackDelivery? delivery = current;
         public int ClaimCalls { get; private set; }
+        public int SaveCalls { get; private set; }
         public Task<DailySlackDelivery?> GetAsync(DateOnly date, CancellationToken cancellationToken = default) => Task.FromResult(delivery);
         public Task<bool> TryClaimAsync(DateOnly date, string contentFingerprint, CancellationToken cancellationToken = default)
         {
@@ -312,7 +331,7 @@ public sealed class ReviewViewModelTests
             delivery = new DailySlackDelivery(date, contentFingerprint, DailySlackDeliveryState.InProgress, null);
             return Task.FromResult(true);
         }
-        public Task SaveAsync(DailySlackDelivery value, CancellationToken cancellationToken = default) { delivery = value; return Task.CompletedTask; }
+        public Task SaveAsync(DailySlackDelivery value, CancellationToken cancellationToken = default) { SaveCalls++; delivery = value; return Task.CompletedTask; }
     }
 
     private sealed class RecordingSlackClientFactory : ISlackClientFactory
@@ -348,6 +367,17 @@ public sealed class ReviewViewModelTests
         {
             await credentials.GetAsync(CredentialKeys.SlackWebhook, cancellationToken);
             return new RecordingSlackClient();
+        }
+    }
+
+    private sealed class InvalidSlackFactory : ISlackClientFactory
+    {
+        public int GetCalls { get; private set; }
+        public Task<bool> IsConfiguredAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<ISlackClient> CreateAsync(CancellationToken cancellationToken = default)
+        {
+            GetCalls++;
+            throw new InvalidOperationException("invalid credential is not exposed");
         }
     }
 

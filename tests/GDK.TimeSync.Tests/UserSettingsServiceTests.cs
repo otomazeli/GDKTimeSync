@@ -10,6 +10,7 @@ public sealed class UserSettingsServiceTests : IDisposable
     [Theory]
     [InlineData("https://hooks.slack.com/services/T000/B000/sentinel-webhook")]
     [InlineData("https://hooks.slack.com/services%2FT000%2FB000%2Fsentinel-webhook")]
+    [InlineData("https://hooks.slack.com/services%25252525252FT000%25252525252FB000%25252525252Fsentinel-webhook")]
     [InlineData("https://example.test/post?authorization=sentinel-secret")]
     [InlineData("Bearer sentinel-secret")]
     public void Direct_save_rejects_sensitive_slack_presentation_text_without_writing_json(string sensitiveText)
@@ -59,7 +60,7 @@ public sealed class UserSettingsServiceTests : IDisposable
     {
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "settings.json");
-        const string sentinel = "https://hooks.slack.com/services%2FT000%2FB000%2Fsentinel-webhook";
+        const string sentinel = "https://hooks.slack.com/services%25252525252FT000%25252525252FB000%25252525252Fsentinel-webhook";
         File.WriteAllText(path, $$"""{"SlackTitle":"{{sentinel}}"}""");
         var service = new UserSettingsService(path);
 

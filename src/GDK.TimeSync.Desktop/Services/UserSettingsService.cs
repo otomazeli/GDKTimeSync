@@ -67,7 +67,8 @@ public sealed class UserSettingsService : IUserSettingsStore
         {
             var candidate = match.Value.TrimEnd('.', ',', ';', ')', ']', '}');
             if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri)) continue;
-            if (IsSlackHost(uri.Host) && DecodePath(uri.AbsolutePath).Contains("/services/", StringComparison.OrdinalIgnoreCase)) return true;
+            var path = DecodePath(uri.AbsolutePath);
+            if (IsSlackHost(uri.Host) && (path.Contains("/services/", StringComparison.OrdinalIgnoreCase) || (path.Contains("/services", StringComparison.OrdinalIgnoreCase) && path.Contains('%')))) return true;
             if (!string.IsNullOrEmpty(uri.UserInfo) || HasSensitiveQuery(uri.Query)) return true;
         }
         return false;
@@ -77,7 +78,7 @@ public sealed class UserSettingsService : IUserSettingsStore
 
     private static string DecodePath(string path)
     {
-        for (var count = 0; count < 4; count++)
+        for (var count = 0; count < Math.Min(path.Length, 64); count++)
         {
             var decoded = Uri.UnescapeDataString(path);
             if (decoded == path) break;

@@ -250,16 +250,29 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
                 return;
             }
 
+            ISlackClient client;
+            try
+            {
+                client = await slackClientFactory.CreateAsync(cancellationToken);
+            }
+            catch
+            {
+                SlackDeliveryError = "Slack is not configured.";
+                return;
+            }
+
+            using (client)
+            {
             if (!await dailyDeliveries.TryClaimAsync(SlackPreview.Date, SlackPreview.ContentFingerprint, cancellationToken))
             {
                 SlackDeliveryError = "A daily Slack delivery already exists and cannot be sent again.";
                 return;
             }
 
-            using var client = await slackClientFactory.CreateAsync(cancellationToken);
             await client.PostAsync(SlackPreview, cancellationToken);
             await dailyDeliveries.SaveAsync(new DailySlackDelivery(SlackPreview.Date, SlackPreview.ContentFingerprint, DailySlackDeliveryState.Sent, null), CancellationToken.None);
             SlackDeliveryError = null;
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
