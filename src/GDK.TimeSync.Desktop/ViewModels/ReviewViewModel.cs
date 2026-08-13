@@ -14,6 +14,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     private readonly IDeliveryAttemptRepository? attempts;
     private readonly IDailySlackDeliveryRepository? dailyDeliveries;
     private readonly ISlackClientFactory? slackClientFactory;
+    private readonly IUserSettingsStore? settings;
     private string dryRunSummary = "Run Dry Run to validate the current local plan.";
     private PlannedWorkItem? selectedTask;
     private DeliveryAttempt? lastTaskAttempt;
@@ -23,19 +24,22 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     private bool isTaskConfirmationVisible;
     private bool isSlackConfirmationVisible;
     private bool canConfirmSlack;
+    private bool isTaskDeliveryInFlight;
 
     public ReviewViewModel(
         ILocalPlanSnapshotProvider? planProvider = null,
         IConfirmedTaskDeliveryService? deliveryService = null,
         IDeliveryAttemptRepository? attempts = null,
         IDailySlackDeliveryRepository? dailyDeliveries = null,
-        ISlackClientFactory? slackClientFactory = null)
+        ISlackClientFactory? slackClientFactory = null,
+        IUserSettingsStore? settings = null)
     {
         this.planProvider = planProvider;
         this.deliveryService = deliveryService;
         this.attempts = attempts;
         this.dailyDeliveries = dailyDeliveries;
         this.slackClientFactory = slackClientFactory;
+        this.settings = settings;
         DryRunCommand = new RelayCommand(_ => RunDryRun());
         RefreshCommand = new RelayCommand(_ => _ = RefreshAsync());
         OpenTaskConfirmationCommand = new RelayCommand(value =>
@@ -43,7 +47,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
             if (value is PlannedWorkItem item)
                 OpenTaskConfirmation(item.Id);
         });
-        ConfirmTaskCommand = new RelayCommand(_ => _ = ConfirmTaskAsync(), () => IsTaskConfirmationVisible);
+        ConfirmTaskCommand = new RelayCommand(_ => _ = ConfirmTaskAsync(), () => CanConfirmTask);
         CancelTaskConfirmationCommand = new RelayCommand(_ => CancelTaskConfirmation(), () => IsTaskConfirmationVisible);
         ComposeSlackPreviewCommand = new RelayCommand(_ => _ = ComposeSlackPreviewAsync());
         ConfirmSlackCommand = new RelayCommand(_ => _ = ConfirmSlackAsync(), () => CanConfirmSlack);
@@ -69,6 +73,18 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     public SlackDailyUpdate? SlackPreview { get => slackPreview; private set => SetField(ref slackPreview, value); }
     public string? TaskDeliveryError { get => taskDeliveryError; private set => SetField(ref taskDeliveryError, value); }
     public string? SlackDeliveryError { get => slackDeliveryError; private set => SetField(ref slackDeliveryError, value); }
+    public bool IsTaskDeliveryInFlight
+    {
+        get => isTaskDeliveryInFlight;
+        private set
+        {
+            if (isTaskDeliveryInFlight == value) return;
+            SetField(ref isTaskDeliveryInFlight, value);
+            ConfirmTaskCommand.NotifyCanExecuteChanged();
+        }
+    }
+    public bool CanConfirmTask => IsTaskConfirmationVisible && !IsTaskDeliveryInFlight;
+    public string TaskDeliveryStatus => LastTaskAttempt?.Status.ToString() ?? "Not delivered";
     public bool IsTaskConfirmationVisible
     {
         get => isTaskConfirmationVisible;
@@ -78,6 +94,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
             SetField(ref isTaskConfirmationVisible, value);
             ConfirmTaskCommand.NotifyCanExecuteChanged();
             CancelTaskConfirmationCommand.NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(CanConfirmTask));
         }
     }
     public bool IsSlackConfirmationVisible
@@ -116,6 +133,8 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         var item = planProvider?.GetSnapshot().Items.SingleOrDefault(value => value.Id == itemId);
         if (item is null) return;
         SelectedTask = item;
+        if (LastTaskAttempt?.PlannedWorkItemId != item.Id)
+            LastTaskAttempt = null;
         TaskDeliveryError = null;
         IsTaskConfirmationVisible = true;
     }
@@ -128,8 +147,10 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
     public async Task ConfirmTaskAsync(CancellationToken cancellationToken = default)
     {
-        if (!IsTaskConfirmationVisible || SelectedTask is not { } item || deliveryService is null) return;
+        if (!CanConfirmTask || SelectedTask is not { } item || deliveryService is null) return;
 
+        IsTaskDeliveryInFlight = true;
+        CancelTaskConfirmation();
         try
         {
             LastTaskAttempt = await deliveryService.DeliverConfirmedAsync(item, cancellationToken);
@@ -145,7 +166,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         }
         finally
         {
-            CancelTaskConfirmation();
+            IsTaskDeliveryInFlight = false;
         }
     }
 
@@ -165,6 +186,12 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
         try
         {
+            if (!await slackClientFactory.IsConfiguredAsync(cancellationToken))
+            {
+                SlackBlockers.Add("Slack is not configured.");
+                return;
+            }
+
             if (await dailyDeliveries.GetAsync(plan.Date, cancellationToken) is not null)
             {
                 SlackBlockers.Add("A daily Slack delivery already exists and cannot be sent again.");
@@ -181,7 +208,9 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
                     SlackBlockers.Add("A pending or unsuccessful task delivery is excluded from Slack.");
             }
 
-            SlackPreview = new SlackDailyUpdateComposer().Compose(plan.Date, completed);
+            var preferences = settings?.Load() ?? new UserSettings();
+            SlackPreview = new SlackDailyUpdateComposer().Compose(plan.Date, completed,
+                new SlackDailyUpdateOptions(preferences.SlackTitle, preferences.SlackTaskHeading, preferences.SlackExtraLines));
             if (SlackPreview is null)
             {
                 SlackBlockers.Add("No Tempo-succeeded tasks are available for Slack.");
@@ -215,6 +244,12 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         IsSlackConfirmationVisible = false;
         try
         {
+            if (!await slackClientFactory.IsConfiguredAsync(cancellationToken))
+            {
+                SlackDeliveryError = "Slack is not configured.";
+                return;
+            }
+
             if (!await dailyDeliveries.TryClaimAsync(SlackPreview.Date, SlackPreview.ContentFingerprint, cancellationToken))
             {
                 SlackDeliveryError = "A daily Slack delivery already exists and cannot be sent again.";
@@ -289,5 +324,9 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         if (EqualityComparer<T>.Default.Equals(field, value)) return;
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        if (propertyName == nameof(LastTaskAttempt))
+            OnPropertyChanged(nameof(TaskDeliveryStatus));
     }
+
+    private void OnPropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

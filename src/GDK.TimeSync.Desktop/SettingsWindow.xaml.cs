@@ -31,6 +31,9 @@ public partial class SettingsWindow : Window
         ReviewReminderTimeTextBox.Text = viewModel.ReviewReminderTime;
         DefaultTempoWorkCategoryTextBox.Text = viewModel.DefaultTempoWorkCategory;
         AiEnabledCheckBox.IsChecked = viewModel.AiEnabled;
+        SlackTitleTextBox.Text = viewModel.SlackTitle;
+        SlackTaskHeadingTextBox.Text = viewModel.SlackTaskHeading;
+        SlackExtraLinesTextBox.Text = viewModel.SlackExtraLines;
     }
 
     private async void OnSaveClick(object sender, RoutedEventArgs e)
@@ -48,7 +51,10 @@ public partial class SettingsWindow : Window
                 TogglWorkspaceId = string.IsNullOrWhiteSpace(TogglWorkspaceIdTextBox.Text) ? null : workspaceId,
                 ReviewReminderTime = ReviewReminderTimeTextBox.Text.Trim(),
                 DefaultTempoWorkCategory = DefaultTempoWorkCategoryTextBox.Text.Trim(),
-                AiEnabled = AiEnabledCheckBox.IsChecked == true
+                AiEnabled = AiEnabledCheckBox.IsChecked == true,
+                SlackTitle = SlackTitleTextBox.Text.Trim(),
+                SlackTaskHeading = SlackTaskHeadingTextBox.Text.Trim(),
+                SlackExtraLines = SlackExtraLinesTextBox.Text.Split(["\r\n", "\n"], StringSplitOptions.None)
             };
             await viewModel.SaveAsync(draftSettings, TogglTokenPasswordBox.Password, JiraTokenPasswordBox.Password, SlackWebhookPasswordBox.Password);
             TogglTokenPasswordBox.Password = string.Empty;

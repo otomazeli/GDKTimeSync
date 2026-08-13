@@ -27,9 +27,31 @@ public sealed class DesktopConfigurationTests
         Assert.Contains("AiEnabled", json, StringComparison.Ordinal);
         Assert.DoesNotContain("password", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("secret", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("slack", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("webhook", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("incoming webhook", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Slack_presentation_preferences_round_trip_without_serializing_credentials()
+    {
+        var preferences = new UserSettings
+        {
+            JiraBaseUrl = "https://jira.cgm.ag",
+            SlackTitle = "Daily delivery",
+            SlackTaskHeading = "Completed work",
+            SlackExtraLines = ["Thank you, team."]
+        };
+        var json = JsonSerializer.Serialize(preferences);
+        var settings = new FakeSettingsStore(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" });
+        var viewModel = new SettingsViewModel(new FakeCredentialStore(), settings, new ConfigurationStateService(new FakeCredentialStore(), settings));
+
+        await viewModel.SaveAsync(preferences, null, null, null);
+
+        Assert.Equal("Daily delivery", settings.Current.SlackTitle);
+        Assert.Equal("Completed work", settings.Current.SlackTaskHeading);
+        Assert.Equal(["Thank you, team."], settings.Current.SlackExtraLines);
+        Assert.DoesNotContain("webhook", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("secret", json, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -67,7 +89,6 @@ public sealed class DesktopConfigurationTests
 
         var storedJson = JsonSerializer.Serialize(settings.Current);
         Assert.DoesNotContain(webhook, storedJson, StringComparison.Ordinal);
-        Assert.DoesNotContain("slack", storedJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("webhook", storedJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("secret", storedJson, StringComparison.OrdinalIgnoreCase);
     }

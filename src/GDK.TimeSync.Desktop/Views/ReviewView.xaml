@@ -32,10 +32,17 @@
                 </Style>
             </StackPanel.Style>
             <TextBlock Text="Post only this selected task?" FontWeight="SemiBold" />
-            <TextBlock Text="{Binding SelectedTask.JiraIssueKey}" />
+            <TextBlock Text="{Binding SelectedTask.JiraIssueKey}" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding SelectedTask.Comment}" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding SelectedTask.Duration, StringFormat={}{0:g}}" />
+            <TextBlock Text="{Binding SelectedTask.TogglProject, StringFormat=Toggl project: {0}}" />
+            <TextBlock Text="{Binding SelectedTask.TempoCategory, StringFormat=Tempo category: {0}}" />
+            <TextBlock Text="{Binding SelectedTask.IsBillable, StringFormat=Billable: {0}}" />
+            <TextBlock Text="{Binding TaskDeliveryStatus, StringFormat=Delivery status: {0}}" />
             <StackPanel Orientation="Horizontal"><Button Command="{Binding ConfirmTaskCommand}">Post task</Button><Button Margin="8,0,0,0" Command="{Binding CancelTaskConfirmationCommand}">Cancel</Button></StackPanel>
         </StackPanel>
         <TextBlock Margin="0,8,0,0" Text="{Binding TaskDeliveryError}" Foreground="Firebrick" TextWrapping="Wrap" />
+        <TextBlock Margin="0,4,0,0" Text="{Binding LastTaskAttempt.Status, StringFormat=Last task result: {0}}" TextWrapping="Wrap" />
         <Button Width="190" Margin="0,12,0,0" HorizontalAlignment="Left" Command="{Binding ComposeSlackPreviewCommand}">Compose daily Slack update</Button>
         <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding SlackBlockers}">
             <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="Firebrick" TextWrapping="Wrap" /></DataTemplate></ItemsControl.ItemTemplate>

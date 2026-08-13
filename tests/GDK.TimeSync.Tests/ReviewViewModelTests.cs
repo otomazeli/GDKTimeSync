@@ -26,6 +26,48 @@ public sealed class ReviewViewModelTests
     }
 
     [Fact]
+    public async Task Task_confirmation_projects_selected_details_and_the_safe_completed_result()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Planning", "CGM-42", "Review design", TimeSpan.FromMinutes(45), "GDK", "SUPPORT", false);
+        var review = CreateReview(DailyPlan.Create(date, [item]));
+
+        review.OpenTaskConfirmation(item.Id);
+
+        Assert.Equal("CGM-42", review.SelectedTask!.JiraIssueKey);
+        Assert.Equal("Review design", review.SelectedTask.Comment);
+        Assert.Equal(TimeSpan.FromMinutes(45), review.SelectedTask.Duration);
+        Assert.Equal("GDK", review.SelectedTask.TogglProject);
+        Assert.Equal("SUPPORT", review.SelectedTask.TempoCategory);
+        Assert.False(review.SelectedTask.IsBillable);
+        Assert.Equal("Not delivered", review.TaskDeliveryStatus);
+
+        await review.ConfirmTaskAsync();
+
+        Assert.Equal("Succeeded", review.TaskDeliveryStatus);
+        Assert.Equal(DeliveryAttemptStatus.Succeeded, review.LastTaskAttempt!.Status);
+    }
+
+    [Fact]
+    public async Task Task_confirmation_closes_synchronously_and_invokes_delivery_once_while_in_flight()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var delivery = new DelayedConfirmedDeliveryService();
+        var review = CreateReview(DailyPlan.Create(date, [item]), delivery);
+        review.OpenTaskConfirmation(item.Id);
+
+        var first = review.ConfirmTaskAsync();
+        var second = review.ConfirmTaskAsync();
+
+        Assert.False(review.IsTaskConfirmationVisible);
+        Assert.False(review.CanConfirmTask);
+        Assert.Equal(1, delivery.InvocationCount);
+        delivery.Complete(Succeeded(item));
+        await Task.WhenAll(first, second);
+    }
+
+    [Fact]
     public async Task No_confirmation_produces_no_task_delivery_or_slack_post()
     {
         var date = new DateOnly(2026, 8, 13);
@@ -81,6 +123,44 @@ public sealed class ReviewViewModelTests
     }
 
     [Fact]
+    public async Task Slack_preview_uses_persisted_non_secret_presentation_preferences()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var review = CreateReview(
+            DailyPlan.Create(date, [item]),
+            attempts: new AttemptRepository(Succeeded(item)),
+            settings: new FixedSettingsStore(new UserSettings
+            {
+                SlackTitle = "Daily delivery",
+                SlackTaskHeading = "Completed work",
+                SlackExtraLines = ["Thank you, team."]
+            }));
+
+        await review.ComposeSlackPreviewAsync();
+
+        Assert.Equal("Daily delivery\nCompleted work\nThank you, team.\nGDK | CGM-1 Completed | *In Progress*", review.SlackPreview!.Text);
+    }
+
+    [Fact]
+    public async Task Missing_slack_configuration_never_claims_or_creates_a_client()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var slack = new RecordingSlackClientFactory { IsConfigured = false };
+        var deliveries = new DailyDeliveryRepository();
+        var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)), slackFactory: slack, dailyDeliveries: deliveries);
+
+        await review.ComposeSlackPreviewAsync();
+        await review.ConfirmSlackAsync();
+
+        Assert.False(review.IsSlackConfirmationVisible);
+        Assert.False(review.CanConfirmSlack);
+        Assert.Equal(0, deliveries.ClaimCalls);
+        Assert.Equal(0, slack.CreateCalls);
+    }
+
+    [Fact]
     public async Task Slack_preview_excludes_non_tempo_succeeded_tasks_and_shows_a_safe_blocker()
     {
         var date = new DateOnly(2026, 8, 13);
@@ -97,8 +177,10 @@ public sealed class ReviewViewModelTests
         Assert.Single(review.SlackBlockers);
     }
 
-    [Fact]
-    public async Task Existing_sent_or_reconciliation_daily_record_keeps_slack_send_unavailable()
+    [Theory]
+    [InlineData(DailySlackDeliveryState.Sent)]
+    [InlineData(DailySlackDeliveryState.ReconciliationRequired)]
+    public async Task Existing_final_daily_delivery_state_keeps_slack_send_unavailable(DailySlackDeliveryState state)
     {
         var date = new DateOnly(2026, 8, 13);
         var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
@@ -107,7 +189,7 @@ public sealed class ReviewViewModelTests
             DailyPlan.Create(date, [item]),
             attempts: new AttemptRepository(Succeeded(item)),
             slackFactory: slack,
-            dailyDeliveries: new DailyDeliveryRepository(new DailySlackDelivery(date, new string('A', 64), DailySlackDeliveryState.Sent, null)));
+            dailyDeliveries: new DailyDeliveryRepository(new DailySlackDelivery(date, new string('A', 64), state, null)));
 
         await review.ComposeSlackPreviewAsync();
         await review.ConfirmSlackAsync();
@@ -122,13 +204,15 @@ public sealed class ReviewViewModelTests
         IConfirmedTaskDeliveryService? delivery = null,
         IDeliveryAttemptRepository? attempts = null,
         ISlackClientFactory? slackFactory = null,
-        IDailySlackDeliveryRepository? dailyDeliveries = null) =>
+        IDailySlackDeliveryRepository? dailyDeliveries = null,
+        IUserSettingsStore? settings = null) =>
         new(
             new FixedPlanSnapshotProvider(plan),
             delivery ?? new RecordingConfirmedDeliveryService(),
             attempts ?? new AttemptRepository(),
             dailyDeliveries ?? new DailyDeliveryRepository(),
-            slackFactory ?? new RecordingSlackClientFactory());
+            slackFactory ?? new RecordingSlackClientFactory(),
+            settings ?? new FixedSettingsStore(new UserSettings()));
 
     private static DeliveryAttempt Succeeded(PlannedWorkItem item) => new(item.Id, 101, 201, DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported);
 
@@ -147,6 +231,24 @@ public sealed class ReviewViewModelTests
         }
     }
 
+    private sealed class DelayedConfirmedDeliveryService : IConfirmedTaskDeliveryService
+    {
+        private readonly TaskCompletionSource<DeliveryAttempt> completion = new();
+        public int InvocationCount { get; private set; }
+        public Task<DeliveryAttempt> DeliverConfirmedAsync(PlannedWorkItem item, CancellationToken cancellationToken = default)
+        {
+            InvocationCount++;
+            return completion.Task;
+        }
+        public void Complete(DeliveryAttempt attempt) => completion.SetResult(attempt);
+    }
+
+    private sealed class FixedSettingsStore(UserSettings settings) : IUserSettingsStore
+    {
+        public UserSettings Load() => settings;
+        public void Save(UserSettings value) { }
+    }
+
     private sealed class AttemptRepository(params DeliveryAttempt[] values) : IDeliveryAttemptRepository
     {
         private readonly Dictionary<Guid, DeliveryAttempt> attempts = values.ToDictionary(value => value.PlannedWorkItemId);
@@ -159,9 +261,11 @@ public sealed class ReviewViewModelTests
     private sealed class DailyDeliveryRepository(DailySlackDelivery? current = null) : IDailySlackDeliveryRepository
     {
         private DailySlackDelivery? delivery = current;
+        public int ClaimCalls { get; private set; }
         public Task<DailySlackDelivery?> GetAsync(DateOnly date, CancellationToken cancellationToken = default) => Task.FromResult(delivery);
         public Task<bool> TryClaimAsync(DateOnly date, string contentFingerprint, CancellationToken cancellationToken = default)
         {
+            ClaimCalls++;
             if (delivery is not null) return Task.FromResult(false);
             delivery = new DailySlackDelivery(date, contentFingerprint, DailySlackDeliveryState.InProgress, null);
             return Task.FromResult(true);
@@ -172,7 +276,9 @@ public sealed class ReviewViewModelTests
     private sealed class RecordingSlackClientFactory : ISlackClientFactory
     {
         public int CreateCalls { get; private set; }
+        public bool IsConfigured { get; set; } = true;
         public RecordingSlackClient Client { get; } = new();
+        public Task<bool> IsConfiguredAsync(CancellationToken cancellationToken = default) => Task.FromResult(IsConfigured);
         public Task<ISlackClient> CreateAsync(CancellationToken cancellationToken = default) { CreateCalls++; return Task.FromResult<ISlackClient>(Client); }
     }
 

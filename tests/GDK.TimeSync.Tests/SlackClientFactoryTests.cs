@@ -34,10 +34,56 @@ public sealed class SlackClientFactoryTests
         Assert.DoesNotContain(webhook, exception.ToString(), StringComparison.Ordinal);
     }
 
-    private sealed class RecordingCredentials(string key, string value) : ICredentialStore
+    [Fact]
+    public async Task Configuration_preflight_rejects_missing_or_invalid_webhooks_without_creating_a_client()
+    {
+        var httpClients = new RecordingHttpClientFactory();
+        var missing = new SlackClientFactory(new RecordingCredentials(CredentialKeys.SlackWebhook, null), httpClients);
+        var invalid = new SlackClientFactory(new RecordingCredentials(CredentialKeys.SlackWebhook, "not-a-url"), httpClients);
+
+        Assert.False(await missing.IsConfiguredAsync());
+        Assert.False(await invalid.IsConfiguredAsync());
+        Assert.Empty(httpClients.Names);
+    }
+
+    [Fact]
+    public async Task CreateAsync_sanitizes_credential_and_http_factory_exceptions()
+    {
+        const string sentinel = "https://hooks.slack.com/services/sentinel-secret";
+        var factory = new SlackClientFactory(new ThrowingCredentials(sentinel), new RecordingHttpClientFactory());
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => factory.CreateAsync());
+
+        Assert.Equal("Slack configuration is not configured.", exception.Message);
+        Assert.Null(exception.InnerException);
+        Assert.DoesNotContain(sentinel, exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CreateAsync_sanitizes_http_client_factory_exceptions()
+    {
+        const string sentinel = "https://hooks.slack.com/services/sentinel-secret";
+        var factory = new SlackClientFactory(new RecordingCredentials(CredentialKeys.SlackWebhook, "https://hooks.slack.com/services/valid"), new ThrowingHttpClientFactory(sentinel));
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => factory.CreateAsync());
+
+        Assert.Equal("Slack configuration is not configured.", exception.Message);
+        Assert.Null(exception.InnerException);
+        Assert.DoesNotContain(sentinel, exception.ToString(), StringComparison.Ordinal);
+    }
+
+    private sealed class RecordingCredentials(string key, string? value) : ICredentialStore
     {
         public List<string> ReadKeys { get; } = [];
         public Task<string?> GetAsync(string requestedKey, CancellationToken cancellationToken = default) { ReadKeys.Add(requestedKey); return Task.FromResult<string?>(requestedKey == key ? value : null); }
+        public Task SaveAsync(string key, string secret, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task DeleteAsync(string key, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class ThrowingCredentials(string sentinel) : ICredentialStore
+    {
+        public Task<string?> GetAsync(string key, CancellationToken cancellationToken = default) => throw new InvalidOperationException(sentinel);
         public Task SaveAsync(string key, string secret, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task DeleteAsync(string key, CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -47,5 +93,10 @@ public sealed class SlackClientFactoryTests
     {
         public List<string> Names { get; } = [];
         public HttpClient CreateClient(string name) { Names.Add(name); return new HttpClient(new HttpClientHandler(), false); }
+    }
+
+    private sealed class ThrowingHttpClientFactory(string sentinel) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => throw new InvalidOperationException(sentinel);
     }
 }

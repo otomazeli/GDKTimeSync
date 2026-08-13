@@ -16,6 +16,9 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
     private long? togglWorkspaceId;
     private string reviewReminderTime = "16:00";
     private string defaultTempoWorkCategory = "DEVELOPMENT";
+    private string slackTitle = "Daily update";
+    private string slackTaskHeading = "Completed tasks";
+    private string slackExtraLines = string.Empty;
     private bool aiEnabled;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -74,6 +77,10 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         set => SetField(ref aiEnabled, value);
     }
 
+    public string SlackTitle { get => slackTitle; set => SetField(ref slackTitle, value); }
+    public string SlackTaskHeading { get => slackTaskHeading; set => SetField(ref slackTaskHeading, value); }
+    public string SlackExtraLines { get => slackExtraLines; set => SetField(ref slackExtraLines, value); }
+
     public bool IsSaving
     {
         get => isSaving;
@@ -95,7 +102,10 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             TogglWorkspaceId = TogglWorkspaceId,
             ReviewReminderTime = ReviewReminderTime,
             DefaultTempoWorkCategory = DefaultTempoWorkCategory,
-            AiEnabled = AiEnabled
+            AiEnabled = AiEnabled,
+            SlackTitle = SlackTitle,
+            SlackTaskHeading = SlackTaskHeading,
+            SlackExtraLines = SplitSlackLines(SlackExtraLines)
         }, newTogglToken, newJiraPat, null, cancellationToken);
 
     public Task SaveAsync(string jiraBaseUrl, string? newTogglToken, string? newJiraPat, string? newSlackWebhook, CancellationToken cancellationToken = default)
@@ -106,7 +116,10 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             TogglWorkspaceId = TogglWorkspaceId,
             ReviewReminderTime = ReviewReminderTime,
             DefaultTempoWorkCategory = DefaultTempoWorkCategory,
-            AiEnabled = AiEnabled
+            AiEnabled = AiEnabled,
+            SlackTitle = SlackTitle,
+            SlackTaskHeading = SlackTaskHeading,
+            SlackExtraLines = SplitSlackLines(SlackExtraLines)
         }, newTogglToken, newJiraPat, newSlackWebhook, cancellationToken);
 
     public async Task SaveAsync(UserSettings proposedSettings, string? newTogglToken, string? newJiraPat, string? newSlackWebhook, CancellationToken cancellationToken = default)
@@ -127,7 +140,10 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             JiraBaseUrl = normalizedJiraBaseUrl,
             JiraUser = normalizedJiraUser,
             ReviewReminderTime = normalizedReviewReminderTime,
-            DefaultTempoWorkCategory = proposedSettings.DefaultTempoWorkCategory.Trim()
+            DefaultTempoWorkCategory = proposedSettings.DefaultTempoWorkCategory.Trim(),
+            SlackTitle = NormalizeSlackText(proposedSettings.SlackTitle, nameof(proposedSettings.SlackTitle)),
+            SlackTaskHeading = NormalizeSlackText(proposedSettings.SlackTaskHeading, nameof(proposedSettings.SlackTaskHeading)),
+            SlackExtraLines = proposedSettings.SlackExtraLines.Select(line => NormalizeSlackText(line, nameof(proposedSettings.SlackExtraLines))).Where(line => line.Length > 0).ToArray()
         };
 
         IsSaving = true;
@@ -174,6 +190,9 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         ReviewReminderTime = currentSettings.ReviewReminderTime;
         DefaultTempoWorkCategory = currentSettings.DefaultTempoWorkCategory;
         AiEnabled = currentSettings.AiEnabled;
+        SlackTitle = currentSettings.SlackTitle;
+        SlackTaskHeading = currentSettings.SlackTaskHeading;
+        SlackExtraLines = string.Join(Environment.NewLine, currentSettings.SlackExtraLines);
     }
 
     private async Task UpdateCredentialStatusAsync(CancellationToken cancellationToken)
@@ -187,6 +206,16 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
     {
         try { return new System.Net.Mail.MailAddress(value).Address == value; }
         catch (FormatException) { return false; }
+    }
+
+    private static IReadOnlyList<string> SplitSlackLines(string value) => value.Split(["\r\n", "\n"], StringSplitOptions.None);
+
+    private static string NormalizeSlackText(string? value, string parameterName)
+    {
+        var normalized = (value ?? string.Empty).Trim();
+        if (normalized.Contains("hooks.slack.com/services/", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Slack presentation preferences cannot contain a webhook.", parameterName);
+        return normalized;
     }
 
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

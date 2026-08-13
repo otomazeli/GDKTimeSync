@@ -58,7 +58,8 @@ public partial class App : System.Windows.Application
             provider.GetRequiredService<IConfirmedTaskDeliveryService>(),
             provider.GetRequiredService<IDeliveryAttemptRepository>(),
             provider.GetRequiredService<IDailySlackDeliveryRepository>(),
-            provider.GetRequiredService<ISlackClientFactory>()));
+            provider.GetRequiredService<ISlackClientFactory>(),
+            provider.GetRequiredService<IUserSettingsStore>()));
 
     protected override void OnExit(ExitEventArgs e)
     {
