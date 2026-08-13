@@ -182,20 +182,26 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SeparateProcessInitializers_MigrateTheSameLegacyDatabase()
+    public async Task SeparateProcessLock_BlocksMigrationUntilReleased()
     {
         var databasePath = CreateDatabasePath();
         await CreateLegacyPlanDatabaseAsync(databasePath);
         var readyPath = CreateTemporaryPath();
-        var startPath = CreateTemporaryPath();
-        using var probe = StartMigrationProbe(databasePath, readyPath, startPath);
+        var releasePath = CreateTemporaryPath();
+        using var probe = StartMigrationProbe(databasePath, readyPath, releasePath);
+        Task<SqliteConnection>? parentOpen = null;
 
         try
         {
             await WaitForFileAsync(readyPath);
-            var parentOpen = Task.Run(() => new SqliteDatabase(databasePath).OpenConnectionAsync());
-            await File.WriteAllTextAsync(startPath, "start");
-            await using var parentConnection = await parentOpen;
+            parentOpen = Task.Run(() => new SqliteDatabase(databasePath).OpenConnectionAsync());
+            var completed = await Task.WhenAny(parentOpen, Task.Delay(TimeSpan.FromMilliseconds(250)));
+
+            Assert.NotSame(parentOpen, completed);
+            Assert.False(probe.HasExited);
+
+            await File.WriteAllTextAsync(releasePath, "release");
+            await parentOpen.WaitAsync(TimeSpan.FromSeconds(10));
             await probe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
 
             Assert.Equal(0, probe.ExitCode);
@@ -206,8 +212,23 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
         }
         finally
         {
+            if (!File.Exists(releasePath))
+                await File.WriteAllTextAsync(releasePath, "release");
             if (!probe.HasExited)
+            {
+                await Task.WhenAny(probe.WaitForExitAsync(), Task.Delay(TimeSpan.FromSeconds(10)));
+            }
+            if (!probe.HasExited)
+            {
                 probe.Kill(entireProcessTree: true);
+                await probe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            if (parentOpen is not null)
+            {
+                var parentCompleted = await Task.WhenAny(parentOpen, Task.Delay(TimeSpan.FromSeconds(10)));
+                if (parentCompleted == parentOpen && parentOpen.IsCompletedSuccessfully)
+                    await (await parentOpen).DisposeAsync();
+            }
         }
     }
 
