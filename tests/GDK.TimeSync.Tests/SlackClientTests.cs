@@ -65,6 +65,28 @@ public sealed class SlackClientTests
     }
 
     [Fact]
+    public async Task PostAsync_OperationalFailure_DoesNotExposeHandlerSecret()
+    {
+        const string secret = "handler-secret-must-not-leak";
+        using var client = CreateClient(new ThrowingHttpMessageHandler(new InvalidOperationException(secret)));
+
+        var exception = await Assert.ThrowsAsync<SlackApiException>(() => client.PostAsync(new SlackDailyUpdate(new DateOnly(2026, 8, 13), "Daily update")));
+
+        Assert.Equal(SlackFailureCode.Transport, exception.FailureCode);
+        Assert.DoesNotContain(secret, exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PostAsync_PreservesSafeHandlerFailure()
+    {
+        using var client = CreateClient(new ThrowingHttpMessageHandler(new SlackApiException("Slack returned an invalid response.", SlackFailureCode.InvalidResponse)));
+
+        var exception = await Assert.ThrowsAsync<SlackApiException>(() => client.PostAsync(new SlackDailyUpdate(new DateOnly(2026, 8, 13), "Daily update")));
+
+        Assert.Equal(SlackFailureCode.InvalidResponse, exception.FailureCode);
+    }
+
+    [Fact]
     public async Task PostAsync_Cancellation_IsSafeFailure()
     {
         using var client = CreateClient(new CancellingHttpMessageHandler());

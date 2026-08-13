@@ -39,7 +39,7 @@ public sealed class SqliteDailySlackDeliveryRepository(SqliteDatabase database) 
     public async Task SaveAsync(DailySlackDelivery delivery, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(delivery);
-        if (delivery.FailureCode == DailySlackFailureCode.Cancelled)
+        if (delivery.FailureCode is not null)
             delivery = delivery with { State = DailySlackDeliveryState.ReconciliationRequired };
         ValidateFingerprint(delivery.ContentFingerprint);
         if (!Enum.IsDefined(delivery.State))
@@ -50,18 +50,19 @@ public sealed class SqliteDailySlackDeliveryRepository(SqliteDatabase database) 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO daily_slack_deliveries(delivery_date, content_fingerprint, state, failure_code)
-            VALUES ($date, $fingerprint, $state, $failureCode)
-            ON CONFLICT(delivery_date) DO UPDATE SET
-                content_fingerprint = excluded.content_fingerprint,
-                state = excluded.state,
-                failure_code = excluded.failure_code
+            UPDATE daily_slack_deliveries
+            SET state = $state, failure_code = $failureCode
+            WHERE delivery_date = $date
+              AND content_fingerprint = $fingerprint
+              AND state = $inProgress
             """;
         command.Parameters.AddWithValue("$date", delivery.Date.ToString("yyyy-MM-dd"));
         command.Parameters.AddWithValue("$fingerprint", delivery.ContentFingerprint);
         command.Parameters.AddWithValue("$state", (int)delivery.State);
         command.Parameters.AddWithValue("$failureCode", delivery.FailureCode is { } savedFailureCode ? (int)savedFailureCode : DBNull.Value);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        command.Parameters.AddWithValue("$inProgress", (int)DailySlackDeliveryState.InProgress);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+            throw new InvalidOperationException("Daily Slack delivery state conflict.");
     }
 
     private static void ValidateFingerprint(string fingerprint)

@@ -26,6 +26,10 @@ public sealed class SlackClient : ISlackClient
             if (!string.Equals((await response.Content.ReadAsStringAsync(cancellationToken)).Trim(), "ok", StringComparison.Ordinal))
                 throw new SlackApiException("Slack returned an invalid response.", SlackFailureCode.InvalidResponse, response.StatusCode);
         }
+        catch (SlackApiException)
+        {
+            throw;
+        }
         catch (HttpRequestException)
         {
             throw new SlackApiException("Unable to reach Slack.", SlackFailureCode.Transport);
@@ -33,6 +37,10 @@ public sealed class SlackClient : ISlackClient
         catch (OperationCanceledException)
         {
             throw new SlackApiException("Slack delivery was cancelled.", SlackFailureCode.Cancelled);
+        }
+        catch (Exception)
+        {
+            throw new SlackApiException("Unable to reach Slack.", SlackFailureCode.Transport);
         }
     }
 

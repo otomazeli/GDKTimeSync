@@ -48,6 +48,7 @@ public sealed class SqliteDailySlackDeliveryRepositoryTests : IAsyncLifetime
     {
         var repository = CreateRepository();
         var date = new DateOnly(2026, 8, 13);
+        await repository.TryClaimAsync(date, Fingerprint);
         await repository.SaveAsync(new DailySlackDelivery(date, Fingerprint, state, state == DailySlackDeliveryState.Sent ? null : DailySlackFailureCode.Cancelled));
 
         Assert.False(await repository.TryClaimAsync(date, Fingerprint));
@@ -59,6 +60,7 @@ public sealed class SqliteDailySlackDeliveryRepositoryTests : IAsyncLifetime
         var repository = CreateRepository();
         var date = new DateOnly(2026, 8, 13);
         var delivery = new DailySlackDelivery(date, Fingerprint, DailySlackDeliveryState.ReconciliationRequired, DailySlackFailureCode.Transport);
+        await repository.TryClaimAsync(date, Fingerprint);
 
         await repository.SaveAsync(delivery);
 
@@ -70,12 +72,60 @@ public sealed class SqliteDailySlackDeliveryRepositoryTests : IAsyncLifetime
     {
         var repository = CreateRepository();
         var date = new DateOnly(2026, 8, 13);
+        await repository.TryClaimAsync(date, Fingerprint);
 
         await repository.SaveAsync(new DailySlackDelivery(date, Fingerprint, DailySlackDeliveryState.InProgress, DailySlackFailureCode.Cancelled));
 
         Assert.Equal(
             new DailySlackDelivery(date, Fingerprint, DailySlackDeliveryState.ReconciliationRequired, DailySlackFailureCode.Cancelled),
             await repository.GetAsync(date));
+    }
+
+    [Fact]
+    public async Task SaveAsync_TransportDeliveryBecomesReconciliationRequired()
+    {
+        var repository = CreateRepository();
+        var date = new DateOnly(2026, 8, 13);
+        await repository.TryClaimAsync(date, Fingerprint);
+
+        await repository.SaveAsync(new DailySlackDelivery(date, Fingerprint, DailySlackDeliveryState.InProgress, DailySlackFailureCode.Transport));
+
+        Assert.Equal(
+            new DailySlackDelivery(date, Fingerprint, DailySlackDeliveryState.ReconciliationRequired, DailySlackFailureCode.Transport),
+            await repository.GetAsync(date));
+    }
+
+    [Fact]
+    public async Task SaveAsync_DoesNotDowngradeSentDelivery()
+    {
+        var repository = CreateRepository();
+        var date = new DateOnly(2026, 8, 13);
+        await repository.TryClaimAsync(date, Fingerprint);
+        await repository.SaveAsync(new DailySlackDelivery(date, Fingerprint, DailySlackDeliveryState.Sent, null));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SaveAsync(new DailySlackDelivery(date, Fingerprint, DailySlackDeliveryState.InProgress, null)));
+
+        Assert.Equal(new DailySlackDelivery(date, Fingerprint, DailySlackDeliveryState.Sent, null), await repository.GetAsync(date));
+    }
+
+    [Fact]
+    public async Task SaveAsync_RejectsDifferentFingerprintAfterClaim()
+    {
+        var repository = CreateRepository();
+        var date = new DateOnly(2026, 8, 13);
+        await repository.TryClaimAsync(date, Fingerprint);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SaveAsync(new DailySlackDelivery(date, new string('b', 64), DailySlackDeliveryState.Sent, null)));
+
+        Assert.Equal(new DailySlackDelivery(date, Fingerprint, DailySlackDeliveryState.InProgress, null), await repository.GetAsync(date));
+    }
+
+    [Fact]
+    public async Task SaveAsync_RejectsAStateWithoutAClaim()
+    {
+        var repository = CreateRepository();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SaveAsync(new DailySlackDelivery(new DateOnly(2026, 8, 13), Fingerprint, DailySlackDeliveryState.Sent, null)));
     }
 
     [Fact]
