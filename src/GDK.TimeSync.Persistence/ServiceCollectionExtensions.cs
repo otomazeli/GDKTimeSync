@@ -10,6 +10,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(new SqliteDatabase(databasePath));
         services.AddSingleton<IDailyPlanRepository, SqliteDailyPlanRepository>();
         services.AddSingleton<IDeliveryAttemptRepository, SqliteDeliveryAttemptRepository>();
+        services.AddSingleton<IDailySlackDeliveryRepository, SqliteDailySlackDeliveryRepository>();
         services.AddSingleton<ITemplateRepository, SqliteTemplateRepository>();
         return services;
     }

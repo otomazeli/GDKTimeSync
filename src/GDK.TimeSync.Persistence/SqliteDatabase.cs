@@ -38,6 +38,11 @@ public sealed class SqliteDatabase
             status INTEGER NOT NULL,
             failure_code INTEGER NULL,
             slack_state INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS daily_slack_deliveries (
+            delivery_date TEXT PRIMARY KEY,
+            content_fingerprint TEXT NOT NULL,
+            state INTEGER NOT NULL CHECK (state IN (0, 1, 2)),
+            failure_code INTEGER NULL CHECK (failure_code IN (0, 1, 2, 3, 4)));
         """;
 
     private readonly string connectionString;
