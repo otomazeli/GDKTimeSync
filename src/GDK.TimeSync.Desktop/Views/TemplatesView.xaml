@@ -16,6 +16,13 @@
                 <DataGridTextColumn Header="Duration" Binding="{Binding Duration, UpdateSourceTrigger=PropertyChanged}" />
                 <DataGridTextColumn Header="Toggl project" Binding="{Binding TogglProject, UpdateSourceTrigger=PropertyChanged}" />
                 <DataGridTextColumn Header="Tempo category" Binding="{Binding TempoCategory, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTemplateColumn Header="Status">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ComboBox ItemsSource="{Binding DataContext.WorkStatuses, RelativeSource={RelativeSource AncestorType=UserControl}}" DisplayMemberPath="DisplayName" SelectedValuePath="Value" SelectedValue="{Binding Status, UpdateSourceTrigger=PropertyChanged}" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
                 <DataGridTemplateColumn Header="">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate><Button Command="{Binding DataContext.AddTemplateCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">Add to Today</Button></DataTemplate>

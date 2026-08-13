@@ -1,5 +1,6 @@
 using GDK.TimeSync.Core;
 using GDK.TimeSync.Persistence;
+using Microsoft.Data.Sqlite;
 
 namespace GDK.TimeSync.Tests;
 
@@ -49,10 +50,56 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
         Assert.Equal(template, loaded);
     }
 
+    [Fact]
+    public void Create_DefaultsWorkStatusToInProgress()
+    {
+        var item = PlannedWorkItem.Create(new DateOnly(2026, 8, 13));
+        var template = RecurringTaskTemplate.Create("Knowledge transfer", "CGMFRAVII-2767", "Knowledge transfer", TimeSpan.FromMinutes(30), "CGM", "DEVELOPMENT");
+
+        Assert.Equal(WorkStatus.InProgress, item.Status);
+        Assert.Equal(WorkStatus.InProgress, template.Status);
+    }
+
+    [Fact]
+    public async Task SaveAsync_RoundTripsPlanWorkStatus()
+    {
+        var repository = CreatePlanRepository();
+        var date = new DateOnly(2026, 8, 13);
+        var plan = DailyPlan.Create(date, [PlannedWorkItem.Create(date) with { Status = WorkStatus.Done }]);
+
+        await repository.SaveAsync(plan);
+
+        Assert.Equal(WorkStatus.Done, Assert.Single((await repository.GetAsync(date))!.Items).Status);
+    }
+
+    [Fact]
+    public async Task SaveAsync_RoundTripsTemplateWorkStatus()
+    {
+        var repository = CreateTemplateRepository();
+        var template = RecurringTaskTemplate.Create("Knowledge transfer", "CGMFRAVII-2767", "Knowledge transfer", TimeSpan.FromMinutes(30), "CGM", "DEVELOPMENT") with { Status = WorkStatus.Waiting };
+
+        await repository.SaveAsync(template);
+
+        Assert.Equal(WorkStatus.Waiting, Assert.Single(await repository.ListAsync()).Status);
+    }
+
+    [Fact]
+    public async Task ExistingPlanRows_MigrateToInProgressWorkStatus()
+    {
+        var databasePath = CreateDatabasePath();
+        await CreateLegacyPlanDatabaseAsync(databasePath);
+        var repository = new SqliteDailyPlanRepository(new SqliteDatabase(databasePath));
+
+        var loaded = await repository.GetAsync(new DateOnly(2026, 8, 13));
+
+        Assert.Equal(WorkStatus.InProgress, Assert.Single(loaded!.Items).Status);
+    }
+
     public Task InitializeAsync() => Task.CompletedTask;
 
     public Task DisposeAsync()
     {
+        SqliteConnection.ClearAllPools();
         foreach (var databasePath in databasePaths)
         {
             if (File.Exists(databasePath))
@@ -79,5 +126,39 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
         var path = Path.Combine(Path.GetTempPath(), $"GDK.TimeSync.Tests.{Guid.NewGuid():N}.db");
         databasePaths.Add(path);
         return path;
+    }
+
+    private static async Task CreateLegacyPlanDatabaseAsync(string databasePath)
+    {
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TABLE daily_plans (plan_date TEXT PRIMARY KEY);
+            CREATE TABLE planned_work_items (
+                id TEXT PRIMARY KEY,
+                plan_date TEXT NOT NULL,
+                start_time TEXT NULL,
+                end_time TEXT NULL,
+                name TEXT NOT NULL,
+                jira_issue_key TEXT NOT NULL,
+                comment TEXT NOT NULL,
+                duration_seconds INTEGER NOT NULL,
+                toggl_project TEXT NOT NULL,
+                tempo_category TEXT NOT NULL,
+                is_billable INTEGER NOT NULL);
+            CREATE TABLE recurring_task_templates (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                jira_issue_key TEXT NOT NULL,
+                description TEXT NOT NULL,
+                duration_seconds INTEGER NOT NULL,
+                toggl_project TEXT NOT NULL,
+                tempo_category TEXT NOT NULL,
+                is_billable INTEGER NOT NULL);
+            INSERT INTO daily_plans(plan_date) VALUES ('2026-08-13');
+            INSERT INTO planned_work_items VALUES ('00000000-0000-0000-0000-000000000001', '2026-08-13', NULL, NULL, 'Knowledge transfer', 'CGMFRAVII-2767', 'Knowledge transfer', 1800, 'CGM', 'DEVELOPMENT', 1);
+            """;
+        await command.ExecuteNonQueryAsync();
     }
 }

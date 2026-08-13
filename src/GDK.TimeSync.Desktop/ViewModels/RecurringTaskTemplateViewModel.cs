@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using GDK.TimeSync.Core;
 
 namespace GDK.TimeSync.Desktop.ViewModels;
 
@@ -11,6 +12,7 @@ public sealed class RecurringTaskTemplateViewModel : INotifyPropertyChanged
     private TimeSpan duration;
     private string togglProject;
     private string tempoCategory;
+    private WorkStatus status;
 
     public RecurringTaskTemplateViewModel(
         string name = "",
@@ -20,7 +22,8 @@ public sealed class RecurringTaskTemplateViewModel : INotifyPropertyChanged
         string togglProject = "",
         string tempoCategory = "",
         bool isBillable = true,
-        Guid? id = null)
+        Guid? id = null,
+        WorkStatus status = WorkStatus.InProgress)
     {
         Id = id ?? Guid.NewGuid();
         this.name = name;
@@ -30,6 +33,7 @@ public sealed class RecurringTaskTemplateViewModel : INotifyPropertyChanged
         this.togglProject = togglProject;
         this.tempoCategory = tempoCategory;
         IsBillable = isBillable;
+        this.status = status;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -42,6 +46,7 @@ public sealed class RecurringTaskTemplateViewModel : INotifyPropertyChanged
     public string TogglProject { get => togglProject; set => SetField(ref togglProject, value); }
     public string TempoCategory { get => tempoCategory; set => SetField(ref tempoCategory, value); }
     public bool IsBillable { get; }
+    public WorkStatus Status { get => status; set => SetField(ref status, value); }
 
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {

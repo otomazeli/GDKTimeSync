@@ -32,6 +32,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     public RelayCommand RemoveItemCommand { get; }
     public RelayCommand AddTemplateCommand { get; }
     public double PlannedSeconds => Items.Sum(item => item.Duration.TotalSeconds);
+    public IReadOnlyList<WorkStatusOption> WorkStatuses => WorkStatusOption.All;
     public string? PersistenceError { get => persistenceError; private set => SetField(ref persistenceError, value); }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -47,7 +48,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
                 Items.Add(new PlannedWorkItemViewModel());
             else
                 foreach (var item in plan.Items)
-                    Items.Add(new PlannedWorkItemViewModel(item.Name, item.JiraIssueKey, item.Comment, item.Duration, item.TogglProject, item.TempoCategory, item.Id, item.Start, item.End, item.IsBillable));
+                    Items.Add(new PlannedWorkItemViewModel(item.Name, item.JiraIssueKey, item.Comment, item.Duration, item.TogglProject, item.TempoCategory, item.Id, item.Start, item.End, item.IsBillable, item.Status));
             isInitialized = true;
             PersistenceError = null;
         }
@@ -68,12 +69,12 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
 
     public DailyPlan GetSnapshot() => DailyPlan.Create(Date, Items.Select(item => new PlannedWorkItem(
         item.Id, Date, item.Start, item.End, item.Name, item.JiraIssueKey, item.Description,
-        item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable)).ToArray());
+        item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable, item.Status)).ToArray());
 
     private void AddTemplate(object? template)
     {
         if (template is not RecurringTaskTemplateViewModel source) return;
-        Items.Add(new PlannedWorkItemViewModel(source.Name, source.JiraIssueKey, source.Description, source.Duration, source.TogglProject, source.TempoCategory, isBillable: source.IsBillable));
+        Items.Add(new PlannedWorkItemViewModel(source.Name, source.JiraIssueKey, source.Description, source.Duration, source.TogglProject, source.TempoCategory, isBillable: source.IsBillable, status: source.Status));
     }
 
     private void RemoveItem(object? item)
@@ -136,7 +137,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             {
                 var plan = DailyPlan.Create(Date, Items.Select(item => new PlannedWorkItem(
                     item.Id, Date, item.Start, item.End, item.Name, item.JiraIssueKey, item.Description,
-                    item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable)).ToArray());
+                    item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable, item.Status)).ToArray());
                 await repository!.SaveAsync(plan);
                 PersistenceError = null;
             }

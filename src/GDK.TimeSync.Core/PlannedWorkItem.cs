@@ -11,7 +11,8 @@ public sealed record PlannedWorkItem(
     TimeSpan Duration,
     string TogglProject,
     string TempoCategory,
-    bool IsBillable)
+    bool IsBillable,
+    WorkStatus Status = WorkStatus.InProgress)
 {
     public static PlannedWorkItem Create(
         DateOnly day,
@@ -24,5 +25,5 @@ public sealed record PlannedWorkItem(
         bool isBillable = true,
         TimeOnly? start = null,
         TimeOnly? end = null) =>
-        new(Guid.NewGuid(), day, start, end, name, jiraIssueKey, comment, duration ?? TimeSpan.Zero, togglProject, tempoCategory, isBillable);
+        new(Guid.NewGuid(), day, start, end, name, jiraIssueKey, comment, duration ?? TimeSpan.Zero, togglProject, tempoCategory, isBillable, WorkStatus.InProgress);
 }

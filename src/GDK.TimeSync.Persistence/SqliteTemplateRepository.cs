@@ -9,7 +9,7 @@ public sealed class SqliteTemplateRepository(SqliteDatabase database) : ITemplat
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, name, jira_issue_key, description, duration_seconds, toggl_project, tempo_category, is_billable
+            SELECT id, name, jira_issue_key, description, duration_seconds, toggl_project, tempo_category, is_billable, work_status
             FROM recurring_task_templates
             ORDER BY name, id
             """;
@@ -25,7 +25,8 @@ public sealed class SqliteTemplateRepository(SqliteDatabase database) : ITemplat
                 TimeSpan.FromSeconds(reader.GetInt64(4)),
                 reader.GetString(5),
                 reader.GetString(6),
-                reader.GetBoolean(7)));
+                reader.GetBoolean(7),
+                (WorkStatus)reader.GetInt32(8)));
         }
 
         return templates;
@@ -37,8 +38,8 @@ public sealed class SqliteTemplateRepository(SqliteDatabase database) : ITemplat
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO recurring_task_templates(id, name, jira_issue_key, description, duration_seconds, toggl_project, tempo_category, is_billable)
-            VALUES ($id, $name, $jiraIssueKey, $description, $durationSeconds, $togglProject, $tempoCategory, $isBillable)
+            INSERT INTO recurring_task_templates(id, name, jira_issue_key, description, duration_seconds, toggl_project, tempo_category, is_billable, work_status)
+            VALUES ($id, $name, $jiraIssueKey, $description, $durationSeconds, $togglProject, $tempoCategory, $isBillable, $workStatus)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 jira_issue_key = excluded.jira_issue_key,
@@ -46,7 +47,8 @@ public sealed class SqliteTemplateRepository(SqliteDatabase database) : ITemplat
                 duration_seconds = excluded.duration_seconds,
                 toggl_project = excluded.toggl_project,
                 tempo_category = excluded.tempo_category,
-                is_billable = excluded.is_billable
+                is_billable = excluded.is_billable,
+                work_status = excluded.work_status
             """;
         command.Parameters.AddWithValue("$id", template.Id.ToString("D"));
         command.Parameters.AddWithValue("$name", template.Name);
@@ -56,6 +58,7 @@ public sealed class SqliteTemplateRepository(SqliteDatabase database) : ITemplat
         command.Parameters.AddWithValue("$togglProject", template.TogglProject);
         command.Parameters.AddWithValue("$tempoCategory", template.TempoCategory);
         command.Parameters.AddWithValue("$isBillable", template.IsBillable);
+        command.Parameters.AddWithValue("$workStatus", (int)template.Status);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }

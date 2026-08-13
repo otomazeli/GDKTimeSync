@@ -8,7 +8,8 @@ public sealed record RecurringTaskTemplate(
     TimeSpan Duration,
     string TogglProject,
     string TempoCategory,
-    bool IsBillable = true)
+    bool IsBillable = true,
+    WorkStatus Status = WorkStatus.InProgress)
 {
     public static RecurringTaskTemplate Create(
         string name,
@@ -18,5 +19,5 @@ public sealed record RecurringTaskTemplate(
         string togglProject,
         string tempoCategory,
         bool isBillable = true) =>
-        new(Guid.NewGuid(), name, jiraIssueKey, description, duration, togglProject, tempoCategory, isBillable);
+        new(Guid.NewGuid(), name, jiraIssueKey, description, duration, togglProject, tempoCategory, isBillable, WorkStatus.InProgress);
 }

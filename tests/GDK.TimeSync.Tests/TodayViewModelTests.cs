@@ -1,4 +1,5 @@
 using GDK.TimeSync.Desktop.ViewModels;
+using GDK.TimeSync.Core;
 
 namespace GDK.TimeSync.Tests;
 
@@ -42,6 +43,17 @@ public sealed class TodayViewModelTests
         Assert.Equal("CGMFRAVII-2767", item.JiraIssueKey);
         Assert.True(item.IsEditable);
         Assert.Equal(1800, today.PlannedSeconds);
+    }
+
+    [Fact]
+    public void AddTemplateCommand_PreservesTemplateWorkStatus()
+    {
+        var today = new TodayViewModel();
+        var template = new RecurringTaskTemplateViewModel(status: WorkStatus.Done);
+
+        today.AddTemplateCommand.Execute(template);
+
+        Assert.Equal(WorkStatus.Done, Assert.Single(today.Items).Status);
     }
 
     [Fact]

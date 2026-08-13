@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using GDK.TimeSync.Core;
 
 namespace GDK.TimeSync.Desktop.ViewModels;
 
@@ -14,8 +15,9 @@ public sealed class PlannedWorkItemViewModel : INotifyPropertyChanged
     private TimeOnly? start;
     private TimeOnly? end;
     private bool isBillable;
+    private WorkStatus status;
 
-    public PlannedWorkItemViewModel(string name = "", string jiraIssueKey = "", string description = "", TimeSpan? duration = null, string togglProject = "", string tempoCategory = "", Guid? id = null, TimeOnly? start = null, TimeOnly? end = null, bool isBillable = true)
+    public PlannedWorkItemViewModel(string name = "", string jiraIssueKey = "", string description = "", TimeSpan? duration = null, string togglProject = "", string tempoCategory = "", Guid? id = null, TimeOnly? start = null, TimeOnly? end = null, bool isBillable = true, WorkStatus status = WorkStatus.InProgress)
     {
         Id = id ?? Guid.NewGuid();
         this.name = name;
@@ -27,6 +29,7 @@ public sealed class PlannedWorkItemViewModel : INotifyPropertyChanged
         this.start = start;
         this.end = end;
         this.isBillable = isBillable;
+        this.status = status;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -43,6 +46,7 @@ public sealed class PlannedWorkItemViewModel : INotifyPropertyChanged
     public TimeOnly? Start { get => start; set => SetField(ref start, value); }
     public TimeOnly? End { get => end; set => SetField(ref end, value); }
     public bool IsBillable { get => isBillable; set => SetField(ref isBillable, value); }
+    public WorkStatus Status { get => status; set => SetField(ref status, value); }
 
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {

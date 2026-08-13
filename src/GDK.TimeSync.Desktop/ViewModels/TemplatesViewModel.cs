@@ -30,6 +30,7 @@ public sealed class TemplatesViewModel : INotifyPropertyChanged
     public RelayCommand AddTemplateCommand { get; }
     public RelayCommand NewTemplateCommand { get; }
     public string? StatusMessage { get => statusMessage; private set => SetField(ref statusMessage, value); }
+    public IReadOnlyList<WorkStatusOption> WorkStatuses => WorkStatusOption.All;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -142,10 +143,10 @@ public sealed class TemplatesViewModel : INotifyPropertyChanged
         "Knowledge transfer", "CGMFRAVII-2767", "Knowledge transfer", TimeSpan.FromMinutes(30), "CGM", "DEVELOPMENT");
 
     private static RecurringTaskTemplateViewModel ToViewModel(RecurringTaskTemplate template) => new(
-        template.Name, template.JiraIssueKey, template.Description, template.Duration, template.TogglProject, template.TempoCategory, template.IsBillable, template.Id);
+        template.Name, template.JiraIssueKey, template.Description, template.Duration, template.TogglProject, template.TempoCategory, template.IsBillable, template.Id, template.Status);
 
     private static RecurringTaskTemplate ToTemplate(RecurringTaskTemplateViewModel template) => new(
-        template.Id, template.Name, template.JiraIssueKey, template.Description, template.Duration, template.TogglProject, template.TempoCategory, template.IsBillable);
+        template.Id, template.Name, template.JiraIssueKey, template.Description, template.Duration, template.TogglProject, template.TempoCategory, template.IsBillable, template.Status);
 
     private void SetField<T>(ref T field, T value, [System.Runtime.CompilerServices.CallerMemberName] string? propertyName = null)
     {
