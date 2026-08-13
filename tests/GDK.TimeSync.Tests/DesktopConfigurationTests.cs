@@ -55,6 +55,23 @@ public sealed class DesktopConfigurationTests
     }
 
     [Fact]
+    public async Task View_model_save_rejects_sensitive_slack_presentation_text()
+    {
+        var settings = new FakeSettingsStore(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" });
+        var viewModel = new SettingsViewModel(new FakeCredentialStore(), settings, new ConfigurationStateService(new FakeCredentialStore(), settings));
+        const string sentinel = "https://hooks.slack.com/services/T000/B000/sentinel-webhook";
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => viewModel.SaveAsync(new UserSettings
+        {
+            JiraBaseUrl = "https://jira.cgm.ag",
+            SlackTitle = sentinel
+        }, null, null, null));
+
+        Assert.Equal("Slack presentation preferences must not contain sensitive content.", exception.Message);
+        Assert.DoesNotContain(sentinel, JsonSerializer.Serialize(settings.Current), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Jira_user_round_trips_as_a_non_secret_json_setting()
     {
         const string jiraUser = "planner@example.com";

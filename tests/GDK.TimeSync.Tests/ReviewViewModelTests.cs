@@ -143,6 +143,31 @@ public sealed class ReviewViewModelTests
     }
 
     [Fact]
+    public async Task Tampered_presentation_settings_are_sanitized_before_they_reach_the_slack_preview()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"GDK.TimeSync.Tests.{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, "settings.json");
+            const string sentinel = "https://hooks.slack.com/services/T000/B000/sentinel-webhook";
+            File.WriteAllText(path, $$"""{"SlackTitle":"{{sentinel}}"}""");
+            var date = new DateOnly(2026, 8, 13);
+            var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+            var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)), settings: new UserSettingsService(path));
+
+            await review.ComposeSlackPreviewAsync();
+
+            Assert.DoesNotContain(sentinel, review.SlackPreview!.Text, StringComparison.Ordinal);
+            Assert.StartsWith("Daily update", review.SlackPreview.Text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Missing_slack_configuration_never_claims_or_creates_a_client()
     {
         var date = new DateOnly(2026, 8, 13);

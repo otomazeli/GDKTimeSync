@@ -141,10 +141,11 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             JiraUser = normalizedJiraUser,
             ReviewReminderTime = normalizedReviewReminderTime,
             DefaultTempoWorkCategory = proposedSettings.DefaultTempoWorkCategory.Trim(),
-            SlackTitle = NormalizeSlackText(proposedSettings.SlackTitle, nameof(proposedSettings.SlackTitle)),
-            SlackTaskHeading = NormalizeSlackText(proposedSettings.SlackTaskHeading, nameof(proposedSettings.SlackTaskHeading)),
-            SlackExtraLines = proposedSettings.SlackExtraLines.Select(line => NormalizeSlackText(line, nameof(proposedSettings.SlackExtraLines))).Where(line => line.Length > 0).ToArray()
+            SlackTitle = NormalizeSlackText(proposedSettings.SlackTitle),
+            SlackTaskHeading = NormalizeSlackText(proposedSettings.SlackTaskHeading),
+            SlackExtraLines = proposedSettings.SlackExtraLines.Select(NormalizeSlackText).Where(line => line.Length > 0).ToArray()
         };
+        UserSettingsService.ValidateSlackPresentation(normalizedSettings);
 
         IsSaving = true;
         try
@@ -210,12 +211,9 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
 
     private static IReadOnlyList<string> SplitSlackLines(string value) => value.Split(["\r\n", "\n"], StringSplitOptions.None);
 
-    private static string NormalizeSlackText(string? value, string parameterName)
+    private static string NormalizeSlackText(string? value)
     {
-        var normalized = (value ?? string.Empty).Trim();
-        if (normalized.Contains("hooks.slack.com/services/", StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("Slack presentation preferences cannot contain a webhook.", parameterName);
-        return normalized;
+        return (value ?? string.Empty).Trim();
     }
 
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
