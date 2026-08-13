@@ -95,6 +95,79 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
         Assert.Equal(WorkStatus.InProgress, Assert.Single(loaded!.Items).Status);
     }
 
+    [Fact]
+    public async Task ExistingTemplateRows_MigrateToInProgressWorkStatus()
+    {
+        var databasePath = CreateDatabasePath();
+        await CreateLegacyPlanDatabaseAsync(databasePath);
+        var repository = new SqliteTemplateRepository(new SqliteDatabase(databasePath));
+
+        var loaded = await repository.ListAsync();
+
+        Assert.Equal(WorkStatus.InProgress, Assert.Single(loaded).Status);
+    }
+
+    [Fact]
+    public async Task InvalidPersistedWorkStatus_IsReadAsInProgress()
+    {
+        var databasePath = CreateDatabasePath();
+        await CreateDatabaseWithInvalidWorkStatusAsync(databasePath);
+
+        var plan = await new SqliteDailyPlanRepository(new SqliteDatabase(databasePath)).GetAsync(new DateOnly(2026, 8, 13));
+        var template = Assert.Single(await new SqliteTemplateRepository(new SqliteDatabase(databasePath)).ListAsync());
+
+        Assert.Equal(WorkStatus.InProgress, Assert.Single(plan!.Items).Status);
+        Assert.Equal(WorkStatus.InProgress, template.Status);
+    }
+
+    [Fact]
+    public async Task SaveAsync_RejectsUndefinedPlanWorkStatus()
+    {
+        var repository = CreatePlanRepository();
+        var date = new DateOnly(2026, 8, 13);
+        var plan = DailyPlan.Create(date, [PlannedWorkItem.Create(date) with { Status = (WorkStatus)999 }]);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => repository.SaveAsync(plan));
+    }
+
+    [Fact]
+    public async Task SaveAsync_RejectsUndefinedTemplateWorkStatus()
+    {
+        var repository = CreateTemplateRepository();
+        var template = RecurringTaskTemplate.Create("Knowledge transfer", "CGMFRAVII-2767", "Knowledge transfer", TimeSpan.FromMinutes(30), "CGM", "DEVELOPMENT") with { Status = (WorkStatus)999 };
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => repository.SaveAsync(template));
+    }
+
+    [Fact]
+    public async Task NewSchema_RejectsInvalidWorkStatus()
+    {
+        var database = new SqliteDatabase(CreateDatabasePath());
+        await using var connection = await database.OpenConnectionAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO recurring_task_templates(id, name, jira_issue_key, description, duration_seconds, toggl_project, tempo_category, is_billable, work_status)
+            VALUES ('00000000-0000-0000-0000-000000000002', 'Knowledge transfer', 'CGMFRAVII-2767', 'Knowledge transfer', 1800, 'CGM', 'DEVELOPMENT', 1, 999)
+            """;
+
+        await Assert.ThrowsAsync<SqliteException>(() => command.ExecuteNonQueryAsync());
+    }
+
+    [Fact]
+    public async Task DistinctDatabaseInitializers_MigrateTheSameLegacyDatabase()
+    {
+        var databasePath = CreateDatabasePath();
+        await CreateLegacyPlanDatabaseAsync(databasePath);
+        var databases = Enumerable.Range(0, 4).Select(_ => new SqliteDatabase(databasePath)).ToArray();
+
+        var connections = await Task.WhenAll(databases.Select(database => database.OpenConnectionAsync()));
+        foreach (var connection in connections)
+            await connection.DisposeAsync();
+
+        var plan = await new SqliteDailyPlanRepository(new SqliteDatabase(databasePath)).GetAsync(new DateOnly(2026, 8, 13));
+        Assert.Equal(WorkStatus.InProgress, Assert.Single(plan!.Items).Status);
+    }
+
     public Task InitializeAsync() => Task.CompletedTask;
 
     public Task DisposeAsync()
@@ -158,6 +231,29 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
                 is_billable INTEGER NOT NULL);
             INSERT INTO daily_plans(plan_date) VALUES ('2026-08-13');
             INSERT INTO planned_work_items VALUES ('00000000-0000-0000-0000-000000000001', '2026-08-13', NULL, NULL, 'Knowledge transfer', 'CGMFRAVII-2767', 'Knowledge transfer', 1800, 'CGM', 'DEVELOPMENT', 1);
+            INSERT INTO recurring_task_templates VALUES ('00000000-0000-0000-0000-000000000002', 'Knowledge transfer', 'CGMFRAVII-2767', 'Knowledge transfer', 1800, 'CGM', 'DEVELOPMENT', 1);
+            """;
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task CreateDatabaseWithInvalidWorkStatusAsync(string databasePath)
+    {
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TABLE daily_plans (plan_date TEXT PRIMARY KEY);
+            CREATE TABLE planned_work_items (
+                id TEXT PRIMARY KEY, plan_date TEXT NOT NULL, start_time TEXT NULL, end_time TEXT NULL,
+                name TEXT NOT NULL, jira_issue_key TEXT NOT NULL, comment TEXT NOT NULL, duration_seconds INTEGER NOT NULL,
+                toggl_project TEXT NOT NULL, tempo_category TEXT NOT NULL, is_billable INTEGER NOT NULL, work_status INTEGER NOT NULL);
+            CREATE TABLE recurring_task_templates (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, jira_issue_key TEXT NOT NULL, description TEXT NOT NULL,
+                duration_seconds INTEGER NOT NULL, toggl_project TEXT NOT NULL, tempo_category TEXT NOT NULL,
+                is_billable INTEGER NOT NULL, work_status INTEGER NOT NULL);
+            INSERT INTO daily_plans(plan_date) VALUES ('2026-08-13');
+            INSERT INTO planned_work_items VALUES ('00000000-0000-0000-0000-000000000001', '2026-08-13', NULL, NULL, 'Knowledge transfer', 'CGMFRAVII-2767', 'Knowledge transfer', 1800, 'CGM', 'DEVELOPMENT', 1, 999);
+            INSERT INTO recurring_task_templates VALUES ('00000000-0000-0000-0000-000000000002', 'Knowledge transfer', 'CGMFRAVII-2767', 'Knowledge transfer', 1800, 'CGM', 'DEVELOPMENT', 1, 999);
             """;
         await command.ExecuteNonQueryAsync();
     }

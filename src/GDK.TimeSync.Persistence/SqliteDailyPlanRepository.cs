@@ -40,7 +40,7 @@ public sealed class SqliteDailyPlanRepository(SqliteDatabase database) : IDailyP
                 reader.GetString(7),
                 reader.GetString(8),
                 reader.GetBoolean(9),
-                (WorkStatus)reader.GetInt32(10)));
+                ReadWorkStatus(reader.IsDBNull(10) ? 0 : reader.GetInt32(10))));
         }
 
         return DailyPlan.Create(date, items);
@@ -51,6 +51,8 @@ public sealed class SqliteDailyPlanRepository(SqliteDatabase database) : IDailyP
         ArgumentNullException.ThrowIfNull(plan);
         if (plan.Items.Any(item => item.Day != plan.Date))
             throw new ArgumentException("Every item must belong to the plan date.", nameof(plan));
+        if (plan.Items.Any(item => !Enum.IsDefined(item.Status)))
+            throw new ArgumentOutOfRangeException(nameof(plan), "Every item must have a defined work status.");
 
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
@@ -97,4 +99,7 @@ public sealed class SqliteDailyPlanRepository(SqliteDatabase database) : IDailyP
 
         await transaction.CommitAsync(cancellationToken);
     }
+
+    private static WorkStatus ReadWorkStatus(int value) =>
+        Enum.IsDefined((WorkStatus)value) ? (WorkStatus)value : WorkStatus.InProgress;
 }

@@ -19,7 +19,7 @@ public sealed class SqliteDatabase
             toggl_project TEXT NOT NULL,
             tempo_category TEXT NOT NULL,
             is_billable INTEGER NOT NULL,
-            work_status INTEGER NOT NULL DEFAULT 0);
+            work_status INTEGER NOT NULL DEFAULT 0 CHECK (work_status IN (0, 1, 2, 3, 4)));
         CREATE INDEX IF NOT EXISTS ix_planned_work_items_plan_date ON planned_work_items(plan_date);
         CREATE TABLE IF NOT EXISTS recurring_task_templates (
             id TEXT PRIMARY KEY,
@@ -30,7 +30,7 @@ public sealed class SqliteDatabase
             toggl_project TEXT NOT NULL,
             tempo_category TEXT NOT NULL,
             is_billable INTEGER NOT NULL,
-            work_status INTEGER NOT NULL DEFAULT 0);
+            work_status INTEGER NOT NULL DEFAULT 0 CHECK (work_status IN (0, 1, 2, 3, 4)));
         CREATE TABLE IF NOT EXISTS delivery_attempts (
             planned_work_item_id TEXT PRIMARY KEY,
             toggl_entry_id INTEGER NULL,
@@ -68,10 +68,24 @@ public sealed class SqliteDatabase
             try
             {
                 await connection.OpenAsync(cancellationToken);
-                await using var command = connection.CreateCommand();
-                command.CommandText = Schema;
-                await command.ExecuteNonQueryAsync(cancellationToken);
-                await EnsureWorkStatusColumnsAsync(connection, cancellationToken);
+                await BeginImmediateAsync(connection, cancellationToken);
+                try
+                {
+                    await using (var command = connection.CreateCommand())
+                    {
+                        command.CommandText = Schema;
+                        await command.ExecuteNonQueryAsync(cancellationToken);
+                    }
+
+                    await EnsureWorkStatusColumnsAsync(connection, cancellationToken);
+                    await CommitAsync(connection, cancellationToken);
+                }
+                catch
+                {
+                    await RollbackAsync(connection);
+                    throw;
+                }
+
                 return connection;
             }
             catch
@@ -109,22 +123,67 @@ public sealed class SqliteDatabase
 
     private static async Task EnsureWorkStatusColumnAsync(SqliteConnection connection, string tableName, CancellationToken cancellationToken)
     {
-        await using var pragma = connection.CreateCommand();
-        pragma.CommandText = $"PRAGMA table_info({tableName})";
-        var exists = false;
-        await using (var reader = await pragma.ExecuteReaderAsync(cancellationToken))
-            while (await reader.ReadAsync(cancellationToken))
-                exists |= string.Equals(reader.GetString(1), "work_status", StringComparison.OrdinalIgnoreCase);
+        var exists = await HasWorkStatusColumnAsync(connection, tableName, cancellationToken);
 
         if (!exists)
         {
-            await using var alter = connection.CreateCommand();
-            alter.CommandText = $"ALTER TABLE {tableName} ADD COLUMN work_status INTEGER NOT NULL DEFAULT 0";
-            await alter.ExecuteNonQueryAsync(cancellationToken);
+            try
+            {
+                await using var alter = connection.CreateCommand();
+                alter.CommandText = $"ALTER TABLE {tableName} ADD COLUMN work_status INTEGER NOT NULL DEFAULT 0";
+                await alter.ExecuteNonQueryAsync(cancellationToken);
+            }
+            catch (SqliteException exception) when (IsDuplicateColumn(exception))
+            {
+                if (!await HasWorkStatusColumnAsync(connection, tableName, cancellationToken))
+                    throw;
+            }
         }
 
         await using var update = connection.CreateCommand();
         update.CommandText = $"UPDATE {tableName} SET work_status = 0 WHERE work_status IS NULL";
         await update.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task<bool> HasWorkStatusColumnAsync(SqliteConnection connection, string tableName, CancellationToken cancellationToken)
+    {
+        await using var pragma = connection.CreateCommand();
+        pragma.CommandText = $"PRAGMA table_info({tableName})";
+        await using var reader = await pragma.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            if (string.Equals(reader.GetString(1), "work_status", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+        return false;
+    }
+
+    private static bool IsDuplicateColumn(SqliteException exception) =>
+        exception.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase);
+
+    private static async Task BeginImmediateAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "BEGIN IMMEDIATE";
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task CommitAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "COMMIT";
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task RollbackAsync(SqliteConnection connection)
+    {
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "ROLLBACK";
+            await command.ExecuteNonQueryAsync();
+        }
+        catch (SqliteException)
+        {
+        }
     }
 }

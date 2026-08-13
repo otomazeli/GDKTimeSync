@@ -26,7 +26,7 @@ public sealed class SqliteTemplateRepository(SqliteDatabase database) : ITemplat
                 reader.GetString(5),
                 reader.GetString(6),
                 reader.GetBoolean(7),
-                (WorkStatus)reader.GetInt32(8)));
+                ReadWorkStatus(reader.IsDBNull(8) ? 0 : reader.GetInt32(8))));
         }
 
         return templates;
@@ -35,6 +35,8 @@ public sealed class SqliteTemplateRepository(SqliteDatabase database) : ITemplat
     public async Task SaveAsync(RecurringTaskTemplate template, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(template);
+        if (!Enum.IsDefined(template.Status))
+            throw new ArgumentOutOfRangeException(nameof(template), "The template must have a defined work status.");
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
@@ -61,4 +63,7 @@ public sealed class SqliteTemplateRepository(SqliteDatabase database) : ITemplat
         command.Parameters.AddWithValue("$workStatus", (int)template.Status);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
+
+    private static WorkStatus ReadWorkStatus(int value) =>
+        Enum.IsDefined((WorkStatus)value) ? (WorkStatus)value : WorkStatus.InProgress;
 }
