@@ -27,7 +27,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         this.review = review ?? new ReviewViewModel();
         this.settings = settings;
         this.history = history;
-        NavigateCommand = new RelayCommand(Navigate);
+        NavigateCommand = new RelayCommand(value => _ = NavigateAsync(value));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -65,11 +65,13 @@ public sealed class ShellViewModel : INotifyPropertyChanged
 
     public Task FlushAsync() => Task.WhenAll(today.FlushAsync(), templates.FlushAsync());
 
-    private void Navigate(object? page)
+    public async Task NavigateAsync(object? page, CancellationToken cancellationToken = default)
     {
         if (page is NavigationPage navigationPage)
         {
             SelectedPage = navigationPage;
+            if (navigationPage == NavigationPage.Review)
+                await review.RefreshAsync(cancellationToken);
             if (navigationPage == NavigationPage.History)
                 _ = history?.LoadAsync();
         }
