@@ -35,14 +35,20 @@ public sealed class SlackClientFactoryTests
     }
 
     [Fact]
-    public async Task Configuration_preflight_rejects_missing_or_invalid_webhooks_without_creating_a_client()
+    public async Task Configuration_preflight_uses_credential_presence_without_reading_or_creating_a_client()
     {
         var httpClients = new RecordingHttpClientFactory();
-        var missing = new SlackClientFactory(new RecordingCredentials(CredentialKeys.SlackWebhook, null), httpClients);
-        var invalid = new SlackClientFactory(new RecordingCredentials(CredentialKeys.SlackWebhook, "not-a-url"), httpClients);
+        var missingCredentials = new RecordingCredentials(CredentialKeys.SlackWebhook, null);
+        var invalidCredentials = new RecordingCredentials(CredentialKeys.SlackWebhook, "not-a-url");
+        var missing = new SlackClientFactory(missingCredentials, httpClients);
+        var invalid = new SlackClientFactory(invalidCredentials, httpClients);
 
         Assert.False(await missing.IsConfiguredAsync());
-        Assert.False(await invalid.IsConfiguredAsync());
+        Assert.True(await invalid.IsConfiguredAsync());
+        Assert.Empty(missingCredentials.ReadKeys);
+        Assert.Empty(invalidCredentials.ReadKeys);
+        Assert.Equal(1, missingCredentials.ExistsCalls);
+        Assert.Equal(1, invalidCredentials.ExistsCalls);
         Assert.Empty(httpClients.Names);
     }
 
@@ -75,9 +81,10 @@ public sealed class SlackClientFactoryTests
     private sealed class RecordingCredentials(string key, string? value) : ICredentialStore
     {
         public List<string> ReadKeys { get; } = [];
+        public int ExistsCalls { get; private set; }
         public Task<string?> GetAsync(string requestedKey, CancellationToken cancellationToken = default) { ReadKeys.Add(requestedKey); return Task.FromResult<string?>(requestedKey == key ? value : null); }
         public Task SaveAsync(string key, string secret, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<bool> ExistsAsync(string requestedKey, CancellationToken cancellationToken = default) { ExistsCalls++; return Task.FromResult(requestedKey == key && value is not null); }
         public Task DeleteAsync(string key, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 

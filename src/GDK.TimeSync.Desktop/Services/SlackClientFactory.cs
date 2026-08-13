@@ -11,7 +11,7 @@ public sealed class SlackClientFactory(ICredentialStore credentials, IHttpClient
     {
         try
         {
-            return IsValidWebhook(await credentials.GetAsync(CredentialKeys.SlackWebhook, cancellationToken));
+            return await credentials.ExistsAsync(CredentialKeys.SlackWebhook, cancellationToken);
         }
         catch
         {
@@ -37,6 +37,4 @@ public sealed class SlackClientFactory(ICredentialStore credentials, IHttpClient
         }
     }
 
-    private static bool IsValidWebhook(string? webhook) =>
-        Uri.TryCreate(webhook, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
 }

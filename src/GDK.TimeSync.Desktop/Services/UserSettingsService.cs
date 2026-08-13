@@ -67,10 +67,23 @@ public sealed class UserSettingsService : IUserSettingsStore
         {
             var candidate = match.Value.TrimEnd('.', ',', ';', ')', ']', '}');
             if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri)) continue;
-            if (uri.Host.EndsWith("slack.com", StringComparison.OrdinalIgnoreCase) && uri.AbsolutePath.Contains("/services/", StringComparison.OrdinalIgnoreCase)) return true;
+            if (IsSlackHost(uri.Host) && DecodePath(uri.AbsolutePath).Contains("/services/", StringComparison.OrdinalIgnoreCase)) return true;
             if (!string.IsNullOrEmpty(uri.UserInfo) || HasSensitiveQuery(uri.Query)) return true;
         }
         return false;
+    }
+
+    private static bool IsSlackHost(string host) => host.Equals("slack.com", StringComparison.OrdinalIgnoreCase) || host.EndsWith(".slack.com", StringComparison.OrdinalIgnoreCase);
+
+    private static string DecodePath(string path)
+    {
+        for (var count = 0; count < 4; count++)
+        {
+            var decoded = Uri.UnescapeDataString(path);
+            if (decoded == path) break;
+            path = decoded;
+        }
+        return path;
     }
 
     private static bool HasSensitiveQuery(string query) => query.Split('&', StringSplitOptions.RemoveEmptyEntries).Any(pair =>

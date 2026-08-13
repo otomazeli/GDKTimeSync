@@ -150,7 +150,7 @@ public sealed class ReviewViewModelTests
         {
             Directory.CreateDirectory(directory);
             var path = Path.Combine(directory, "settings.json");
-            const string sentinel = "https://hooks.slack.com/services/T000/B000/sentinel-webhook";
+            const string sentinel = "https://hooks.slack.com/services%2FT000%2FB000%2Fsentinel-webhook";
             File.WriteAllText(path, $$"""{"SlackTitle":"{{sentinel}}"}""");
             var date = new DateOnly(2026, 8, 13);
             var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
@@ -183,6 +183,23 @@ public sealed class ReviewViewModelTests
         Assert.False(review.CanConfirmSlack);
         Assert.Equal(0, deliveries.ClaimCalls);
         Assert.Equal(0, slack.CreateCalls);
+    }
+
+    [Fact]
+    public async Task Slack_preview_reads_no_credential_and_final_confirmation_reads_once()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var credentials = new CountingCredentials();
+        var slack = new CredentialBackedSlackFactory(credentials);
+        var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)), slackFactory: slack);
+
+        await review.ComposeSlackPreviewAsync();
+
+        Assert.Equal(0, credentials.GetCalls);
+        Assert.Equal(1, credentials.ExistsCalls);
+        await review.ConfirmSlackAsync();
+        Assert.Equal(1, credentials.GetCalls);
     }
 
     [Fact]
@@ -312,6 +329,26 @@ public sealed class ReviewViewModelTests
         public List<SlackDailyUpdate> PostedUpdates { get; } = [];
         public Task PostAsync(SlackDailyUpdate update, CancellationToken cancellationToken = default) { PostedUpdates.Add(update); return Task.CompletedTask; }
         public void Dispose() { }
+    }
+
+    private sealed class CountingCredentials : ICredentialStore
+    {
+        public int GetCalls { get; private set; }
+        public int ExistsCalls { get; private set; }
+        public Task<string?> GetAsync(string key, CancellationToken cancellationToken = default) { GetCalls++; return Task.FromResult<string?>("not-exposed"); }
+        public Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default) { ExistsCalls++; return Task.FromResult(true); }
+        public Task SaveAsync(string key, string secret, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task DeleteAsync(string key, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class CredentialBackedSlackFactory(CountingCredentials credentials) : ISlackClientFactory
+    {
+        public Task<bool> IsConfiguredAsync(CancellationToken cancellationToken = default) => credentials.ExistsAsync(CredentialKeys.SlackWebhook, cancellationToken);
+        public async Task<ISlackClient> CreateAsync(CancellationToken cancellationToken = default)
+        {
+            await credentials.GetAsync(CredentialKeys.SlackWebhook, cancellationToken);
+            return new RecordingSlackClient();
+        }
     }
 
 }

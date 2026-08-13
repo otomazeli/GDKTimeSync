@@ -9,6 +9,7 @@ public sealed class UserSettingsServiceTests : IDisposable
 
     [Theory]
     [InlineData("https://hooks.slack.com/services/T000/B000/sentinel-webhook")]
+    [InlineData("https://hooks.slack.com/services%2FT000%2FB000%2Fsentinel-webhook")]
     [InlineData("https://example.test/post?authorization=sentinel-secret")]
     [InlineData("Bearer sentinel-secret")]
     public void Direct_save_rejects_sensitive_slack_presentation_text_without_writing_json(string sensitiveText)
@@ -20,6 +21,18 @@ public sealed class UserSettingsServiceTests : IDisposable
 
         Assert.Equal("Slack presentation preferences must not contain sensitive content.", exception.Message);
         Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void Benign_non_slack_services_documentation_url_is_preserved()
+    {
+        var path = Path.Combine(directory, "settings.json");
+        const string documentation = "https://not-slack.com/services/docs";
+        var service = new UserSettingsService(path);
+
+        service.Save(new UserSettings { SlackTitle = documentation });
+
+        Assert.Equal(documentation, service.Load().SlackTitle);
     }
 
     [Fact]
@@ -38,6 +51,22 @@ public sealed class UserSettingsServiceTests : IDisposable
         Assert.Equal("Completed", loaded.SlackTaskHeading);
         Assert.Equal(["See https://example.test/docs"], loaded.SlackExtraLines);
         Assert.DoesNotContain(sentinel, json, StringComparison.Ordinal);
+        Assert.DoesNotContain(sentinel, File.ReadAllText(path), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Load_rewrites_tampered_encoded_slack_webhook_before_it_can_be_serialized()
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "settings.json");
+        const string sentinel = "https://hooks.slack.com/services%2FT000%2FB000%2Fsentinel-webhook";
+        File.WriteAllText(path, $$"""{"SlackTitle":"{{sentinel}}"}""");
+        var service = new UserSettingsService(path);
+
+        var loaded = service.Load();
+
+        Assert.Equal("Daily update", loaded.SlackTitle);
+        Assert.DoesNotContain(sentinel, JsonSerializer.Serialize(loaded), StringComparison.Ordinal);
         Assert.DoesNotContain(sentinel, File.ReadAllText(path), StringComparison.Ordinal);
     }
 
