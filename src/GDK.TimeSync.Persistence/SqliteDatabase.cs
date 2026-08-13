@@ -56,6 +56,7 @@ public sealed class SqliteDatabase
 
     public async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken = default)
     {
+        await Task.Yield();
         var directory = Path.GetDirectoryName(DatabasePath);
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);

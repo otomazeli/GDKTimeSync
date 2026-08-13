@@ -189,12 +189,28 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
         var readyPath = CreateTemporaryPath();
         var releasePath = CreateTemporaryPath();
         using var probe = StartMigrationProbe(databasePath, readyPath, releasePath);
+        using var parentCancellation = new CancellationTokenSource();
+        var parentStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<SqliteConnection>? parentOpen = null;
 
         try
         {
             await WaitForFileAsync(readyPath);
-            parentOpen = Task.Run(() => new SqliteDatabase(databasePath).OpenConnectionAsync());
+            parentOpen = Task.Run(async () =>
+            {
+                try
+                {
+                    var open = new SqliteDatabase(databasePath).OpenConnectionAsync(parentCancellation.Token);
+                    parentStarted.TrySetResult();
+                    return await open;
+                }
+                catch (Exception exception)
+                {
+                    parentStarted.TrySetException(exception);
+                    throw;
+                }
+            });
+            await parentStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
             var completed = await Task.WhenAny(parentOpen, Task.Delay(TimeSpan.FromMilliseconds(250)));
 
             Assert.NotSame(parentOpen, completed);
@@ -212,23 +228,9 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
         }
         finally
         {
-            if (!File.Exists(releasePath))
-                await File.WriteAllTextAsync(releasePath, "release");
-            if (!probe.HasExited)
-            {
-                await Task.WhenAny(probe.WaitForExitAsync(), Task.Delay(TimeSpan.FromSeconds(10)));
-            }
-            if (!probe.HasExited)
-            {
-                probe.Kill(entireProcessTree: true);
-                await probe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
-            }
-            if (parentOpen is not null)
-            {
-                var parentCompleted = await Task.WhenAny(parentOpen, Task.Delay(TimeSpan.FromSeconds(10)));
-                if (parentCompleted == parentOpen && parentOpen.IsCompletedSuccessfully)
-                    await (await parentOpen).DisposeAsync();
-            }
+            await ReleaseProbeAsync(releasePath);
+            await StopProbeAsync(probe);
+            await ObserveParentOpenAsync(parentOpen, parentCancellation);
         }
     }
 
@@ -305,6 +307,78 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
             await Task.Delay(10);
 
         Assert.True(File.Exists(path), "Migration probe did not signal readiness.");
+    }
+
+    private static async Task ReleaseProbeAsync(string releasePath)
+    {
+        try
+        {
+            if (!File.Exists(releasePath))
+                await File.WriteAllTextAsync(releasePath, "release");
+        }
+        catch
+        {
+        }
+    }
+
+    private static async Task StopProbeAsync(Process probe)
+    {
+        var probeExited = probe.WaitForExitAsync();
+        if (!probe.HasExited && await Task.WhenAny(probeExited, Task.Delay(TimeSpan.FromSeconds(10))) != probeExited)
+        {
+            try
+            {
+                if (!probe.HasExited)
+                    probe.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
+        if (!probe.HasExited)
+        {
+            try
+            {
+                await probe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or TimeoutException)
+            {
+            }
+        }
+    }
+
+    private static async Task ObserveParentOpenAsync(Task<SqliteConnection>? parentOpen, CancellationTokenSource cancellation)
+    {
+        if (parentOpen is null)
+            return;
+
+        if (await Task.WhenAny(parentOpen, Task.Delay(TimeSpan.FromSeconds(10))) != parentOpen)
+        {
+            cancellation.Cancel();
+            if (await Task.WhenAny(parentOpen, Task.Delay(TimeSpan.FromSeconds(10))) != parentOpen)
+            {
+                _ = parentOpen.ContinueWith(task =>
+                {
+                    if (task.IsCompletedSuccessfully)
+                        task.Result.Dispose();
+                    else
+                        _ = task.Exception;
+                }, TaskScheduler.Default);
+                return;
+            }
+        }
+
+        if (parentOpen.IsCompleted)
+        {
+            try
+            {
+                await using var connection = await parentOpen;
+            }
+            catch
+            {
+            }
+        }
     }
 
     private static async Task CreateLegacyPlanDatabaseAsync(string databasePath)
