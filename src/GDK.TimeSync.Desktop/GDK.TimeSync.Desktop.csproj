@@ -5,6 +5,7 @@
     <ProjectReference Include="..\GDK.TimeSync.Toggl\GDK.TimeSync.Toggl.csproj" />
     <ProjectReference Include="..\GDK.TimeSync.Jira\GDK.TimeSync.Jira.csproj" />
     <ProjectReference Include="..\GDK.TimeSync.Persistence\GDK.TimeSync.Persistence.csproj" />
+    <ProjectReference Include="..\GDK.TimeSync.Slack\GDK.TimeSync.Slack.csproj" />
     <ProjectReference Include="..\GDK.TimeSync.Tempo\GDK.TimeSync.Tempo.csproj" />
   </ItemGroup>
 

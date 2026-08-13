@@ -28,11 +28,14 @@ public partial class App : System.Windows.Application
         services.AddHttpClient(IntegrationClientFactory.TogglHttpClientName);
         services.AddHttpClient(IntegrationClientFactory.JiraHttpClientName);
         services.AddHttpClient(IntegrationClientFactory.TempoHttpClientName);
+        services.AddHttpClient(SlackClientFactory.HttpClientName);
         services.AddSingleton<UserSettingsService>();
         services.AddSingleton<IUserSettingsStore>(provider => provider.GetRequiredService<UserSettingsService>());
         services.AddSingleton<WindowsCredentialStore>();
         services.AddSingleton<ICredentialStore>(provider => provider.GetRequiredService<WindowsCredentialStore>());
         services.AddSingleton<IIntegrationClientFactory, IntegrationClientFactory>();
+        services.AddSingleton<IConfirmedTaskDeliveryService, ConfirmedTaskDeliveryService>();
+        services.AddSingleton<ISlackClientFactory, SlackClientFactory>();
         services.AddSingleton<IConfigurationStateService, ConfigurationStateService>();
         services.AddSingleton<MainViewModel>();
         services.AddSingleton<TodayViewModel>();
@@ -50,7 +53,12 @@ public partial class App : System.Windows.Application
     }
 
     internal static void RegisterReviewServices(IServiceCollection services) =>
-        services.AddSingleton<ReviewViewModel>(provider => new ReviewViewModel(provider.GetRequiredService<TodayViewModel>()));
+        services.AddSingleton<ReviewViewModel>(provider => new ReviewViewModel(
+            provider.GetRequiredService<TodayViewModel>(),
+            provider.GetRequiredService<IConfirmedTaskDeliveryService>(),
+            provider.GetRequiredService<IDeliveryAttemptRepository>(),
+            provider.GetRequiredService<IDailySlackDeliveryRepository>(),
+            provider.GetRequiredService<ISlackClientFactory>()));
 
     protected override void OnExit(ExitEventArgs e)
     {

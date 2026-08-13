@@ -2,33 +2,262 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using GDK.TimeSync.Core;
+using GDK.TimeSync.Desktop.Services;
+using GDK.TimeSync.Slack;
 
 namespace GDK.TimeSync.Desktop.ViewModels;
 
 public sealed class ReviewViewModel : INotifyPropertyChanged
 {
     private readonly ILocalPlanSnapshotProvider? planProvider;
+    private readonly IConfirmedTaskDeliveryService? deliveryService;
+    private readonly IDeliveryAttemptRepository? attempts;
+    private readonly IDailySlackDeliveryRepository? dailyDeliveries;
+    private readonly ISlackClientFactory? slackClientFactory;
     private string dryRunSummary = "Run Dry Run to validate the current local plan.";
-    private bool isConfirmationVisible;
+    private PlannedWorkItem? selectedTask;
+    private DeliveryAttempt? lastTaskAttempt;
+    private SlackDailyUpdate? slackPreview;
+    private string? taskDeliveryError;
+    private string? slackDeliveryError;
+    private bool isTaskConfirmationVisible;
+    private bool isSlackConfirmationVisible;
+    private bool canConfirmSlack;
 
-    public ReviewViewModel(ILocalPlanSnapshotProvider? planProvider = null)
+    public ReviewViewModel(
+        ILocalPlanSnapshotProvider? planProvider = null,
+        IConfirmedTaskDeliveryService? deliveryService = null,
+        IDeliveryAttemptRepository? attempts = null,
+        IDailySlackDeliveryRepository? dailyDeliveries = null,
+        ISlackClientFactory? slackClientFactory = null)
     {
         this.planProvider = planProvider;
+        this.deliveryService = deliveryService;
+        this.attempts = attempts;
+        this.dailyDeliveries = dailyDeliveries;
+        this.slackClientFactory = slackClientFactory;
         DryRunCommand = new RelayCommand(_ => RunDryRun());
-        ConfirmReviewCommand = new RelayCommand(_ => IsConfirmationVisible = true);
-        PostAllCommand = new RelayCommand(() => { }, () => false);
+        RefreshCommand = new RelayCommand(_ => _ = RefreshAsync());
+        OpenTaskConfirmationCommand = new RelayCommand(value =>
+        {
+            if (value is PlannedWorkItem item)
+                OpenTaskConfirmation(item.Id);
+        });
+        ConfirmTaskCommand = new RelayCommand(_ => _ = ConfirmTaskAsync(), () => IsTaskConfirmationVisible);
+        CancelTaskConfirmationCommand = new RelayCommand(_ => CancelTaskConfirmation(), () => IsTaskConfirmationVisible);
+        ComposeSlackPreviewCommand = new RelayCommand(_ => _ = ComposeSlackPreviewAsync());
+        ConfirmSlackCommand = new RelayCommand(_ => _ = ConfirmSlackAsync(), () => CanConfirmSlack);
+        CancelSlackConfirmationCommand = new RelayCommand(_ => CancelSlackConfirmation(), () => IsSlackConfirmationVisible);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public bool CanPostAll => false;
-    public string PostAllExplanation => "Post all is disabled until the delivery workflow is available. No external systems can be contacted from this milestone.";
-    public RelayCommand PostAllCommand { get; }
     public RelayCommand DryRunCommand { get; }
-    public RelayCommand ConfirmReviewCommand { get; }
+    public RelayCommand RefreshCommand { get; }
+    public RelayCommand OpenTaskConfirmationCommand { get; }
+    public RelayCommand ConfirmTaskCommand { get; }
+    public RelayCommand CancelTaskConfirmationCommand { get; }
+    public RelayCommand ComposeSlackPreviewCommand { get; }
+    public RelayCommand ConfirmSlackCommand { get; }
+    public RelayCommand CancelSlackConfirmationCommand { get; }
+    public ObservableCollection<PlannedWorkItem> Items { get; } = [];
     public ObservableCollection<string> DryRunBlockers { get; } = [];
+    public ObservableCollection<string> SlackBlockers { get; } = [];
     public string DryRunSummary { get => dryRunSummary; private set => SetField(ref dryRunSummary, value); }
-    public bool IsConfirmationVisible { get => isConfirmationVisible; private set => SetField(ref isConfirmationVisible, value); }
+    public PlannedWorkItem? SelectedTask { get => selectedTask; private set => SetField(ref selectedTask, value); }
+    public DeliveryAttempt? LastTaskAttempt { get => lastTaskAttempt; private set => SetField(ref lastTaskAttempt, value); }
+    public SlackDailyUpdate? SlackPreview { get => slackPreview; private set => SetField(ref slackPreview, value); }
+    public string? TaskDeliveryError { get => taskDeliveryError; private set => SetField(ref taskDeliveryError, value); }
+    public string? SlackDeliveryError { get => slackDeliveryError; private set => SetField(ref slackDeliveryError, value); }
+    public bool IsTaskConfirmationVisible
+    {
+        get => isTaskConfirmationVisible;
+        private set
+        {
+            if (isTaskConfirmationVisible == value) return;
+            SetField(ref isTaskConfirmationVisible, value);
+            ConfirmTaskCommand.NotifyCanExecuteChanged();
+            CancelTaskConfirmationCommand.NotifyCanExecuteChanged();
+        }
+    }
+    public bool IsSlackConfirmationVisible
+    {
+        get => isSlackConfirmationVisible;
+        private set
+        {
+            if (isSlackConfirmationVisible == value) return;
+            SetField(ref isSlackConfirmationVisible, value);
+            CancelSlackConfirmationCommand.NotifyCanExecuteChanged();
+        }
+    }
+    public bool CanConfirmSlack
+    {
+        get => canConfirmSlack;
+        private set
+        {
+            if (canConfirmSlack == value) return;
+            SetField(ref canConfirmSlack, value);
+            ConfirmSlackCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    public Task RefreshAsync(CancellationToken cancellationToken = default)
+    {
+        Items.Clear();
+        var plan = planProvider?.GetSnapshot();
+        if (plan is not null)
+            foreach (var item in plan.Items)
+                Items.Add(item);
+        return Task.CompletedTask;
+    }
+
+    public void OpenTaskConfirmation(Guid itemId)
+    {
+        var item = planProvider?.GetSnapshot().Items.SingleOrDefault(value => value.Id == itemId);
+        if (item is null) return;
+        SelectedTask = item;
+        TaskDeliveryError = null;
+        IsTaskConfirmationVisible = true;
+    }
+
+    public void CancelTaskConfirmation()
+    {
+        IsTaskConfirmationVisible = false;
+        SelectedTask = null;
+    }
+
+    public async Task ConfirmTaskAsync(CancellationToken cancellationToken = default)
+    {
+        if (!IsTaskConfirmationVisible || SelectedTask is not { } item || deliveryService is null) return;
+
+        try
+        {
+            LastTaskAttempt = await deliveryService.DeliverConfirmedAsync(item, cancellationToken);
+            TaskDeliveryError = null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            TaskDeliveryError = "Task delivery was cancelled.";
+        }
+        catch
+        {
+            TaskDeliveryError = "Task delivery could not be completed.";
+        }
+        finally
+        {
+            CancelTaskConfirmation();
+        }
+    }
+
+    public async Task ComposeSlackPreviewAsync(CancellationToken cancellationToken = default)
+    {
+        SlackBlockers.Clear();
+        SlackPreview = null;
+        SlackDeliveryError = null;
+        CanConfirmSlack = false;
+        IsSlackConfirmationVisible = false;
+        var plan = planProvider?.GetSnapshot();
+        if (plan is null || attempts is null || dailyDeliveries is null || slackClientFactory is null)
+        {
+            SlackBlockers.Add("Daily Slack delivery is unavailable.");
+            return;
+        }
+
+        try
+        {
+            if (await dailyDeliveries.GetAsync(plan.Date, cancellationToken) is not null)
+            {
+                SlackBlockers.Add("A daily Slack delivery already exists and cannot be sent again.");
+                return;
+            }
+
+            var completed = new List<SlackDailyCompletedItem>();
+            foreach (var item in plan.Items)
+            {
+                var attempt = await attempts.GetAsync(item.Id, cancellationToken);
+                if (attempt is { Status: DeliveryAttemptStatus.Succeeded, TempoWorklogId: not null })
+                    completed.Add(new SlackDailyCompletedItem(item.TogglProject, item.JiraIssueKey, item.Comment, item.Status));
+                else
+                    SlackBlockers.Add("A pending or unsuccessful task delivery is excluded from Slack.");
+            }
+
+            SlackPreview = new SlackDailyUpdateComposer().Compose(plan.Date, completed);
+            if (SlackPreview is null)
+            {
+                SlackBlockers.Add("No Tempo-succeeded tasks are available for Slack.");
+                return;
+            }
+
+            CanConfirmSlack = true;
+            IsSlackConfirmationVisible = true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            SlackBlockers.Add("Daily Slack preview was cancelled.");
+        }
+        catch
+        {
+            SlackBlockers.Add("Daily Slack preview is unavailable.");
+        }
+    }
+
+    public void CancelSlackConfirmation()
+    {
+        IsSlackConfirmationVisible = false;
+        CanConfirmSlack = false;
+    }
+
+    public async Task ConfirmSlackAsync(CancellationToken cancellationToken = default)
+    {
+        if (!CanConfirmSlack || SlackPreview is null || dailyDeliveries is null || slackClientFactory is null) return;
+
+        CanConfirmSlack = false;
+        IsSlackConfirmationVisible = false;
+        try
+        {
+            if (!await dailyDeliveries.TryClaimAsync(SlackPreview.Date, SlackPreview.ContentFingerprint, cancellationToken))
+            {
+                SlackDeliveryError = "A daily Slack delivery already exists and cannot be sent again.";
+                return;
+            }
+
+            using var client = await slackClientFactory.CreateAsync(cancellationToken);
+            await client.PostAsync(SlackPreview, cancellationToken);
+            await dailyDeliveries.SaveAsync(new DailySlackDelivery(SlackPreview.Date, SlackPreview.ContentFingerprint, DailySlackDeliveryState.Sent, null), CancellationToken.None);
+            SlackDeliveryError = null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await MarkSlackReconciliationRequiredAsync(DailySlackFailureCode.Cancelled);
+        }
+        catch (SlackApiException exception)
+        {
+            await MarkSlackReconciliationRequiredAsync(exception.FailureCode switch
+            {
+                SlackFailureCode.UnsuccessfulResponse => DailySlackFailureCode.UnsuccessfulResponse,
+                SlackFailureCode.InvalidResponse => DailySlackFailureCode.InvalidResponse,
+                SlackFailureCode.Cancelled => DailySlackFailureCode.Cancelled,
+                _ => DailySlackFailureCode.Transport
+            });
+        }
+        catch
+        {
+            await MarkSlackReconciliationRequiredAsync(DailySlackFailureCode.PersistenceFailed);
+        }
+    }
+
+    private async Task MarkSlackReconciliationRequiredAsync(DailySlackFailureCode failureCode)
+    {
+        try
+        {
+            await dailyDeliveries!.SaveAsync(new DailySlackDelivery(SlackPreview!.Date, SlackPreview.ContentFingerprint,
+                DailySlackDeliveryState.ReconciliationRequired, failureCode), CancellationToken.None);
+        }
+        catch
+        {
+        }
+        SlackDeliveryError = "Daily Slack delivery requires reconciliation.";
+    }
 
     private void RunDryRun()
     {
@@ -52,7 +281,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         }
 
         var duration = TimeSpan.FromTicks(plan.Items.Sum(item => item.Duration.Ticks));
-        DryRunSummary = $"{plan.Items.Count} planned item(s), {duration.TotalMinutes:0} planned minute(s). Delivery sequence: Toggl → Jira → Tempo → Slack.";
+        DryRunSummary = $"{plan.Items.Count} planned item(s), {duration.TotalMinutes:0} planned minute(s). Dry Run does not deliver tasks or Slack.";
     }
 
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

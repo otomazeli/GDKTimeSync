@@ -12,20 +12,48 @@
             </ItemsControl.ItemTemplate>
         </ItemsControl>
         <Button Width="100" Margin="0,12,0,0" HorizontalAlignment="Left" Command="{Binding DryRunCommand}">Dry Run</Button>
-        <Button Width="130" Margin="0,8,0,0" HorizontalAlignment="Left" Command="{Binding ConfirmReviewCommand}">Confirm preview</Button>
-        <TextBlock Margin="0,8,0,0" Text="Preview confirmed. Posting remains unavailable." Foreground="DimGray">
-            <TextBlock.Style>
-                <Style TargetType="TextBlock">
+        <Button Width="100" Margin="0,8,0,0" HorizontalAlignment="Left" Command="{Binding RefreshCommand}">Refresh</Button>
+        <ItemsControl Margin="0,12,0,0" ItemsSource="{Binding Items}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Margin="0,0,0,8">
+                        <TextBlock Text="{Binding JiraIssueKey}" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Comment}" TextWrapping="Wrap" />
+                        <Button Width="100" HorizontalAlignment="Left" Margin="0,4,0,0" Command="{Binding DataContext.OpenTaskConfirmationCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">Post task</Button>
+                    </StackPanel>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <StackPanel Margin="0,8,0,0">
+            <StackPanel.Style>
+                <Style TargetType="StackPanel">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers><DataTrigger Binding="{Binding IsTaskConfirmationVisible}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                </Style>
+            </StackPanel.Style>
+            <TextBlock Text="Post only this selected task?" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding SelectedTask.JiraIssueKey}" />
+            <StackPanel Orientation="Horizontal"><Button Command="{Binding ConfirmTaskCommand}">Post task</Button><Button Margin="8,0,0,0" Command="{Binding CancelTaskConfirmationCommand}">Cancel</Button></StackPanel>
+        </StackPanel>
+        <TextBlock Margin="0,8,0,0" Text="{Binding TaskDeliveryError}" Foreground="Firebrick" TextWrapping="Wrap" />
+        <Button Width="190" Margin="0,12,0,0" HorizontalAlignment="Left" Command="{Binding ComposeSlackPreviewCommand}">Compose daily Slack update</Button>
+        <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding SlackBlockers}">
+            <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="Firebrick" TextWrapping="Wrap" /></DataTemplate></ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <StackPanel Margin="0,8,0,0">
+            <StackPanel.Style>
+                <Style TargetType="StackPanel">
                     <Setter Property="Visibility" Value="Collapsed" />
                     <Style.Triggers>
-                        <DataTrigger Binding="{Binding IsConfirmationVisible}" Value="True">
+                        <DataTrigger Binding="{Binding IsSlackConfirmationVisible}" Value="True">
                             <Setter Property="Visibility" Value="Visible" />
                         </DataTrigger>
                     </Style.Triggers>
                 </Style>
-            </TextBlock.Style>
-        </TextBlock>
-        <TextBlock Margin="0,8,0,16" Text="{Binding PostAllExplanation}" TextWrapping="Wrap" Foreground="DimGray" />
-        <Button Width="100" HorizontalAlignment="Left" Command="{Binding PostAllCommand}" IsEnabled="{Binding CanPostAll}">Post all</Button>
+            </StackPanel.Style>
+            <TextBlock Text="{Binding SlackPreview.Text}" TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal"><Button Command="{Binding ConfirmSlackCommand}">Send daily Slack update</Button><Button Margin="8,0,0,0" Command="{Binding CancelSlackConfirmationCommand}">Cancel</Button></StackPanel>
+        </StackPanel>
+        <TextBlock Margin="0,8,0,0" Text="{Binding SlackDeliveryError}" Foreground="Firebrick" TextWrapping="Wrap" />
     </StackPanel>
 </UserControl>
