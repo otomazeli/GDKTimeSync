@@ -71,6 +71,21 @@ public sealed class UserSettingsServiceTests : IDisposable
         Assert.DoesNotContain(sentinel, File.ReadAllText(path), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Load_rewrites_an_invalid_reminder_mode_to_both()
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "settings.json");
+        File.WriteAllText(path, "{\"EndOfDayReminderMode\":999}");
+        var service = new UserSettingsService(path);
+
+        var loaded = service.Load();
+        var persisted = JsonSerializer.Deserialize<UserSettings>(File.ReadAllText(path));
+
+        Assert.Equal(EndOfDayReminderMode.Both, loaded.EndOfDayReminderMode);
+        Assert.Equal(EndOfDayReminderMode.Both, persisted!.EndOfDayReminderMode);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(directory))
