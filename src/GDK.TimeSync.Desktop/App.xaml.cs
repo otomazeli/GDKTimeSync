@@ -69,10 +69,30 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        StopEndOfDayReminderAsync().GetAwaiter().GetResult();
-        trayIcon?.Dispose();
-        serviceProvider?.Dispose();
-        base.OnExit(e);
+        try
+        {
+            ReminderLifecycle.StopThenAsync(DetachReminderService(), OnReviewDue, static () => Task.CompletedTask).GetAwaiter().GetResult();
+        }
+        finally
+        {
+            try
+            {
+                trayIcon?.Dispose();
+            }
+            catch (Exception) { }
+            finally
+            {
+                try
+                {
+                    serviceProvider?.Dispose();
+                }
+                catch (Exception) { }
+                finally
+                {
+                    base.OnExit(e);
+                }
+            }
+        }
     }
 
     private void ShowMainWindow()
@@ -94,9 +114,7 @@ public partial class App : System.Windows.Application
     {
         if (isExiting) return;
         isExiting = true;
-        await StopEndOfDayReminderAsync();
-        await serviceProvider!.GetRequiredService<ShellViewModel>().FlushAsync();
-        Shutdown();
+        await ReminderLifecycle.StopThenAsync(DetachReminderService(), OnReviewDue, FlushAndShutdownAsync);
     }
 
     private void OnReviewDue(object? sender, ReviewDueEventArgs e)
@@ -127,12 +145,28 @@ public partial class App : System.Windows.Application
         await serviceProvider.GetRequiredService<ShellViewModel>().NavigateAsync(NavigationPage.Review);
     }
 
-    private async Task StopEndOfDayReminderAsync()
+    private IEndOfDayReminderService? DetachReminderService()
     {
-        if (endOfDayReminderService is null) return;
-
-        endOfDayReminderService.ReviewDue -= OnReviewDue;
-        await endOfDayReminderService.StopAsync();
+        var reminder = endOfDayReminderService;
         endOfDayReminderService = null;
+        return reminder;
+    }
+
+    private async Task FlushAndShutdownAsync()
+    {
+        try
+        {
+            if (serviceProvider is not null)
+                await serviceProvider.GetRequiredService<ShellViewModel>().FlushAsync();
+        }
+        catch (Exception) { }
+        finally
+        {
+            try
+            {
+                Shutdown();
+            }
+            catch (Exception) { }
+        }
     }
 }

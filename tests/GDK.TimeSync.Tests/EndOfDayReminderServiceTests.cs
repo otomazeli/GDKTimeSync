@@ -5,6 +5,25 @@ namespace GDK.TimeSync.Tests;
 public sealed class EndOfDayReminderServiceTests
 {
     [Fact]
+    public async Task Stopping_a_faulting_reminder_still_runs_the_remaining_exit_action()
+    {
+        var reminder = new ThrowingStopReminderService();
+        EventHandler<ReviewDueEventArgs> handler = (_, _) => { };
+        reminder.ReviewDue += handler;
+        var remainingExitActions = 0;
+
+        await ReminderLifecycle.StopThenAsync(reminder, handler, () =>
+        {
+            remainingExitActions++;
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal(1, reminder.StopCalls);
+        Assert.Equal(0, reminder.SubscriptionCount);
+        Assert.Equal(1, remainingExitActions);
+    }
+
+    [Fact]
     public void CheckNow_Raises_once_after_the_configured_time_for_each_local_date()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 15, 59, 0, TimeSpan.Zero));
@@ -88,6 +107,36 @@ public sealed class EndOfDayReminderServiceTests
         public UserSettings Load() => settings;
 
         public void Save(UserSettings value) { }
+    }
+
+    private sealed class ThrowingStopReminderService : IEndOfDayReminderService
+    {
+        private EventHandler<ReviewDueEventArgs>? reviewDue;
+
+        public int StopCalls { get; private set; }
+        public int SubscriptionCount { get; private set; }
+
+        public event EventHandler<ReviewDueEventArgs>? ReviewDue
+        {
+            add
+            {
+                reviewDue += value;
+                SubscriptionCount++;
+            }
+            remove
+            {
+                reviewDue -= value;
+                SubscriptionCount--;
+            }
+        }
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default)
+        {
+            StopCalls++;
+            return Task.FromException(new InvalidOperationException("Test-only stop failure."));
+        }
     }
 
     private sealed class FakeTimeProvider(DateTimeOffset now) : TimeProvider
