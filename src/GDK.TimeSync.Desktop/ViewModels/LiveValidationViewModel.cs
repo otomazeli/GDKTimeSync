@@ -94,6 +94,7 @@ public sealed class LiveValidationViewModel : INotifyPropertyChanged
 
     public Task RefreshAsync(CancellationToken cancellationToken = default)
     {
+        if (IsInFlight) return Task.CompletedTask;
         try
         {
             var plan = planProvider?.GetSnapshot();
@@ -109,6 +110,7 @@ public sealed class LiveValidationViewModel : INotifyPropertyChanged
 
     public void LoadItems(IEnumerable<PlannedWorkItem> items)
     {
+        if (IsInFlight) return;
         var selectedId = SelectedItem?.Id;
         Items.Clear();
         foreach (var item in items)

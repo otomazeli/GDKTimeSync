@@ -4,6 +4,7 @@ using GDK.TimeSync.Desktop.ViewModels;
 using GDK.TimeSync.Jira;
 using GDK.TimeSync.Tempo;
 using GDK.TimeSync.Toggl;
+using System.Xml.Linq;
 
 namespace GDK.TimeSync.Tests;
 
@@ -71,7 +72,8 @@ public sealed class LiveValidationViewModelTests
         var first = CreateItem();
         var second = CreateItem() with { Id = Guid.NewGuid(), JiraIssueKey = "GDK-43" };
         var safety = new SafetyProbe { PendingToggl = new TaskCompletionSource<LiveValidationResult>() };
-        var viewModel = new LiveValidationViewModel(new FixedPlanSnapshotProvider(DailyPlan.Create(first.Day, [first, second])), safety, safety);
+        var snapshot = new MutablePlanSnapshotProvider(DailyPlan.Create(first.Day, [first, second]));
+        var viewModel = new LiveValidationViewModel(snapshot, safety, safety);
         await viewModel.RefreshAsync();
         viewModel.SelectItem(first.Id);
         viewModel.OpenTogglConfirmation();
@@ -82,6 +84,59 @@ public sealed class LiveValidationViewModelTests
         Assert.Equal(first, viewModel.SelectedItem);
         safety.PendingToggl.SetResult(Result(LiveValidationStep.Toggl, first, DeliveryAttemptStatus.InProgress, togglId: 44));
         await confirmation;
+    }
+
+    [Fact]
+    public async Task Refresh_cannot_replace_the_selected_item_while_a_confirmed_toggl_action_is_in_flight()
+    {
+        var first = CreateItem();
+        var second = CreateItem() with { Id = Guid.NewGuid(), JiraIssueKey = "GDK-43" };
+        var safety = new SafetyProbe { PendingToggl = new TaskCompletionSource<LiveValidationResult>() };
+        var snapshot = new MutablePlanSnapshotProvider(DailyPlan.Create(first.Day, [first, second]));
+        var viewModel = new LiveValidationViewModel(snapshot, safety, safety);
+        await viewModel.RefreshAsync();
+        viewModel.SelectItem(first.Id);
+        viewModel.OpenTogglConfirmation();
+
+        var confirmation = viewModel.ConfirmTogglAsync();
+        snapshot.Plan = DailyPlan.Create(first.Day, [second]);
+        await viewModel.RefreshAsync();
+
+        Assert.Equal(first, viewModel.SelectedItem);
+        safety.PendingToggl.SetResult(Result(LiveValidationStep.Toggl, first, DeliveryAttemptStatus.InProgress, togglId: 44));
+        await confirmation;
+    }
+
+    [Fact]
+    public async Task Review_refresh_cannot_replace_the_validation_selection_while_a_confirmed_action_is_in_flight()
+    {
+        var first = CreateItem();
+        var second = CreateItem() with { Id = Guid.NewGuid(), JiraIssueKey = "GDK-43" };
+        var safety = new SafetyProbe { PendingToggl = new TaskCompletionSource<LiveValidationResult>() };
+        var snapshot = new MutablePlanSnapshotProvider(DailyPlan.Create(first.Day, [first, second]));
+        var review = new ReviewViewModel(snapshot, diagnosticsService: safety, validationService: safety);
+        await review.RefreshAsync();
+        review.LiveValidation.SelectItem(first.Id);
+        review.LiveValidation.OpenTogglConfirmation();
+
+        var confirmation = review.LiveValidation.ConfirmTogglAsync();
+        snapshot.Plan = DailyPlan.Create(first.Day, [second]);
+        await review.RefreshAsync();
+
+        Assert.Equal(first, review.LiveValidation.SelectedItem);
+        safety.PendingToggl.SetResult(Result(LiveValidationStep.Toggl, first, DeliveryAttemptStatus.InProgress, togglId: 44));
+        await confirmation;
+    }
+
+    [Fact]
+    public void Review_view_wraps_its_content_in_a_vertical_scroll_viewer()
+    {
+        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GDK.TimeSync.Desktop", "Views", "ReviewView.xaml"));
+        var root = XDocument.Load(path).Root!;
+        var scrollViewer = Assert.Single(root.Elements(), element => element.Name.LocalName == "ScrollViewer");
+
+        Assert.Equal("Auto", scrollViewer.Attribute("VerticalScrollBarVisibility")?.Value);
+        Assert.Contains(scrollViewer.Elements(), element => element.Name.LocalName == "StackPanel");
     }
 
     [Fact]
@@ -189,6 +244,12 @@ public sealed class LiveValidationViewModelTests
     private sealed class FixedPlanSnapshotProvider(DailyPlan plan) : ILocalPlanSnapshotProvider
     {
         public DailyPlan GetSnapshot() => plan;
+    }
+
+    private sealed class MutablePlanSnapshotProvider(DailyPlan plan) : ILocalPlanSnapshotProvider
+    {
+        public DailyPlan Plan { get; set; } = plan;
+        public DailyPlan GetSnapshot() => Plan;
     }
 
     private sealed class SafetyProbe : IIntegrationDiagnosticsService, ILiveIntegrationValidationService

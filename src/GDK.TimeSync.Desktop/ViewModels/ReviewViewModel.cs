@@ -124,6 +124,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
     public Task RefreshAsync(CancellationToken cancellationToken = default)
     {
+        if (LiveValidation.IsInFlight) return Task.CompletedTask;
         Items.Clear();
         var plan = planProvider?.GetSnapshot();
         if (plan is not null)

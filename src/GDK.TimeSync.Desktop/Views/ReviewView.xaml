@@ -1,6 +1,7 @@
 <UserControl x:Class="GDK.TimeSync.Desktop.Views.ReviewView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
     <StackPanel>
         <TextBlock Text="End-of-day review" FontSize="24" FontWeight="SemiBold" />
         <TextBlock Margin="0,8,0,0" Text="{Binding DryRunSummary}" TextWrapping="Wrap" />
@@ -132,4 +133,5 @@
         </StackPanel>
         <TextBlock Margin="0,8,0,0" Text="{Binding SlackDeliveryError}" Foreground="Firebrick" TextWrapping="Wrap" />
     </StackPanel>
+    </ScrollViewer>
 </UserControl>
