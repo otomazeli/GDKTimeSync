@@ -19,9 +19,10 @@ public sealed class EndOfDayReminderService(IUserSettingsStore settingsStore, Ti
         {
             if (timerLoop is not null) return Task.CompletedTask;
 
-            timerCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timerCancellation = cancellation;
+            timerLoop = RunTimerAsync(cancellation.Token);
             CheckNow();
-            timerLoop = RunTimerAsync(timerCancellation.Token);
         }
 
         return Task.CompletedTask;

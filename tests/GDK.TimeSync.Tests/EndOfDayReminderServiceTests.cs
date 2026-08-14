@@ -47,9 +47,37 @@ public sealed class EndOfDayReminderServiceTests
     [Fact]
     public void CheckNow_uses_1600_for_an_invalid_persisted_time()
     {
-        var service = CreateService("not-a-time", EndOfDayReminderMode.Both, new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 15, 59, 0, TimeSpan.Zero)));
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 15, 59, 0, TimeSpan.Zero));
+        var service = CreateService("not-a-time", EndOfDayReminderMode.Both, clock);
+        var raised = 0;
+        service.ReviewDue += (_, _) => raised++;
 
         Assert.False(service.CheckNow());
+        clock.Advance(TimeSpan.FromMinutes(1));
+        Assert.True(service.CheckNow());
+        Assert.Equal(1, raised);
+    }
+
+    [Fact]
+    public async Task StartAsync_stops_the_timer_when_a_due_handler_stops_the_service()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 16, 0, 0, TimeSpan.Zero));
+        var service = CreateService("16:00", EndOfDayReminderMode.Both, clock);
+        var raised = 0;
+        service.ReviewDue += (_, _) =>
+        {
+            raised++;
+            service.StopAsync().GetAwaiter().GetResult();
+        };
+
+        await service.StartAsync();
+
+        Assert.Equal(1, raised);
+        Assert.True(clock.TimerDisposed);
+        clock.Advance(TimeSpan.FromDays(1));
+        clock.Tick();
+        await Task.Yield();
+        Assert.Equal(1, raised);
     }
 
     private static EndOfDayReminderService CreateService(string time, EndOfDayReminderMode mode, TimeProvider clock) =>
@@ -65,11 +93,39 @@ public sealed class EndOfDayReminderServiceTests
     private sealed class FakeTimeProvider(DateTimeOffset now) : TimeProvider
     {
         private DateTimeOffset current = now;
+        private FakeTimer? timer;
 
         public override DateTimeOffset GetUtcNow() => current.ToUniversalTime();
 
         public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
 
         public void Advance(TimeSpan amount) => current += amount;
+
+        public bool TimerDisposed => timer?.Disposed ?? false;
+
+        public void Tick() => timer?.Tick();
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+            timer = new FakeTimer(callback, state);
+
+        private sealed class FakeTimer(TimerCallback callback, object? state) : ITimer
+        {
+            public bool Disposed { get; private set; }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period) => !Disposed;
+
+            public void Dispose() => Disposed = true;
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+
+            public void Tick()
+            {
+                if (!Disposed) callback(state);
+            }
+        }
     }
 }
