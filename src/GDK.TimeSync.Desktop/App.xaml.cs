@@ -38,6 +38,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ICredentialStore>(provider => provider.GetRequiredService<WindowsCredentialStore>());
         services.AddSingleton<IIntegrationClientFactory, IntegrationClientFactory>();
         services.AddSingleton<IIntegrationDiagnosticsService, IntegrationDiagnosticsService>();
+        services.AddSingleton<ILiveIntegrationValidationService, LiveIntegrationValidationService>();
         services.AddSingleton<IConfirmedTaskDeliveryService, ConfirmedTaskDeliveryService>();
         services.AddSingleton<ISlackClientFactory, SlackClientFactory>();
         services.AddSingleton<IConfigurationStateService, ConfigurationStateService>();
@@ -66,7 +67,9 @@ public partial class App : System.Windows.Application
             provider.GetRequiredService<IDeliveryAttemptRepository>(),
             provider.GetRequiredService<IDailySlackDeliveryRepository>(),
             provider.GetRequiredService<ISlackClientFactory>(),
-            provider.GetRequiredService<IUserSettingsStore>()));
+            provider.GetRequiredService<IUserSettingsStore>(),
+            provider.GetRequiredService<IIntegrationDiagnosticsService>(),
+            provider.GetRequiredService<ILiveIntegrationValidationService>()));
 
     protected override void OnExit(ExitEventArgs e)
     {

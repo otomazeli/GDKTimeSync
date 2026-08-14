@@ -32,7 +32,9 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         IDeliveryAttemptRepository? attempts = null,
         IDailySlackDeliveryRepository? dailyDeliveries = null,
         ISlackClientFactory? slackClientFactory = null,
-        IUserSettingsStore? settings = null)
+        IUserSettingsStore? settings = null,
+        IIntegrationDiagnosticsService? diagnosticsService = null,
+        ILiveIntegrationValidationService? validationService = null)
     {
         this.planProvider = planProvider;
         this.deliveryService = deliveryService;
@@ -40,6 +42,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         this.dailyDeliveries = dailyDeliveries;
         this.slackClientFactory = slackClientFactory;
         this.settings = settings;
+        LiveValidation = new LiveValidationViewModel(planProvider, diagnosticsService, validationService);
         DryRunCommand = new RelayCommand(_ => RunDryRun());
         RefreshCommand = new RelayCommand(_ => _ = RefreshAsync());
         OpenTaskConfirmationCommand = new RelayCommand(value =>
@@ -64,6 +67,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     public RelayCommand ComposeSlackPreviewCommand { get; }
     public RelayCommand ConfirmSlackCommand { get; }
     public RelayCommand CancelSlackConfirmationCommand { get; }
+    public LiveValidationViewModel LiveValidation { get; }
     public ObservableCollection<PlannedWorkItem> Items { get; } = [];
     public ObservableCollection<string> DryRunBlockers { get; } = [];
     public ObservableCollection<string> SlackBlockers { get; } = [];
@@ -125,6 +129,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         if (plan is not null)
             foreach (var item in plan.Items)
                 Items.Add(item);
+        LiveValidation.LoadItems(Items);
         return Task.CompletedTask;
     }
 

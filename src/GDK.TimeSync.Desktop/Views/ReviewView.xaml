@@ -24,6 +24,75 @@
                 </DataTemplate>
             </ItemsControl.ItemTemplate>
         </ItemsControl>
+        <Separator Margin="0,12,0,8" />
+        <TextBlock Text="Guided integration validation" FontSize="18" FontWeight="SemiBold" />
+        <TextBlock Margin="0,4,0,0" Text="Select a local planned item, then explicitly validate each integration step." TextWrapping="Wrap" />
+        <Button Width="140" Margin="0,8,0,0" HorizontalAlignment="Left" Command="{Binding LiveValidation.RunDiagnosticsCommand}">Run diagnostics</Button>
+        <ItemsControl Margin="0,4,0,0" ItemsSource="{Binding LiveValidation.Diagnostics}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding Target, StringFormat={}{0}:}" />
+                        <TextBlock Margin="4,0,0,0" Text="{Binding SafeMessage}" />
+                    </StackPanel>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding LiveValidation.Items}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Margin="0,0,0,6">
+                        <TextBlock Text="{Binding JiraIssueKey}" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Comment}" TextWrapping="Wrap" />
+                        <Button Width="130" Margin="0,4,0,0" HorizontalAlignment="Left" Command="{Binding DataContext.LiveValidation.SelectItemCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">Select for validation</Button>
+                    </StackPanel>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <StackPanel Margin="0,4,0,0">
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.JiraIssueKey}" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.Comment}" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.Duration, StringFormat={}{0:g}}" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.Start, StringFormat=Start: {0:t}}" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.End, StringFormat=End: {0:t}}" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.TogglProject, StringFormat=Toggl project: {0}}" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.TempoCategory, StringFormat=Tempo category: {0}}" />
+            <StackPanel Margin="0,6,0,0" Orientation="Horizontal">
+                <Button Command="{Binding LiveValidation.OpenTogglConfirmationCommand}">Create Toggl entry</Button>
+                <Button Margin="8,0,0,0" Command="{Binding LiveValidation.ValidateJiraCommand}">Validate Jira</Button>
+                <Button Margin="8,0,0,0" Command="{Binding LiveValidation.OpenTempoConfirmationCommand}">Create and verify Tempo</Button>
+            </StackPanel>
+        </StackPanel>
+        <StackPanel Margin="0,8,0,0">
+            <StackPanel.Style>
+                <Style TargetType="StackPanel">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers><DataTrigger Binding="{Binding LiveValidation.IsTogglConfirmationVisible}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                </Style>
+            </StackPanel.Style>
+            <TextBlock Text="Create a Toggl entry for this selected item?" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.JiraIssueKey}" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.Comment}" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.Duration, StringFormat={}{0:g}}" />
+            <StackPanel Orientation="Horizontal"><Button Command="{Binding LiveValidation.ConfirmTogglCommand}">Confirm Toggl entry</Button><Button Margin="8,0,0,0" Command="{Binding LiveValidation.CancelTogglConfirmationCommand}">Cancel</Button></StackPanel>
+        </StackPanel>
+        <StackPanel Margin="0,8,0,0">
+            <StackPanel.Style>
+                <Style TargetType="StackPanel">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers><DataTrigger Binding="{Binding LiveValidation.IsTempoConfirmationVisible}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                </Style>
+            </StackPanel.Style>
+            <TextBlock Text="Create and verify a Tempo worklog for this selected item?" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.JiraIssueKey}" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.Comment}" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.Duration, StringFormat={}{0:g}}" />
+            <StackPanel Orientation="Horizontal"><Button Command="{Binding LiveValidation.ConfirmTempoCommand}">Confirm Tempo worklog</Button><Button Margin="8,0,0,0" Command="{Binding LiveValidation.CancelTempoConfirmationCommand}">Cancel</Button></StackPanel>
+        </StackPanel>
+        <TextBlock Margin="0,8,0,0" Text="{Binding LiveValidation.StepStatus}" TextWrapping="Wrap" />
+        <TextBlock Margin="0,4,0,0" Text="{Binding LiveValidation.RecoveryMessage}" Foreground="Firebrick" TextWrapping="Wrap" />
+        <Separator Margin="0,12,0,8" />
+        <TextBlock Text="Daily Slack delivery" FontSize="18" FontWeight="SemiBold" />
         <StackPanel Margin="0,8,0,0">
             <StackPanel.Style>
                 <Style TargetType="StackPanel">
