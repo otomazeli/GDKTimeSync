@@ -25,9 +25,9 @@ public sealed class UserSettingsService : IUserSettingsStore
         try
         {
             var loaded = JsonSerializer.Deserialize<UserSettings>(File.ReadAllText(settingsPath), SerializerOptions) ?? new UserSettings();
-            var sanitized = SanitizeSlackPresentation(loaded, out var changed);
-            if (changed) Save(sanitized);
-            return sanitized;
+            var normalized = NormalizeSettings(loaded, out var changed);
+            if (changed) Save(normalized);
+            return normalized;
         }
         catch (JsonException) { return new UserSettings(); }
     }
@@ -57,6 +57,15 @@ public sealed class UserSettingsService : IUserSettingsStore
         var extraLines = existingLines.Where(line => !IsSensitivePresentationText(line)).ToArray();
         changed = title != settings.SlackTitle || heading != settings.SlackTaskHeading || extraLines.Length != existingLines.Count || !extraLines.SequenceEqual(existingLines);
         return changed ? settings with { SlackTitle = title, SlackTaskHeading = heading, SlackExtraLines = extraLines } : settings;
+    }
+
+    private static UserSettings NormalizeSettings(UserSettings settings, out bool changed)
+    {
+        var sanitized = SanitizeSlackPresentation(settings, out changed);
+        var reminderMode = EndOfDayReminderModes.Normalize(sanitized.EndOfDayReminderMode);
+        if (reminderMode == sanitized.EndOfDayReminderMode) return sanitized;
+        changed = true;
+        return sanitized with { EndOfDayReminderMode = reminderMode };
     }
 
     private static bool IsSensitivePresentationText(string? value)

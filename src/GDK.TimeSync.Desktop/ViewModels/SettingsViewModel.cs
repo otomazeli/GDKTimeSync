@@ -15,6 +15,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
     private string jiraUser = string.Empty;
     private long? togglWorkspaceId;
     private string reviewReminderTime = "16:00";
+    private EndOfDayReminderMode endOfDayReminderMode = EndOfDayReminderMode.Both;
     private string defaultTempoWorkCategory = "DEVELOPMENT";
     private string slackTitle = "Daily update";
     private string slackTaskHeading = "Completed tasks";
@@ -65,6 +66,14 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         set => SetField(ref reviewReminderTime, value);
     }
 
+    public IReadOnlyList<EndOfDayReminderMode> ReminderModeOptions { get; } = Enum.GetValues<EndOfDayReminderMode>();
+
+    public EndOfDayReminderMode EndOfDayReminderMode
+    {
+        get => endOfDayReminderMode;
+        set => SetField(ref endOfDayReminderMode, value);
+    }
+
     public string DefaultTempoWorkCategory
     {
         get => defaultTempoWorkCategory;
@@ -101,6 +110,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             JiraUser = JiraUser,
             TogglWorkspaceId = TogglWorkspaceId,
             ReviewReminderTime = ReviewReminderTime,
+            EndOfDayReminderMode = EndOfDayReminderMode,
             DefaultTempoWorkCategory = DefaultTempoWorkCategory,
             AiEnabled = AiEnabled,
             SlackTitle = SlackTitle,
@@ -115,6 +125,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             JiraUser = JiraUser,
             TogglWorkspaceId = TogglWorkspaceId,
             ReviewReminderTime = ReviewReminderTime,
+            EndOfDayReminderMode = EndOfDayReminderMode,
             DefaultTempoWorkCategory = DefaultTempoWorkCategory,
             AiEnabled = AiEnabled,
             SlackTitle = SlackTitle,
@@ -140,6 +151,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             JiraBaseUrl = normalizedJiraBaseUrl,
             JiraUser = normalizedJiraUser,
             ReviewReminderTime = normalizedReviewReminderTime,
+            EndOfDayReminderMode = EndOfDayReminderModes.Normalize(proposedSettings.EndOfDayReminderMode),
             DefaultTempoWorkCategory = proposedSettings.DefaultTempoWorkCategory.Trim(),
             SlackTitle = NormalizeSlackText(proposedSettings.SlackTitle),
             SlackTaskHeading = NormalizeSlackText(proposedSettings.SlackTaskHeading),
@@ -189,6 +201,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         JiraUser = currentSettings.JiraUser;
         TogglWorkspaceId = currentSettings.TogglWorkspaceId;
         ReviewReminderTime = currentSettings.ReviewReminderTime;
+        EndOfDayReminderMode = EndOfDayReminderModes.Normalize(currentSettings.EndOfDayReminderMode);
         DefaultTempoWorkCategory = currentSettings.DefaultTempoWorkCategory;
         AiEnabled = currentSettings.AiEnabled;
         SlackTitle = currentSettings.SlackTitle;

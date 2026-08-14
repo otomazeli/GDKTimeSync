@@ -7,6 +7,26 @@ namespace GDK.TimeSync.Tests;
 public sealed class DesktopConfigurationTests
 {
     [Fact]
+    public async Task Saving_reminder_mode_persists_a_non_secret_preference()
+    {
+        var settings = new FakeSettingsStore(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" });
+        var credentials = new FakeCredentialStore();
+        var viewModel = new SettingsViewModel(credentials, settings, new ConfigurationStateService(credentials, settings));
+        viewModel.EndOfDayReminderMode = EndOfDayReminderMode.TrayNotificationOnly;
+
+        await viewModel.SaveAsync("https://jira.cgm.ag", null, null);
+
+        Assert.Equal(EndOfDayReminderMode.TrayNotificationOnly, settings.Current.EndOfDayReminderMode);
+        Assert.DoesNotContain("token", JsonSerializer.Serialize(settings.Current), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Invalid_persisted_reminder_mode_loads_as_both()
+    {
+        Assert.Equal(EndOfDayReminderMode.Both, EndOfDayReminderModes.Normalize((EndOfDayReminderMode)999));
+    }
+
+    [Fact]
     public void Settings_json_contains_only_persisted_non_secret_fields()
     {
         var json = JsonSerializer.Serialize(new UserSettings
