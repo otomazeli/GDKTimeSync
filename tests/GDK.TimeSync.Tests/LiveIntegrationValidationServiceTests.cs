@@ -63,7 +63,7 @@ public sealed class LiveIntegrationValidationServiceTests
         Assert.Equal(456L, result.Attempt.TempoWorklogId);
         Assert.Equal(["JiraGet", "TempoCreate", "TempoRead"], calls);
         Assert.Equal(0, attempts.ClaimCount);
-        Assert.Equal(2, attempts.SaveCount);
+        Assert.Equal(3, attempts.SaveCount);
     }
 
     [Theory]
@@ -190,13 +190,15 @@ public sealed class LiveIntegrationValidationServiceTests
         var service = CreateService(new RecordingIntegrationClientFactory(calls), attempts);
 
         var failed = await service.CreateAndVerifyTempoAsync(item);
-        var repeated = await service.CreateAndVerifyTempoAsync(item);
+        var repeated = await CreateService(new RecordingIntegrationClientFactory(calls), attempts).CreateAndVerifyTempoAsync(item);
 
         Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, failed.Attempt.Status);
         Assert.Equal(DeliveryFailureCode.PersistenceFailed, failed.Attempt.FailureCode);
-        Assert.Equal(failed.Attempt, repeated.Attempt);
+        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, repeated.Attempt.Status);
+        Assert.Equal(DeliveryFailureCode.PersistenceFailed, repeated.Attempt.FailureCode);
+        Assert.Null(repeated.Attempt.TempoWorklogId);
         Assert.Equal(["JiraGet", "TempoCreate"], calls);
-        Assert.Equal(2, attempts.SaveCount);
+        Assert.Equal(3, attempts.SaveCount);
     }
 
     [Theory]
@@ -325,7 +327,32 @@ public sealed class LiveIntegrationValidationServiceTests
         Assert.Equal(456L, result.Attempt.TempoWorklogId);
         Assert.Equal(result.Attempt, repeated.Attempt);
         Assert.Equal(["JiraGet", "TempoCreate", "TempoRead"], calls);
-        Assert.Equal(2, attempts.SaveCount);
+        Assert.Equal(3, attempts.SaveCount);
+    }
+
+    [Fact]
+    public async Task CreateTogglAsync_contains_post_write_disposal_failure_as_reconciliation()
+    {
+        var calls = new List<string>();
+        var result = await CreateService(new RecordingIntegrationClientFactory(calls) { ThrowOnTogglDispose = true }, new RecordingAttemptRepository()).CreateTogglAsync(CreateItem());
+
+        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, result.Attempt.Status);
+        Assert.Equal(123L, result.Attempt.TogglEntryId);
+        Assert.Equal(["TogglCreate"], calls);
+    }
+
+    [Fact]
+    public async Task CreateAndVerifyTempoAsync_contains_post_write_disposal_failure_as_reconciliation()
+    {
+        var item = CreateItem();
+        var calls = new List<string>();
+        var attempts = new RecordingAttemptRepository(new DeliveryAttempt(item.Id, 123, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported));
+
+        var result = await CreateService(new RecordingIntegrationClientFactory(calls) { ThrowOnTempoDispose = true }, attempts).CreateAndVerifyTempoAsync(item);
+
+        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, result.Attempt.Status);
+        Assert.Equal(456L, result.Attempt.TempoWorklogId);
+        Assert.Equal(["JiraGet", "TempoCreate", "TempoRead"], calls);
     }
 
     [Fact]
@@ -411,6 +438,8 @@ public sealed class LiveIntegrationValidationServiceTests
         public bool ReturnMismatchedTempoReadDuration { get; init; }
         public bool FailTogglFactory { get; init; }
         public bool FailTempoFactory { get; init; }
+        public bool ThrowOnTogglDispose { get; init; }
+        public bool ThrowOnTempoDispose { get; init; }
         public string? JiraFailureDetail { get; init; }
 
         public Task<ITogglClient> CreateTogglAsync(CancellationToken cancellationToken = default)
@@ -418,7 +447,7 @@ public sealed class LiveIntegrationValidationServiceTests
             if (FailTogglFactory)
                 throw new InvalidOperationException();
             TogglClientCreations++;
-            return Task.FromResult<ITogglClient>(new TogglClient(CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Toggl, FailTogglCreate, null)), new TogglOptions { BaseUrl = "https://validation.example.test/", ApiToken = "unit-token" }));
+            return Task.FromResult<ITogglClient>(new TogglClient(CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Toggl, FailTogglCreate, null), ThrowOnTogglDispose), new TogglOptions { BaseUrl = "https://validation.example.test/", ApiToken = "unit-token" }));
         }
 
         public Task<JiraClient> CreateJiraAsync(CancellationToken cancellationToken = default) => Task.FromResult(new JiraClient(
@@ -431,13 +460,22 @@ public sealed class LiveIntegrationValidationServiceTests
             if (FailTempoFactory)
                 throw new InvalidOperationException();
             TempoClientCreations++;
-            return Task.FromResult(new TempoClient(CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Tempo, false, null, ReturnMismatchedTempoReadId, ReturnMismatchedTempoReadDuration)), new TempoOptions { BaseUrl = "https://validation.example.test/", PersonalAccessToken = "unit-token" }));
+            return Task.FromResult(new TempoClient(CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Tempo, false, null, ReturnMismatchedTempoReadId, ReturnMismatchedTempoReadDuration), ThrowOnTempoDispose), new TempoOptions { BaseUrl = "https://validation.example.test/", PersonalAccessToken = "unit-token" }));
         }
 
-        private static HttpClient CreateHttpClient(HttpMessageHandler handler) => new(handler) { BaseAddress = new Uri("https://validation.example.test/") };
+        private static HttpClient CreateHttpClient(HttpMessageHandler handler, bool throwOnDispose = false) => new ThrowingDisposeHttpClient(handler, throwOnDispose) { BaseAddress = new Uri("https://validation.example.test/") };
     }
 
     private enum IntegrationTarget { Toggl, Jira, Tempo }
+
+    private sealed class ThrowingDisposeHttpClient(HttpMessageHandler handler, bool throwOnDispose) : HttpClient(handler, disposeHandler: false)
+    {
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (throwOnDispose) throw new InvalidOperationException();
+        }
+    }
 
     private sealed class RecordingHandler(List<string> calls, IntegrationTarget target, bool failCreate, string? jiraFailureDetail, bool returnMismatchedTempoReadId = false, bool returnMismatchedTempoReadDuration = false) : HttpMessageHandler
     {

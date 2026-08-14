@@ -48,24 +48,24 @@ public sealed class LiveIntegrationValidationService(
             return await PersistPreWriteResultAsync(LiveValidationStep.Toggl, claim.Attempt, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed, "Toggl creation failed.");
         }
 
-        using (toggl)
+        var afterWrite = claim.Attempt;
+        try
         {
-            var afterWrite = claim.Attempt;
-            try
+            using (toggl)
             {
                 var entry = await toggl.CreateTimeEntryAsync(request, cancellationToken);
                 afterWrite = claim.Attempt with { TogglEntryId = entry.Id, Status = DeliveryAttemptStatus.InProgress, FailureCode = null };
                 await attempts.SaveAsync(afterWrite, CancellationToken.None);
                 return new LiveValidationResult(LiveValidationStep.Toggl, afterWrite, "Toggl entry created.");
             }
-            catch (OperationCanceledException)
-            {
-                return await ReconciliationResultAsync(LiveValidationStep.Toggl, afterWrite, DeliveryFailureCode.Cancelled, "Toggl reconciliation is required.");
-            }
-            catch
-            {
-                return await ReconciliationResultAsync(LiveValidationStep.Toggl, afterWrite, DeliveryFailureCode.TogglFailed, "Toggl reconciliation is required.");
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            return await ReconciliationResultAsync(LiveValidationStep.Toggl, afterWrite, DeliveryFailureCode.Cancelled, "Toggl reconciliation is required.");
+        }
+        catch
+        {
+            return await ReconciliationResultAsync(LiveValidationStep.Toggl, afterWrite, DeliveryFailureCode.TogglFailed, "Toggl reconciliation is required.");
         }
     }
 
@@ -152,24 +152,34 @@ public sealed class LiveIntegrationValidationService(
             return FailedResult(LiveValidationStep.Tempo, item.Id, DeliveryFailureCode.TempoFailed, "Tempo creation failed.", current);
         }
 
-        using (tempo)
+        var preWriteMarker = current with { Status = DeliveryAttemptStatus.ReconciliationRequired, FailureCode = DeliveryFailureCode.PersistenceFailed };
+        try
         {
-            var afterWrite = current;
-            try
+            await attempts.SaveAsync(preWriteMarker, CancellationToken.None);
+        }
+        catch
+        {
+            return new LiveValidationResult(LiveValidationStep.Tempo, preWriteMarker, "Reconciliation is required.");
+        }
+
+        var afterWrite = current;
+        try
+        {
+            using (tempo)
             {
                 var created = await tempo.CreateWorklogAsync(request with { OriginTaskId = jiraIssueId }, cancellationToken);
                 afterWrite = current with { TempoWorklogId = created.TempoWorklogId, Status = DeliveryAttemptStatus.InProgress, FailureCode = null };
                 await attempts.SaveAsync(afterWrite, CancellationToken.None);
                 return await VerifyTempoAsync(tempo, afterWrite, timing.DurationSeconds, cancellationToken);
             }
-            catch (OperationCanceledException)
-            {
-                return await ReconciliationResultAsync(LiveValidationStep.Tempo, afterWrite, DeliveryFailureCode.Cancelled, "Tempo reconciliation is required.");
-            }
-            catch
-            {
-                return await ReconciliationResultAsync(LiveValidationStep.Tempo, afterWrite, DeliveryFailureCode.TempoFailed, "Tempo reconciliation is required.");
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            return await ReconciliationResultAsync(LiveValidationStep.Tempo, afterWrite, DeliveryFailureCode.Cancelled, "Tempo reconciliation is required.");
+        }
+        catch
+        {
+            return await ReconciliationResultAsync(LiveValidationStep.Tempo, afterWrite, DeliveryFailureCode.TempoFailed, "Tempo reconciliation is required.");
         }
     }
 
