@@ -66,12 +66,14 @@ public sealed class LiveIntegrationValidationServiceTests
         Assert.Equal(2, attempts.SaveCount);
     }
 
-    [Fact]
-    public async Task CreateAndVerifyTempoAsync_requires_reconciliation_when_readback_does_not_match()
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task CreateAndVerifyTempoAsync_requires_reconciliation_when_readback_id_or_duration_does_not_match(bool mismatchId, bool mismatchDuration)
     {
         var item = CreateItem();
         var calls = new List<string>();
-        var clients = new RecordingIntegrationClientFactory(calls) { ReturnMismatchedTempoRead = true };
+        var clients = new RecordingIntegrationClientFactory(calls) { ReturnMismatchedTempoReadId = mismatchId, ReturnMismatchedTempoReadDuration = mismatchDuration };
         var attempts = new RecordingAttemptRepository(new DeliveryAttempt(item.Id, 123, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported));
         var service = CreateService(clients, attempts);
 
@@ -80,6 +82,22 @@ public sealed class LiveIntegrationValidationServiceTests
         Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, result.Attempt.Status);
         Assert.Equal(456L, result.Attempt.TempoWorklogId);
         Assert.Equal(["JiraGet", "TempoCreate", "TempoRead"], calls);
+    }
+
+    [Fact]
+    public async Task CreateAndVerifyTempoAsync_reads_existing_tempo_id_without_creating_another_worklog()
+    {
+        var item = CreateItem();
+        var calls = new List<string>();
+        var existing = new DeliveryAttempt(item.Id, 123, 456, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported);
+        var attempts = new RecordingAttemptRepository(existing);
+
+        var result = await CreateService(new RecordingIntegrationClientFactory(calls), attempts).CreateAndVerifyTempoAsync(item);
+
+        Assert.Equal(DeliveryAttemptStatus.Succeeded, result.Attempt.Status);
+        Assert.Equal(456L, result.Attempt.TempoWorklogId);
+        Assert.Equal(["TempoRead"], calls);
+        Assert.Equal(1, attempts.SaveCount);
     }
 
     [Theory]
@@ -139,6 +157,149 @@ public sealed class LiveIntegrationValidationServiceTests
     }
 
     [Fact]
+    public async Task CreateTogglAsync_keeps_a_no_resend_barrier_when_both_post_write_persistence_saves_fail()
+    {
+        var calls = new List<string>();
+        var attempts = new RecordingAttemptRepository
+        {
+            FailuresRemaining = 2,
+            FailWhen = value => value.TogglEntryId is not null
+        };
+        var service = CreateService(new RecordingIntegrationClientFactory(calls), attempts);
+
+        var failed = await service.CreateTogglAsync(CreateItem());
+        var repeated = await service.CreateTogglAsync(CreateItem() with { Id = failed.Attempt.PlannedWorkItemId });
+
+        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, failed.Attempt.Status);
+        Assert.Equal(DeliveryFailureCode.PersistenceFailed, failed.Attempt.FailureCode);
+        Assert.Equal(failed.Attempt, repeated.Attempt);
+        Assert.Equal(["TogglCreate"], calls);
+        Assert.Equal(2, attempts.SaveCount);
+    }
+
+    [Fact]
+    public async Task CreateAndVerifyTempoAsync_keeps_a_no_resend_barrier_when_both_post_write_persistence_saves_fail()
+    {
+        var item = CreateItem();
+        var calls = new List<string>();
+        var attempts = new RecordingAttemptRepository(new DeliveryAttempt(item.Id, 123, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported))
+        {
+            FailuresRemaining = 2,
+            FailWhen = value => value.TempoWorklogId is not null
+        };
+        var service = CreateService(new RecordingIntegrationClientFactory(calls), attempts);
+
+        var failed = await service.CreateAndVerifyTempoAsync(item);
+        var repeated = await service.CreateAndVerifyTempoAsync(item);
+
+        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, failed.Attempt.Status);
+        Assert.Equal(DeliveryFailureCode.PersistenceFailed, failed.Attempt.FailureCode);
+        Assert.Equal(failed.Attempt, repeated.Attempt);
+        Assert.Equal(["JiraGet", "TempoCreate"], calls);
+        Assert.Equal(2, attempts.SaveCount);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task CreateTogglAsync_blocks_missing_or_inconsistent_selected_times_before_claim_or_client_creation(int timeProblem)
+    {
+        var item = InvalidTimingItem(timeProblem);
+        var calls = new List<string>();
+        var clients = new RecordingIntegrationClientFactory(calls);
+        var attempts = new RecordingAttemptRepository();
+
+        var result = await CreateService(clients, attempts).CreateTogglAsync(item);
+
+        Assert.Equal(DeliveryAttemptStatus.Failed, result.Attempt.Status);
+        Assert.Empty(calls);
+        Assert.Equal(0, attempts.ClaimCount);
+        Assert.Equal(0, attempts.SaveCount);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task CreateAndVerifyTempoAsync_blocks_missing_or_inconsistent_selected_times_before_client_creation(int timeProblem)
+    {
+        var item = InvalidTimingItem(timeProblem);
+        var calls = new List<string>();
+        var clients = new RecordingIntegrationClientFactory(calls);
+        var attempts = new RecordingAttemptRepository(new DeliveryAttempt(item.Id, 123, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported));
+
+        var result = await CreateService(clients, attempts).CreateAndVerifyTempoAsync(item);
+
+        Assert.Equal(DeliveryAttemptStatus.Failed, result.Attempt.Status);
+        Assert.Empty(calls);
+        Assert.Equal(0, attempts.SaveCount);
+    }
+
+    [Fact]
+    public async Task CreateTogglAsync_prewrite_cancellation_is_cancelled_before_claim_or_client_creation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var calls = new List<string>();
+        var attempts = new RecordingAttemptRepository();
+
+        var result = await CreateService(new RecordingIntegrationClientFactory(calls), attempts).CreateTogglAsync(CreateItem(), cancellation.Token);
+
+        Assert.Equal(DeliveryAttemptStatus.Cancelled, result.Attempt.Status);
+        Assert.Empty(calls);
+        Assert.Equal(0, attempts.ClaimCount);
+        Assert.Equal(0, attempts.SaveCount);
+    }
+
+    [Fact]
+    public async Task CreateAndVerifyTempoAsync_prewrite_cancellation_is_cancelled_before_client_creation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var item = CreateItem();
+        var calls = new List<string>();
+        var attempts = new RecordingAttemptRepository(new DeliveryAttempt(item.Id, 123, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported));
+
+        var result = await CreateService(new RecordingIntegrationClientFactory(calls), attempts).CreateAndVerifyTempoAsync(item, cancellation.Token);
+
+        Assert.Equal(DeliveryAttemptStatus.Cancelled, result.Attempt.Status);
+        Assert.Empty(calls);
+        Assert.Equal(0, attempts.SaveCount);
+    }
+
+    [Fact]
+    public async Task CreateTogglAsync_preflight_and_factory_failures_are_failed_without_reconciliation()
+    {
+        var preflightCalls = new List<string>();
+        var preflight = await CreateService(new RecordingIntegrationClientFactory(preflightCalls), new RecordingAttemptRepository(), new UserSettings { JiraUser = "planner" }).CreateTogglAsync(CreateItem());
+        var factoryCalls = new List<string>();
+        var factory = await CreateService(new RecordingIntegrationClientFactory(factoryCalls) { FailTogglFactory = true }, new RecordingAttemptRepository()).CreateTogglAsync(CreateItem());
+
+        Assert.Equal(DeliveryAttemptStatus.Failed, preflight.Attempt.Status);
+        Assert.Equal(DeliveryAttemptStatus.Failed, factory.Attempt.Status);
+        Assert.NotEqual(DeliveryAttemptStatus.ReconciliationRequired, factory.Attempt.Status);
+        Assert.Empty(preflightCalls);
+        Assert.Empty(factoryCalls);
+    }
+
+    [Fact]
+    public async Task CreateAndVerifyTempoAsync_factory_failure_is_failed_without_reconciliation()
+    {
+        var item = CreateItem();
+        var calls = new List<string>();
+        var clients = new RecordingIntegrationClientFactory(calls) { FailTempoFactory = true };
+        var attempts = new RecordingAttemptRepository(new DeliveryAttempt(item.Id, 123, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported));
+
+        var result = await CreateService(clients, attempts).CreateAndVerifyTempoAsync(item);
+
+        Assert.Equal(DeliveryAttemptStatus.Failed, result.Attempt.Status);
+        Assert.NotEqual(DeliveryAttemptStatus.ReconciliationRequired, result.Attempt.Status);
+        Assert.Equal(["JiraGet"], calls);
+        Assert.Equal(0, attempts.SaveCount);
+    }
+
+    [Fact]
     public async Task CreateAndVerifyTempoAsync_marks_post_write_cancellation_for_reconciliation_without_deleting()
     {
         var item = CreateItem();
@@ -178,8 +339,8 @@ public sealed class LiveIntegrationValidationServiceTests
         Assert.DoesNotContain(sentinel, result.ToString(), StringComparison.Ordinal);
     }
 
-    private static LiveIntegrationValidationService CreateService(RecordingIntegrationClientFactory clients, RecordingAttemptRepository attempts) =>
-        new(clients, new FixedSettingsStore(), attempts);
+    private static LiveIntegrationValidationService CreateService(RecordingIntegrationClientFactory clients, RecordingAttemptRepository attempts, UserSettings? settings = null) =>
+        new(clients, new FixedSettingsStore(settings), attempts);
 
     private static PlannedWorkItem CreateItem() => PlannedWorkItem.Create(
         new DateOnly(2026, 8, 14),
@@ -187,11 +348,20 @@ public sealed class LiveIntegrationValidationServiceTests
         jiraIssueKey: "GDK-42",
         comment: "Validate integrations",
         duration: TimeSpan.FromMinutes(30),
-        start: new TimeOnly(9, 0));
+        start: new TimeOnly(9, 0),
+        end: new TimeOnly(9, 30));
 
-    private sealed class FixedSettingsStore : IUserSettingsStore
+    private static PlannedWorkItem InvalidTimingItem(int timeProblem) => timeProblem switch
     {
-        public UserSettings Load() => new() { TogglWorkspaceId = 77, JiraUser = "planner" };
+        0 => CreateItem() with { Start = null },
+        1 => CreateItem() with { End = null },
+        2 => CreateItem() with { End = new TimeOnly(9, 45) },
+        _ => throw new ArgumentOutOfRangeException(nameof(timeProblem))
+    };
+
+    private sealed class FixedSettingsStore(UserSettings? settings = null) : IUserSettingsStore
+    {
+        public UserSettings Load() => settings ?? new UserSettings { TogglWorkspaceId = 77, JiraUser = "planner" };
         public void Save(UserSettings settings) => throw new NotSupportedException();
     }
 
@@ -237,11 +407,16 @@ public sealed class LiveIntegrationValidationServiceTests
         public int TogglClientCreations { get; private set; }
         public int TempoClientCreations { get; private set; }
         public bool FailTogglCreate { get; init; }
-        public bool ReturnMismatchedTempoRead { get; init; }
+        public bool ReturnMismatchedTempoReadId { get; init; }
+        public bool ReturnMismatchedTempoReadDuration { get; init; }
+        public bool FailTogglFactory { get; init; }
+        public bool FailTempoFactory { get; init; }
         public string? JiraFailureDetail { get; init; }
 
         public Task<ITogglClient> CreateTogglAsync(CancellationToken cancellationToken = default)
         {
+            if (FailTogglFactory)
+                throw new InvalidOperationException();
             TogglClientCreations++;
             return Task.FromResult<ITogglClient>(new TogglClient(CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Toggl, FailTogglCreate, null)), new TogglOptions { BaseUrl = "https://validation.example.test/", ApiToken = "unit-token" }));
         }
@@ -253,8 +428,10 @@ public sealed class LiveIntegrationValidationServiceTests
 
         public Task<TempoClient> CreateTempoAsync(CancellationToken cancellationToken = default)
         {
+            if (FailTempoFactory)
+                throw new InvalidOperationException();
             TempoClientCreations++;
-            return Task.FromResult(new TempoClient(CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Tempo, false, null, ReturnMismatchedTempoRead)), new TempoOptions { BaseUrl = "https://validation.example.test/", PersonalAccessToken = "unit-token" }));
+            return Task.FromResult(new TempoClient(CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Tempo, false, null, ReturnMismatchedTempoReadId, ReturnMismatchedTempoReadDuration)), new TempoOptions { BaseUrl = "https://validation.example.test/", PersonalAccessToken = "unit-token" }));
         }
 
         private static HttpClient CreateHttpClient(HttpMessageHandler handler) => new(handler) { BaseAddress = new Uri("https://validation.example.test/") };
@@ -262,7 +439,7 @@ public sealed class LiveIntegrationValidationServiceTests
 
     private enum IntegrationTarget { Toggl, Jira, Tempo }
 
-    private sealed class RecordingHandler(List<string> calls, IntegrationTarget target, bool failCreate, string? jiraFailureDetail, bool returnMismatchedTempoRead = false) : HttpMessageHandler
+    private sealed class RecordingHandler(List<string> calls, IntegrationTarget target, bool failCreate, string? jiraFailureDetail, bool returnMismatchedTempoReadId = false, bool returnMismatchedTempoReadDuration = false) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -286,7 +463,7 @@ public sealed class LiveIntegrationValidationServiceTests
                 "TogglCreate" => Json(new TogglTimeEntry { Id = 123, Description = "Validate integrations", Start = new DateTimeOffset(2026, 8, 14, 9, 0, 0, TimeSpan.Zero), Stop = new DateTimeOffset(2026, 8, 14, 9, 30, 0, TimeSpan.Zero) }),
                 "JiraGet" => Json(new { id = "jira-42", key = "GDK-42", fields = new { summary = "Validation" } }),
                 "TempoCreate" => Json(new TempoWorklog(456, "planner", "jira-42", new DateTime(2026, 8, 14, 9, 0, 0), 1800, "Validate integrations")),
-                "TempoRead" => Json(new TempoWorklog(returnMismatchedTempoRead ? 457 : 456, "planner", "jira-42", new DateTime(2026, 8, 14, 9, 0, 0), returnMismatchedTempoRead ? 1799 : 1800, "Validate integrations")),
+                "TempoRead" => Json(new TempoWorklog(returnMismatchedTempoReadId ? 457 : 456, "planner", "jira-42", new DateTime(2026, 8, 14, 9, 0, 0), returnMismatchedTempoReadDuration ? 1799 : 1800, "Validate integrations")),
                 _ => throw new ArgumentOutOfRangeException()
             });
         }
