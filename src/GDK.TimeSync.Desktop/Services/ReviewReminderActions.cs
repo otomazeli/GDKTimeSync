@@ -9,3 +9,16 @@ public sealed record ReviewReminderActions(bool ShowTrayNotification, bool OpenR
         _ => new(true, true)
     };
 }
+
+internal static class ReviewReminderPresenter
+{
+    public static async Task PresentAsync(
+        EndOfDayReminderMode mode,
+        Action showTrayNotification,
+        Func<Task> openReviewWindow)
+    {
+        var actions = ReviewReminderActions.From(mode);
+        if (actions.ShowTrayNotification) showTrayNotification();
+        if (actions.OpenReviewWindow) await openReviewWindow();
+    }
+}

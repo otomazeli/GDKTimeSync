@@ -86,6 +86,20 @@ public sealed class UserSettingsServiceTests : IDisposable
         Assert.Equal(EndOfDayReminderMode.Both, persisted!.EndOfDayReminderMode);
     }
 
+    [Fact]
+    public void Load_returns_the_safe_mode_when_the_corrective_rewrite_is_blocked()
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "settings.json");
+        File.WriteAllText(path, "{\"EndOfDayReminderMode\":999}");
+        using var readLock = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var service = new UserSettingsService(path);
+
+        var loaded = service.Load();
+
+        Assert.Equal(EndOfDayReminderMode.Both, loaded.EndOfDayReminderMode);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(directory))

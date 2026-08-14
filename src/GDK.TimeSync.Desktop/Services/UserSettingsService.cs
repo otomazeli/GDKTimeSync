@@ -26,7 +26,12 @@ public sealed class UserSettingsService : IUserSettingsStore
         {
             var loaded = JsonSerializer.Deserialize<UserSettings>(File.ReadAllText(settingsPath), SerializerOptions) ?? new UserSettings();
             var normalized = NormalizeSettings(loaded, out var changed);
-            if (changed) Save(normalized);
+            if (changed)
+            {
+                try { Save(normalized); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
             return normalized;
         }
         catch (JsonException) { return new UserSettings(); }

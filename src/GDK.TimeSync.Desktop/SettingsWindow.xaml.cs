@@ -30,7 +30,7 @@ public partial class SettingsWindow : Window
         TogglWorkspaceIdTextBox.Text = viewModel.TogglWorkspaceId?.ToString() ?? string.Empty;
         ReviewReminderTimeTextBox.Text = viewModel.ReviewReminderTime;
         EndOfDayReminderModeComboBox.ItemsSource = viewModel.ReminderModeOptions;
-        EndOfDayReminderModeComboBox.SelectedItem = viewModel.EndOfDayReminderMode;
+        EndOfDayReminderModeComboBox.SelectedValue = viewModel.EndOfDayReminderMode;
         DefaultTempoWorkCategoryTextBox.Text = viewModel.DefaultTempoWorkCategory;
         AiEnabledCheckBox.IsChecked = viewModel.AiEnabled;
         SlackTitleTextBox.Text = viewModel.SlackTitle;
@@ -52,7 +52,7 @@ public partial class SettingsWindow : Window
                 JiraUser = JiraUserTextBox.Text.Trim(),
                 TogglWorkspaceId = string.IsNullOrWhiteSpace(TogglWorkspaceIdTextBox.Text) ? null : workspaceId,
                 ReviewReminderTime = ReviewReminderTimeTextBox.Text.Trim(),
-                EndOfDayReminderMode = EndOfDayReminderModeComboBox.SelectedItem is EndOfDayReminderMode mode ? mode : EndOfDayReminderMode.Both,
+                EndOfDayReminderMode = EndOfDayReminderModeComboBox.SelectedValue is EndOfDayReminderMode mode ? mode : EndOfDayReminderMode.Both,
                 DefaultTempoWorkCategory = DefaultTempoWorkCategoryTextBox.Text.Trim(),
                 AiEnabled = AiEnabledCheckBox.IsChecked == true,
                 SlackTitle = SlackTitleTextBox.Text.Trim(),

@@ -27,6 +27,20 @@ public sealed class DesktopConfigurationTests
     }
 
     [Fact]
+    public void Reminder_mode_options_keep_enum_values_and_show_user_labels()
+    {
+        var credentials = new FakeCredentialStore();
+        var settings = new FakeSettingsStore(new UserSettings());
+        var viewModel = new SettingsViewModel(credentials, settings, new ConfigurationStateService(credentials, settings));
+
+        Assert.Collection(
+            viewModel.ReminderModeOptions,
+            option => { Assert.Equal(EndOfDayReminderMode.TrayNotificationOnly, option.Value); Assert.Equal("Tray notification only", option.Label); },
+            option => { Assert.Equal(EndOfDayReminderMode.OpenReviewOnly, option.Value); Assert.Equal("Open Review window only", option.Label); },
+            option => { Assert.Equal(EndOfDayReminderMode.Both, option.Value); Assert.Equal("Both", option.Label); });
+    }
+
+    [Fact]
     public void Settings_json_contains_only_persisted_non_secret_fields()
     {
         var json = JsonSerializer.Serialize(new UserSettings

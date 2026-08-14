@@ -71,7 +71,7 @@ public partial class App : System.Windows.Application
     {
         try
         {
-            ReminderLifecycle.StopThenAsync(DetachReminderService(), OnReviewDue, static () => Task.CompletedTask).GetAwaiter().GetResult();
+            ReminderLifecycle.BeginStop(DetachReminderService(), OnReviewDue);
         }
         finally
         {
@@ -137,12 +137,11 @@ public partial class App : System.Windows.Application
     {
         if (isExiting || trayIcon is null || serviceProvider is null) return;
 
-        var actions = ReviewReminderActions.From(mode);
-        if (actions.ShowTrayNotification) trayIcon.ShowReviewReminder();
-        if (!actions.OpenReviewWindow) return;
-
-        ShowMainWindow();
-        await serviceProvider.GetRequiredService<ShellViewModel>().NavigateAsync(NavigationPage.Review);
+        await ReviewReminderPresenter.PresentAsync(mode, trayIcon.ShowReviewReminder, async () =>
+        {
+            ShowMainWindow();
+            await serviceProvider.GetRequiredService<ShellViewModel>().NavigateAsync(NavigationPage.Review);
+        });
     }
 
     private IEndOfDayReminderService? DetachReminderService()

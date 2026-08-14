@@ -5,6 +5,19 @@ namespace GDK.TimeSync.Tests;
 public sealed class EndOfDayReminderServiceTests
 {
     [Fact]
+    public async Task Direct_exit_begins_stopping_without_waiting_for_the_timer_loop()
+    {
+        var reminder = new IncompleteStopReminderService();
+        EventHandler<ReviewDueEventArgs> handler = (_, _) => { };
+        reminder.ReviewDue += handler;
+
+        await Task.Run(() => ReminderLifecycle.BeginStop(reminder, handler)).WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Equal(1, reminder.StopCalls);
+        Assert.Equal(0, reminder.SubscriptionCount);
+    }
+
+    [Fact]
     public async Task Stopping_a_faulting_reminder_still_runs_the_remaining_exit_action()
     {
         var reminder = new ThrowingStopReminderService();
@@ -137,6 +150,24 @@ public sealed class EndOfDayReminderServiceTests
             StopCalls++;
             return Task.FromException(new InvalidOperationException("Test-only stop failure."));
         }
+    }
+
+    private sealed class IncompleteStopReminderService : IEndOfDayReminderService
+    {
+        private EventHandler<ReviewDueEventArgs>? reviewDue;
+        private readonly TaskCompletionSource stopCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int StopCalls { get; private set; }
+        public int SubscriptionCount { get; private set; }
+
+        public event EventHandler<ReviewDueEventArgs>? ReviewDue
+        {
+            add { reviewDue += value; SubscriptionCount++; }
+            remove { reviewDue -= value; SubscriptionCount--; }
+        }
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken = default) { StopCalls++; return stopCompletion.Task; }
     }
 
     private sealed class FakeTimeProvider(DateTimeOffset now) : TimeProvider

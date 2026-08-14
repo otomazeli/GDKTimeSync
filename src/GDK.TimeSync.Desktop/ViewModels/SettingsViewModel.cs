@@ -5,6 +5,8 @@ using GDK.TimeSync.Desktop.Services;
 
 namespace GDK.TimeSync.Desktop.ViewModels;
 
+public sealed record ReminderModeOption(EndOfDayReminderMode Value, string Label);
+
 public sealed class SettingsViewModel(ICredentialStore credentials, IUserSettingsStore settings, IConfigurationStateService configurationState) : INotifyPropertyChanged
 {
     private bool isTogglTokenConfigured;
@@ -66,7 +68,12 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         set => SetField(ref reviewReminderTime, value);
     }
 
-    public IReadOnlyList<EndOfDayReminderMode> ReminderModeOptions { get; } = Enum.GetValues<EndOfDayReminderMode>();
+    public IReadOnlyList<ReminderModeOption> ReminderModeOptions { get; } =
+    [
+        new(EndOfDayReminderMode.TrayNotificationOnly, "Tray notification only"),
+        new(EndOfDayReminderMode.OpenReviewOnly, "Open Review window only"),
+        new(EndOfDayReminderMode.Both, "Both")
+    ];
 
     public EndOfDayReminderMode EndOfDayReminderMode
     {

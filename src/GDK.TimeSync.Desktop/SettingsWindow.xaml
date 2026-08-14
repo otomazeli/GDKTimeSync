@@ -16,7 +16,7 @@
             <TextBlock Text="End-of-day review reminder (HH:mm)" />
             <TextBox x:Name="ReviewReminderTimeTextBox" Margin="0,5,0,14" />
             <TextBlock Text="End-of-day reminder presentation" />
-            <ComboBox x:Name="EndOfDayReminderModeComboBox" Margin="0,5,0,14" />
+            <ComboBox x:Name="EndOfDayReminderModeComboBox" Margin="0,5,0,14" DisplayMemberPath="Label" SelectedValuePath="Value" />
             <TextBlock Text="Default Tempo work category" />
             <TextBox x:Name="DefaultTempoWorkCategoryTextBox" Margin="0,5,0,14" />
             <CheckBox x:Name="AiEnabledCheckBox" Margin="0,0,0,18" Content="Enable optional AI assistance" />
