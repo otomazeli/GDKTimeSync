@@ -159,6 +159,14 @@ public sealed class LiveIntegrationValidationService(
         }
         catch
         {
+            try
+            {
+                tempo.Dispose();
+            }
+            catch
+            {
+            }
+
             return new LiveValidationResult(LiveValidationStep.Tempo, preWriteMarker, "Reconciliation is required.");
         }
 

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
 using GDK.TimeSync.Jira;
+using GDK.TimeSync.Persistence;
 using GDK.TimeSync.Tempo;
 using GDK.TimeSync.Toggl;
 
@@ -181,24 +182,53 @@ public sealed class LiveIntegrationValidationServiceTests
     public async Task CreateAndVerifyTempoAsync_keeps_a_no_resend_barrier_when_both_post_write_persistence_saves_fail()
     {
         var item = CreateItem();
+        var databasePath = Path.Combine(Path.GetTempPath(), $"GDK.TimeSync.LiveValidation.{Guid.NewGuid():N}.db");
+        try
+        {
+            var firstRepository = new SqliteDeliveryAttemptRepository(new SqliteDatabase(databasePath));
+            await firstRepository.SaveAsync(new DeliveryAttempt(item.Id, 123, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported));
+            var firstAttempts = new FailureInjectingAttemptRepository(firstRepository)
+            {
+                FailuresRemaining = 2,
+                FailWhen = value => value.TempoWorklogId is not null
+            };
+            var firstCalls = new List<string>();
+
+            var failed = await CreateService(new RecordingIntegrationClientFactory(firstCalls), firstAttempts).CreateAndVerifyTempoAsync(item);
+            var resumedCalls = new List<string>();
+            var repeated = await CreateService(new RecordingIntegrationClientFactory(resumedCalls), new SqliteDeliveryAttemptRepository(new SqliteDatabase(databasePath))).CreateAndVerifyTempoAsync(item);
+
+            Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, failed.Attempt.Status);
+            Assert.Equal(DeliveryFailureCode.PersistenceFailed, failed.Attempt.FailureCode);
+            Assert.Equal(["JiraGet", "TempoCreate"], firstCalls);
+            Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, repeated.Attempt.Status);
+            Assert.Equal(DeliveryFailureCode.PersistenceFailed, repeated.Attempt.FailureCode);
+            Assert.Empty(resumedCalls);
+        }
+        finally
+        {
+            if (File.Exists(databasePath)) File.Delete(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task CreateAndVerifyTempoAsync_disposes_created_client_when_durable_marker_save_fails()
+    {
+        var item = CreateItem();
         var calls = new List<string>();
         var attempts = new RecordingAttemptRepository(new DeliveryAttempt(item.Id, 123, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported))
         {
-            FailuresRemaining = 2,
-            FailWhen = value => value.TempoWorklogId is not null
+            FailuresRemaining = 1,
+            FailWhen = value => value is { TempoWorklogId: null, Status: DeliveryAttemptStatus.ReconciliationRequired }
         };
-        var service = CreateService(new RecordingIntegrationClientFactory(calls), attempts);
+        var clients = new RecordingIntegrationClientFactory(calls);
 
-        var failed = await service.CreateAndVerifyTempoAsync(item);
-        var repeated = await CreateService(new RecordingIntegrationClientFactory(calls), attempts).CreateAndVerifyTempoAsync(item);
+        var result = await CreateService(clients, attempts).CreateAndVerifyTempoAsync(item);
 
-        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, failed.Attempt.Status);
-        Assert.Equal(DeliveryFailureCode.PersistenceFailed, failed.Attempt.FailureCode);
-        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, repeated.Attempt.Status);
-        Assert.Equal(DeliveryFailureCode.PersistenceFailed, repeated.Attempt.FailureCode);
-        Assert.Null(repeated.Attempt.TempoWorklogId);
-        Assert.Equal(["JiraGet", "TempoCreate"], calls);
-        Assert.Equal(3, attempts.SaveCount);
+        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, result.Attempt.Status);
+        Assert.Equal(DeliveryFailureCode.PersistenceFailed, result.Attempt.FailureCode);
+        Assert.Equal(["JiraGet"], calls);
+        Assert.True(Assert.Single(clients.TempoHttpClients).WasDisposed);
     }
 
     [Theory]
@@ -366,7 +396,7 @@ public sealed class LiveIntegrationValidationServiceTests
         Assert.DoesNotContain(sentinel, result.ToString(), StringComparison.Ordinal);
     }
 
-    private static LiveIntegrationValidationService CreateService(RecordingIntegrationClientFactory clients, RecordingAttemptRepository attempts, UserSettings? settings = null) =>
+    private static LiveIntegrationValidationService CreateService(RecordingIntegrationClientFactory clients, IDeliveryAttemptRepository attempts, UserSettings? settings = null) =>
         new(clients, new FixedSettingsStore(settings), attempts);
 
     private static PlannedWorkItem CreateItem() => PlannedWorkItem.Create(
@@ -429,8 +459,30 @@ public sealed class LiveIntegrationValidationServiceTests
         }
     }
 
+    private sealed class FailureInjectingAttemptRepository(IDeliveryAttemptRepository inner) : IDeliveryAttemptRepository
+    {
+        public Func<DeliveryAttempt, bool>? FailWhen { get; init; }
+        public int FailuresRemaining { get; set; }
+
+        public Task<DeliveryAttempt?> GetAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default) => inner.GetAsync(plannedWorkItemId, cancellationToken);
+        public Task<IReadOnlyList<DeliveryAttempt>> ListAsync(CancellationToken cancellationToken = default) => inner.ListAsync(cancellationToken);
+        public Task<DeliveryAttemptClaim> ClaimAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default) => inner.ClaimAsync(plannedWorkItemId, cancellationToken);
+
+        public Task SaveAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default)
+        {
+            if (FailuresRemaining > 0 && FailWhen?.Invoke(attempt) is true)
+            {
+                FailuresRemaining--;
+                throw new InvalidOperationException();
+            }
+
+            return inner.SaveAsync(attempt, cancellationToken);
+        }
+    }
+
     private sealed class RecordingIntegrationClientFactory(List<string> calls) : IIntegrationClientFactory
     {
+        public List<ThrowingDisposeHttpClient> TempoHttpClients { get; } = [];
         public int TogglClientCreations { get; private set; }
         public int TempoClientCreations { get; private set; }
         public bool FailTogglCreate { get; init; }
@@ -460,18 +512,23 @@ public sealed class LiveIntegrationValidationServiceTests
             if (FailTempoFactory)
                 throw new InvalidOperationException();
             TempoClientCreations++;
-            return Task.FromResult(new TempoClient(CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Tempo, false, null, ReturnMismatchedTempoReadId, ReturnMismatchedTempoReadDuration), ThrowOnTempoDispose), new TempoOptions { BaseUrl = "https://validation.example.test/", PersonalAccessToken = "unit-token" }));
+            var httpClient = CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Tempo, false, null, ReturnMismatchedTempoReadId, ReturnMismatchedTempoReadDuration), ThrowOnTempoDispose);
+            TempoHttpClients.Add(httpClient);
+            return Task.FromResult(new TempoClient(httpClient, new TempoOptions { BaseUrl = "https://validation.example.test/", PersonalAccessToken = "unit-token" }));
         }
 
-        private static HttpClient CreateHttpClient(HttpMessageHandler handler, bool throwOnDispose = false) => new ThrowingDisposeHttpClient(handler, throwOnDispose) { BaseAddress = new Uri("https://validation.example.test/") };
+        private static ThrowingDisposeHttpClient CreateHttpClient(HttpMessageHandler handler, bool throwOnDispose = false) => new(handler, throwOnDispose) { BaseAddress = new Uri("https://validation.example.test/") };
     }
 
     private enum IntegrationTarget { Toggl, Jira, Tempo }
 
     private sealed class ThrowingDisposeHttpClient(HttpMessageHandler handler, bool throwOnDispose) : HttpClient(handler, disposeHandler: false)
     {
+        public bool WasDisposed { get; private set; }
+
         protected override void Dispose(bool disposing)
         {
+            WasDisposed = true;
             base.Dispose(disposing);
             if (throwOnDispose) throw new InvalidOperationException();
         }
