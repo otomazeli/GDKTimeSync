@@ -37,7 +37,10 @@ public sealed class SqliteDatabase
             tempo_worklog_id INTEGER NULL,
             status INTEGER NOT NULL,
             failure_code INTEGER NULL,
-            slack_state INTEGER NOT NULL);
+            slack_state INTEGER NOT NULL,
+            toggl_write_recorded_at_utc TEXT NULL,
+            tempo_write_recorded_at_utc TEXT NULL,
+            reconciliation_recorded_at_utc TEXT NULL);
         CREATE TABLE IF NOT EXISTS daily_slack_deliveries (
             delivery_date TEXT PRIMARY KEY,
             content_fingerprint TEXT NOT NULL,
@@ -84,6 +87,7 @@ public sealed class SqliteDatabase
                     }
 
                     await EnsureWorkStatusColumnsAsync(connection, cancellationToken);
+                    await EnsureDeliveryAttemptTimestampColumnsAsync(connection, cancellationToken);
                     await CommitAsync(connection, cancellationToken);
                 }
                 catch
@@ -125,6 +129,39 @@ public sealed class SqliteDatabase
     {
         await EnsureWorkStatusColumnAsync(connection, "planned_work_items", cancellationToken);
         await EnsureWorkStatusColumnAsync(connection, "recurring_task_templates", cancellationToken);
+    }
+
+    private static async Task EnsureDeliveryAttemptTimestampColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await EnsureColumnAsync(connection, "delivery_attempts", "toggl_write_recorded_at_utc", "TEXT NULL", cancellationToken);
+        await EnsureColumnAsync(connection, "delivery_attempts", "tempo_write_recorded_at_utc", "TEXT NULL", cancellationToken);
+        await EnsureColumnAsync(connection, "delivery_attempts", "reconciliation_recorded_at_utc", "TEXT NULL", cancellationToken);
+    }
+
+    private static async Task EnsureColumnAsync(SqliteConnection connection, string tableName, string columnName, string definition, CancellationToken cancellationToken)
+    {
+        if (await HasColumnAsync(connection, tableName, columnName, cancellationToken)) return;
+        try
+        {
+            await using var alter = connection.CreateCommand();
+            alter.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {columnName} {definition}";
+            await alter.ExecuteNonQueryAsync(cancellationToken);
+        }
+        catch (SqliteException exception) when (IsDuplicateColumn(exception))
+        {
+            if (!await HasColumnAsync(connection, tableName, columnName, cancellationToken)) throw;
+        }
+    }
+
+    private static async Task<bool> HasColumnAsync(SqliteConnection connection, string tableName, string columnName, CancellationToken cancellationToken)
+    {
+        await using var pragma = connection.CreateCommand();
+        pragma.CommandText = $"PRAGMA table_info({tableName})";
+        await using var reader = await pragma.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
     }
 
     private static async Task EnsureWorkStatusColumnAsync(SqliteConnection connection, string tableName, CancellationToken cancellationToken)

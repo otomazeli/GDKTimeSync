@@ -7,16 +7,37 @@ namespace GDK.TimeSync.Desktop.Services;
 public sealed class LiveIntegrationValidationService(
     IIntegrationClientFactory clients,
     IUserSettingsStore settings,
-    IDeliveryAttemptRepository attempts) : ILiveIntegrationValidationService
+    IDeliveryAttemptRepository attempts,
+    TimeProvider? timeProvider = null) : ILiveIntegrationValidationService
 {
     private readonly ConcurrentDictionary<Guid, DeliveryAttempt> pendingReconciliation = [];
+    private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
+
+    public async Task<LiveValidationPreview> LoadPreviewAsync(PlannedWorkItem item, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        var configuration = settings.Load();
+        var attempt = await attempts.GetAsync(item.Id, cancellationToken);
+        return new LiveValidationPreview(
+            attempt,
+            configuration.JiraUser.Trim(),
+            SafeServer(configuration.JiraBaseUrl),
+            string.IsNullOrWhiteSpace(item.TempoCategory) ? configuration.DefaultTempoWorkCategory : item.TempoCategory);
+    }
+
+    private static string SafeServer(string configuredUrl)
+    {
+        if (!Uri.TryCreate(configuredUrl, UriKind.Absolute, out var uri)) return "Not configured";
+        var safe = new UriBuilder(uri) { UserName = string.Empty, Password = string.Empty, Path = string.Empty, Query = string.Empty, Fragment = string.Empty };
+        return safe.Uri.GetLeftPart(UriPartial.Authority);
+    }
 
     public async Task<LiveValidationResult> CreateTogglAsync(PlannedWorkItem item, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(item);
         if (pendingReconciliation.TryGetValue(item.Id, out var pending))
             return ExistingResult(LiveValidationStep.Toggl, pending);
-        if (!TryGetTiming(item, out var timing) || !TryCreateTogglRequest(item, timing, out var request))
+        if (!TryGetTiming(item, out var timing) || string.IsNullOrWhiteSpace(item.TogglProject) || !TryCreateTogglRequest(item, timing, out var request))
             return FailedResult(LiveValidationStep.Toggl, item.Id, DeliveryFailureCode.TogglFailed, "Toggl creation could not start.");
         if (cancellationToken.IsCancellationRequested)
             return CancelledResult(LiveValidationStep.Toggl, item.Id, "Toggl creation cancelled.");
@@ -48,15 +69,61 @@ public sealed class LiveIntegrationValidationService(
             return await PersistPreWriteResultAsync(LiveValidationStep.Toggl, claim.Attempt, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed, "Toggl creation failed.");
         }
 
+        TogglCreateTimeEntryRequest projectedRequest;
+        try
+        {
+            var project = (await toggl.GetProjectsAsync(request.WorkspaceId, cancellationToken))
+                .SingleOrDefault(candidate => string.Equals(candidate.Name.Trim(), item.TogglProject.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (project is null)
+            {
+                toggl.Dispose();
+                return await PersistPreWriteResultAsync(LiveValidationStep.Toggl, claim.Attempt, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed, "Selected Toggl project was not found.");
+            }
+            projectedRequest = request with { ProjectId = project.Id };
+        }
+        catch (OperationCanceledException)
+        {
+            try { toggl.Dispose(); } catch { }
+            return await PersistPreWriteResultAsync(LiveValidationStep.Toggl, claim.Attempt, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled, "Toggl creation cancelled.");
+        }
+        catch
+        {
+            try { toggl.Dispose(); } catch { }
+            return await PersistPreWriteResultAsync(LiveValidationStep.Toggl, claim.Attempt, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed, "Toggl creation failed.");
+        }
+
+        var preWriteMarker = claim.Attempt with
+        {
+            Status = DeliveryAttemptStatus.ReconciliationRequired,
+            FailureCode = DeliveryFailureCode.PersistenceFailed,
+            ReconciliationRecordedAtUtc = clock.GetUtcNow()
+        };
+        try
+        {
+            await attempts.SaveAsync(preWriteMarker, CancellationToken.None);
+        }
+        catch
+        {
+            try { toggl.Dispose(); } catch { }
+            return new LiveValidationResult(LiveValidationStep.Toggl, preWriteMarker, "Toggl creation is blocked because durable state is unavailable.", LiveValidationOutcome.ReconciliationRequired);
+        }
+
         var afterWrite = claim.Attempt;
         try
         {
             using (toggl)
             {
-                var entry = await toggl.CreateTimeEntryAsync(request, cancellationToken);
-                afterWrite = claim.Attempt with { TogglEntryId = entry.Id, Status = DeliveryAttemptStatus.InProgress, FailureCode = null };
+                var entry = await toggl.CreateTimeEntryAsync(projectedRequest, cancellationToken);
+                afterWrite = claim.Attempt with
+                {
+                    TogglEntryId = entry.Id,
+                    Status = DeliveryAttemptStatus.InProgress,
+                    FailureCode = null,
+                    TogglWriteRecordedAtUtc = clock.GetUtcNow(),
+                    ReconciliationRecordedAtUtc = null
+                };
                 await attempts.SaveAsync(afterWrite, CancellationToken.None);
-                return new LiveValidationResult(LiveValidationStep.Toggl, afterWrite, "Toggl entry created.");
+                return new LiveValidationResult(LiveValidationStep.Toggl, afterWrite, "Toggl entry created.", LiveValidationOutcome.Created);
             }
         }
         catch (OperationCanceledException)
@@ -78,16 +145,16 @@ public sealed class LiveIntegrationValidationService(
             using var jira = await clients.CreateJiraAsync(cancellationToken);
             var issue = await jira.GetIssueAsync(item.JiraIssueKey, cancellationToken);
             return string.IsNullOrWhiteSpace(issue.Id)
-                ? new LiveValidationResult(LiveValidationStep.Jira, resultAttempt with { Status = DeliveryAttemptStatus.Failed, FailureCode = DeliveryFailureCode.JiraIssueNotFound }, "Jira issue was not found.")
-                : new LiveValidationResult(LiveValidationStep.Jira, resultAttempt, "Jira issue validated.");
+                ? new LiveValidationResult(LiveValidationStep.Jira, resultAttempt with { Status = DeliveryAttemptStatus.Failed, FailureCode = DeliveryFailureCode.JiraIssueNotFound }, "Jira issue was not found.", LiveValidationOutcome.Failed)
+                : new LiveValidationResult(LiveValidationStep.Jira, resultAttempt, "Jira issue validated.", LiveValidationOutcome.Validated);
         }
         catch (OperationCanceledException)
         {
-            return new LiveValidationResult(LiveValidationStep.Jira, resultAttempt with { Status = DeliveryAttemptStatus.Cancelled, FailureCode = DeliveryFailureCode.Cancelled }, "Jira validation cancelled.");
+            return new LiveValidationResult(LiveValidationStep.Jira, resultAttempt with { Status = DeliveryAttemptStatus.Cancelled, FailureCode = DeliveryFailureCode.Cancelled }, "Jira validation cancelled.", LiveValidationOutcome.Cancelled);
         }
         catch
         {
-            return new LiveValidationResult(LiveValidationStep.Jira, resultAttempt with { Status = DeliveryAttemptStatus.Failed, FailureCode = DeliveryFailureCode.JiraFailed }, "Jira validation failed.");
+            return new LiveValidationResult(LiveValidationStep.Jira, resultAttempt with { Status = DeliveryAttemptStatus.Failed, FailureCode = DeliveryFailureCode.JiraFailed }, "Jira validation failed.", LiveValidationOutcome.Failed);
         }
     }
 
@@ -108,7 +175,9 @@ public sealed class LiveIntegrationValidationService(
         }
 
         if (current is null || current.TogglEntryId is null || current.Status != DeliveryAttemptStatus.InProgress)
-            return new LiveValidationResult(LiveValidationStep.Tempo, current ?? NewResultAttempt(item.Id, DeliveryAttemptStatus.InProgress), "Tempo requires a non-terminal Toggl entry.");
+            return current is { Status: DeliveryAttemptStatus.Succeeded }
+                ? new LiveValidationResult(LiveValidationStep.Tempo, current, "Existing delivery requires manual review; Tempo was not read back.", LiveValidationOutcome.Blocked)
+                : new LiveValidationResult(LiveValidationStep.Tempo, current ?? NewResultAttempt(item.Id, DeliveryAttemptStatus.InProgress), "Tempo requires a non-terminal Toggl entry.", LiveValidationOutcome.Blocked);
         if (!TryGetTiming(item, out var timing))
             return FailedResult(LiveValidationStep.Tempo, item.Id, DeliveryFailureCode.TempoFailed, "Tempo creation could not start.", current);
         if (cancellationToken.IsCancellationRequested)
@@ -152,7 +221,12 @@ public sealed class LiveIntegrationValidationService(
             return FailedResult(LiveValidationStep.Tempo, item.Id, DeliveryFailureCode.TempoFailed, "Tempo creation failed.", current);
         }
 
-        var preWriteMarker = current with { Status = DeliveryAttemptStatus.ReconciliationRequired, FailureCode = DeliveryFailureCode.PersistenceFailed };
+        var preWriteMarker = current with
+        {
+            Status = DeliveryAttemptStatus.ReconciliationRequired,
+            FailureCode = DeliveryFailureCode.PersistenceFailed,
+            ReconciliationRecordedAtUtc = clock.GetUtcNow()
+        };
         try
         {
             await attempts.SaveAsync(preWriteMarker, CancellationToken.None);
@@ -167,7 +241,7 @@ public sealed class LiveIntegrationValidationService(
             {
             }
 
-            return new LiveValidationResult(LiveValidationStep.Tempo, preWriteMarker, "Reconciliation is required.");
+            return new LiveValidationResult(LiveValidationStep.Tempo, preWriteMarker, "Reconciliation is required.", LiveValidationOutcome.ReconciliationRequired);
         }
 
         var afterWrite = current;
@@ -176,7 +250,14 @@ public sealed class LiveIntegrationValidationService(
             using (tempo)
             {
                 var created = await tempo.CreateWorklogAsync(request with { OriginTaskId = jiraIssueId }, cancellationToken);
-                afterWrite = current with { TempoWorklogId = created.TempoWorklogId, Status = DeliveryAttemptStatus.InProgress, FailureCode = null };
+                afterWrite = current with
+                {
+                    TempoWorklogId = created.TempoWorklogId,
+                    Status = DeliveryAttemptStatus.InProgress,
+                    FailureCode = null,
+                    TempoWriteRecordedAtUtc = clock.GetUtcNow(),
+                    ReconciliationRecordedAtUtc = null
+                };
                 await attempts.SaveAsync(afterWrite, CancellationToken.None);
                 return await VerifyTempoAsync(tempo, afterWrite, timing.DurationSeconds, cancellationToken);
             }
@@ -215,12 +296,12 @@ public sealed class LiveIntegrationValidationService(
         if (readback?.TempoWorklogId != worklogId || readback.TimeSpentSeconds != durationSeconds)
             return await ReconciliationResultAsync(LiveValidationStep.Tempo, attempt, DeliveryFailureCode.TempoFailed, "Tempo reconciliation is required.");
 
-        var succeeded = attempt with { Status = DeliveryAttemptStatus.Succeeded, FailureCode = null };
+        var succeeded = attempt with { Status = DeliveryAttemptStatus.Succeeded, FailureCode = null, ReconciliationRecordedAtUtc = null };
         try
         {
             await attempts.SaveAsync(succeeded, CancellationToken.None);
             pendingReconciliation.TryRemove(succeeded.PlannedWorkItemId, out _);
-            return new LiveValidationResult(LiveValidationStep.Tempo, succeeded, "Tempo worklog verified.");
+            return new LiveValidationResult(LiveValidationStep.Tempo, succeeded, "Tempo worklog verified.", LiveValidationOutcome.Verified);
         }
         catch
         {
@@ -271,23 +352,29 @@ public sealed class LiveIntegrationValidationService(
         {
         }
 
-        return new LiveValidationResult(step, result, message);
+        return new LiveValidationResult(step, result, message,
+            status == DeliveryAttemptStatus.Cancelled ? LiveValidationOutcome.Cancelled : LiveValidationOutcome.Failed);
     }
 
     private async Task<LiveValidationResult> ReconciliationResultAsync(LiveValidationStep step, DeliveryAttempt attempt, DeliveryFailureCode failureCode, string message)
     {
-        var reconciliation = attempt with { Status = DeliveryAttemptStatus.ReconciliationRequired, FailureCode = failureCode };
+        var reconciliation = attempt with
+        {
+            Status = DeliveryAttemptStatus.ReconciliationRequired,
+            FailureCode = failureCode,
+            ReconciliationRecordedAtUtc = clock.GetUtcNow()
+        };
         try
         {
             await attempts.SaveAsync(reconciliation, CancellationToken.None);
             pendingReconciliation.TryRemove(attempt.PlannedWorkItemId, out _);
-            return new LiveValidationResult(step, reconciliation, message);
+            return new LiveValidationResult(step, reconciliation, message, LiveValidationOutcome.ReconciliationRequired);
         }
         catch
         {
             var blocked = reconciliation with { FailureCode = DeliveryFailureCode.PersistenceFailed };
             pendingReconciliation[attempt.PlannedWorkItemId] = blocked;
-            return new LiveValidationResult(step, blocked, "Reconciliation is required.");
+            return new LiveValidationResult(step, blocked, "Reconciliation is required.", LiveValidationOutcome.ReconciliationRequired);
         }
     }
 
@@ -313,13 +400,15 @@ public sealed class LiveIntegrationValidationService(
     }
 
     private static LiveValidationResult ExistingResult(LiveValidationStep step, DeliveryAttempt attempt) =>
-        new(step, attempt, attempt.Status == DeliveryAttemptStatus.ReconciliationRequired ? "Reconciliation is required before continuing." : "This validation step has already been recorded.");
+        attempt.Status == DeliveryAttemptStatus.ReconciliationRequired
+            ? new(step, attempt, "Reconciliation is required before continuing.", LiveValidationOutcome.ReconciliationRequired)
+            : new(step, attempt, "Existing durable state blocks another write.", LiveValidationOutcome.Blocked);
 
     private static LiveValidationResult FailedResult(LiveValidationStep step, Guid itemId, DeliveryFailureCode failureCode, string message, DeliveryAttempt? attempt = null) =>
-        new(step, (attempt ?? NewResultAttempt(itemId, DeliveryAttemptStatus.Failed)) with { Status = DeliveryAttemptStatus.Failed, FailureCode = failureCode }, message);
+        new(step, (attempt ?? NewResultAttempt(itemId, DeliveryAttemptStatus.Failed)) with { Status = DeliveryAttemptStatus.Failed, FailureCode = failureCode }, message, LiveValidationOutcome.Failed);
 
     private static LiveValidationResult CancelledResult(LiveValidationStep step, Guid itemId, string message, DeliveryAttempt? attempt = null) =>
-        new(step, (attempt ?? NewResultAttempt(itemId, DeliveryAttemptStatus.Cancelled)) with { Status = DeliveryAttemptStatus.Cancelled, FailureCode = DeliveryFailureCode.Cancelled }, message);
+        new(step, (attempt ?? NewResultAttempt(itemId, DeliveryAttemptStatus.Cancelled)) with { Status = DeliveryAttemptStatus.Cancelled, FailureCode = DeliveryFailureCode.Cancelled }, message, LiveValidationOutcome.Cancelled);
 
     private static DeliveryAttempt NewResultAttempt(Guid itemId, DeliveryAttemptStatus status) =>
         new(itemId, null, null, status, null, SlackDeliveryState.NotSupported);

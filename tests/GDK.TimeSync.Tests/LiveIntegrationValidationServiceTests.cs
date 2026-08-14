@@ -25,9 +25,51 @@ public sealed class LiveIntegrationValidationServiceTests
         Assert.Equal(DeliveryAttemptStatus.InProgress, result.Attempt.Status);
         Assert.Equal(123L, result.Attempt.TogglEntryId);
         Assert.Null(result.Attempt.TempoWorklogId);
-        Assert.Equal(["TogglCreate"], calls);
+        Assert.Equal(["TogglProjects", "TogglCreate"], calls);
         Assert.Equal(1, attempts.ClaimCount);
-        Assert.Equal(1, attempts.SaveCount);
+        Assert.Equal(2, attempts.SaveCount);
+    }
+
+    [Fact]
+    public async Task CreateTogglAsync_maps_the_selected_project_into_the_post_payload()
+    {
+        var calls = new List<string>();
+        var clients = new RecordingIntegrationClientFactory(calls);
+
+        var result = await CreateService(clients, new RecordingAttemptRepository()).CreateTogglAsync(CreateItem());
+
+        Assert.Equal(LiveValidationOutcome.Created, result.Outcome);
+        Assert.Contains("\"project_id\":314", clients.LastTogglCreateBody, StringComparison.Ordinal);
+        Assert.Equal(["TogglProjects", "TogglCreate"], calls);
+    }
+
+    [Fact]
+    public async Task LoadPreviewAsync_returns_only_durable_state_and_safe_configuration_metadata()
+    {
+        var item = CreateItem();
+        var attempt = new DeliveryAttempt(item.Id, 123, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported);
+        var clients = new RecordingIntegrationClientFactory([]);
+        var settings = new UserSettings { JiraBaseUrl = "https://jira.example.test", JiraUser = "planner@example.test", TogglWorkspaceId = 77 };
+
+        var preview = await CreateService(clients, new RecordingAttemptRepository(attempt), settings).LoadPreviewAsync(item);
+
+        Assert.Equal(attempt, preview.Attempt);
+        Assert.Equal("planner@example.test", preview.TempoWorker);
+        Assert.Equal("https://jira.example.test", preview.TempoBaseUrl);
+        Assert.Equal("DEVELOPMENT", preview.TempoCategory);
+        Assert.Equal(0, clients.TogglClientCreations + clients.TempoClientCreations + clients.JiraClientCreations);
+    }
+
+    [Fact]
+    public async Task LoadPreviewAsync_never_exposes_url_user_information()
+    {
+        const string sentinel = "preview-userinfo-sentinel";
+        var settings = new UserSettings { JiraBaseUrl = $"https://{sentinel}@jira.example.test/private", JiraUser = "planner" };
+
+        var preview = await CreateService(new RecordingIntegrationClientFactory([]), new RecordingAttemptRepository(), settings).LoadPreviewAsync(CreateItem());
+
+        Assert.Equal("https://jira.example.test", preview.TempoBaseUrl);
+        Assert.DoesNotContain(sentinel, preview.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -116,9 +158,26 @@ public sealed class LiveIntegrationValidationServiceTests
         var result = await service.CreateAndVerifyTempoAsync(item);
 
         Assert.Equal(existing, result.Attempt);
-        Assert.Equal("Tempo requires a non-terminal Toggl entry.", result.SafeMessage);
+        Assert.Equal(LiveValidationOutcome.Blocked, result.Outcome);
+        Assert.Equal(status == DeliveryAttemptStatus.Succeeded
+            ? "Existing delivery requires manual review; Tempo was not read back."
+            : "Tempo requires a non-terminal Toggl entry.", result.SafeMessage);
         Assert.Empty(calls);
         Assert.Equal(0, attempts.SaveCount);
+    }
+
+    [Fact]
+    public async Task CreateAndVerifyTempoAsync_does_not_claim_readback_for_a_preexisting_succeeded_delivery()
+    {
+        var item = CreateItem();
+        var existing = new DeliveryAttempt(item.Id, 123, 456, DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported);
+        var clients = new RecordingIntegrationClientFactory([]);
+
+        var result = await CreateService(clients, new RecordingAttemptRepository(existing)).CreateAndVerifyTempoAsync(item);
+
+        Assert.Equal(LiveValidationOutcome.Blocked, result.Outcome);
+        Assert.Equal("Existing delivery requires manual review; Tempo was not read back.", result.SafeMessage);
+        Assert.Equal(0, clients.TempoClientCreations);
     }
 
     [Fact]
@@ -136,9 +195,9 @@ public sealed class LiveIntegrationValidationServiceTests
         Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, result.Attempt.Status);
         Assert.Equal(DeliveryFailureCode.TogglFailed, result.Attempt.FailureCode);
         Assert.Equal(result.Attempt, repeated.Attempt);
-        Assert.Equal(["TogglCreate"], calls);
+        Assert.Equal(["TogglProjects", "TogglCreate"], calls);
         Assert.Equal(2, attempts.ClaimCount);
-        Assert.Equal(1, attempts.SaveCount);
+        Assert.Equal(2, attempts.SaveCount);
     }
 
     [Fact]
@@ -154,7 +213,7 @@ public sealed class LiveIntegrationValidationServiceTests
         Assert.Equal(123L, result.Attempt.TogglEntryId);
         Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, result.Attempt.Status);
         Assert.Equal(DeliveryFailureCode.TogglFailed, result.Attempt.FailureCode);
-        Assert.Equal(2, attempts.SaveCount);
+        Assert.Equal(3, attempts.SaveCount);
     }
 
     [Fact]
@@ -174,8 +233,60 @@ public sealed class LiveIntegrationValidationServiceTests
         Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, failed.Attempt.Status);
         Assert.Equal(DeliveryFailureCode.PersistenceFailed, failed.Attempt.FailureCode);
         Assert.Equal(failed.Attempt, repeated.Attempt);
-        Assert.Equal(["TogglCreate"], calls);
-        Assert.Equal(2, attempts.SaveCount);
+        Assert.Equal(["TogglProjects", "TogglCreate"], calls);
+        Assert.Equal(3, attempts.SaveCount);
+    }
+
+    [Fact]
+    public async Task CreateTogglAsync_rehydrates_a_durable_no_resend_barrier_after_restart()
+    {
+        var item = CreateItem();
+        var databasePath = Path.Combine(Path.GetTempPath(), $"GDK.TimeSync.LiveValidation.Toggl.{Guid.NewGuid():N}.db");
+        try
+        {
+            var durable = new SqliteDeliveryAttemptRepository(new SqliteDatabase(databasePath));
+            var failing = new FailureInjectingAttemptRepository(durable)
+            {
+                FailuresRemaining = 2,
+                FailWhen = value => value.TogglEntryId is not null
+            };
+            var firstCalls = new List<string>();
+
+            var failed = await CreateService(new RecordingIntegrationClientFactory(firstCalls), failing).CreateTogglAsync(item);
+            var resumedCalls = new List<string>();
+            var resumed = await CreateService(new RecordingIntegrationClientFactory(resumedCalls), new SqliteDeliveryAttemptRepository(new SqliteDatabase(databasePath))).CreateTogglAsync(item);
+
+            Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, failed.Attempt.Status);
+            Assert.Equal(["TogglProjects", "TogglCreate"], firstCalls);
+            Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, resumed.Attempt.Status);
+            Assert.Equal(LiveValidationOutcome.ReconciliationRequired, resumed.Outcome);
+            Assert.Empty(resumedCalls);
+        }
+        finally
+        {
+            if (File.Exists(databasePath)) File.Delete(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Successful_writes_and_reconciliation_record_durable_evidence_timestamps()
+    {
+        var item = CreateItem();
+        var now = new DateTimeOffset(2026, 8, 14, 13, 5, 0, TimeSpan.Zero);
+        var attempts = new RecordingAttemptRepository();
+        var service = CreateService(new RecordingIntegrationClientFactory([]), attempts, timeProvider: new FixedTimeProvider(now));
+
+        var toggl = await service.CreateTogglAsync(item);
+
+        Assert.Equal(now, toggl.Attempt.TogglWriteRecordedAtUtc);
+        Assert.Null(toggl.Attempt.TempoWriteRecordedAtUtc);
+        Assert.Null(toggl.Attempt.ReconciliationRecordedAtUtc);
+
+        var reconciliationAttempts = new RecordingAttemptRepository(new DeliveryAttempt(item.Id, 123, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported));
+        var reconciliation = await CreateService(new RecordingIntegrationClientFactory([]) { ReturnMismatchedTempoReadDuration = true }, reconciliationAttempts, timeProvider: new FixedTimeProvider(now)).CreateAndVerifyTempoAsync(item);
+
+        Assert.Equal(now, reconciliation.Attempt.TempoWriteRecordedAtUtc);
+        Assert.Equal(now, reconciliation.Attempt.ReconciliationRecordedAtUtc);
     }
 
     [Fact]
@@ -368,7 +479,7 @@ public sealed class LiveIntegrationValidationServiceTests
 
         Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, result.Attempt.Status);
         Assert.Equal(123L, result.Attempt.TogglEntryId);
-        Assert.Equal(["TogglCreate"], calls);
+        Assert.Equal(["TogglProjects", "TogglCreate"], calls);
     }
 
     [Fact]
@@ -396,8 +507,8 @@ public sealed class LiveIntegrationValidationServiceTests
         Assert.DoesNotContain(sentinel, result.ToString(), StringComparison.Ordinal);
     }
 
-    private static LiveIntegrationValidationService CreateService(RecordingIntegrationClientFactory clients, IDeliveryAttemptRepository attempts, UserSettings? settings = null) =>
-        new(clients, new FixedSettingsStore(settings), attempts);
+    private static LiveIntegrationValidationService CreateService(RecordingIntegrationClientFactory clients, IDeliveryAttemptRepository attempts, UserSettings? settings = null, TimeProvider? timeProvider = null) =>
+        new(clients, new FixedSettingsStore(settings), attempts, timeProvider);
 
     private static PlannedWorkItem CreateItem() => PlannedWorkItem.Create(
         new DateOnly(2026, 8, 14),
@@ -405,6 +516,8 @@ public sealed class LiveIntegrationValidationServiceTests
         jiraIssueKey: "GDK-42",
         comment: "Validate integrations",
         duration: TimeSpan.FromMinutes(30),
+        togglProject: "GDK",
+        tempoCategory: "DEVELOPMENT",
         start: new TimeOnly(9, 0),
         end: new TimeOnly(9, 30));
 
@@ -484,7 +597,9 @@ public sealed class LiveIntegrationValidationServiceTests
     {
         public List<ThrowingDisposeHttpClient> TempoHttpClients { get; } = [];
         public int TogglClientCreations { get; private set; }
+        public int JiraClientCreations { get; private set; }
         public int TempoClientCreations { get; private set; }
+        public string? LastTogglCreateBody { get; private set; }
         public bool FailTogglCreate { get; init; }
         public bool ReturnMismatchedTempoReadId { get; init; }
         public bool ReturnMismatchedTempoReadDuration { get; init; }
@@ -499,20 +614,26 @@ public sealed class LiveIntegrationValidationServiceTests
             if (FailTogglFactory)
                 throw new InvalidOperationException();
             TogglClientCreations++;
-            return Task.FromResult<ITogglClient>(new TogglClient(CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Toggl, FailTogglCreate, null), ThrowOnTogglDispose), new TogglOptions { BaseUrl = "https://validation.example.test/", ApiToken = "unit-token" }));
+            return Task.FromResult<ITogglClient>(new TogglClient(CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Toggl, FailTogglCreate, null, body => LastTogglCreateBody = body), ThrowOnTogglDispose), new TogglOptions { BaseUrl = "https://validation.example.test/", ApiToken = "unit-token" }));
         }
 
-        public Task<JiraClient> CreateJiraAsync(CancellationToken cancellationToken = default) => Task.FromResult(new JiraClient(
-            CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Jira, false, JiraFailureDetail)),
-            new JiraOptions { BaseUrl = "https://validation.example.test/", PersonalAccessToken = "unit-token" },
-            new IssueKeyValidator(new IssueKeyValidationOptions())));
+        public Task<JiraClient> CreateJiraAsync(CancellationToken cancellationToken = default)
+        {
+            JiraClientCreations++;
+            return Task.FromResult(new JiraClient(
+                CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Jira, false, JiraFailureDetail)),
+                new JiraOptions { BaseUrl = "https://validation.example.test/", PersonalAccessToken = "unit-token" },
+                new IssueKeyValidator(new IssueKeyValidationOptions())));
+        }
 
         public Task<TempoClient> CreateTempoAsync(CancellationToken cancellationToken = default)
         {
             if (FailTempoFactory)
                 throw new InvalidOperationException();
             TempoClientCreations++;
-            var httpClient = CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Tempo, false, null, ReturnMismatchedTempoReadId, ReturnMismatchedTempoReadDuration), ThrowOnTempoDispose);
+            var httpClient = CreateHttpClient(new RecordingHandler(calls, IntegrationTarget.Tempo, false, null,
+                returnMismatchedTempoReadId: ReturnMismatchedTempoReadId,
+                returnMismatchedTempoReadDuration: ReturnMismatchedTempoReadDuration), ThrowOnTempoDispose);
             TempoHttpClients.Add(httpClient);
             return Task.FromResult(new TempoClient(httpClient, new TempoOptions { BaseUrl = "https://validation.example.test/", PersonalAccessToken = "unit-token" }));
         }
@@ -534,12 +655,13 @@ public sealed class LiveIntegrationValidationServiceTests
         }
     }
 
-    private sealed class RecordingHandler(List<string> calls, IntegrationTarget target, bool failCreate, string? jiraFailureDetail, bool returnMismatchedTempoReadId = false, bool returnMismatchedTempoReadDuration = false) : HttpMessageHandler
+    private sealed class RecordingHandler(List<string> calls, IntegrationTarget target, bool failCreate, string? jiraFailureDetail, Action<string>? captureBody = null, bool returnMismatchedTempoReadId = false, bool returnMismatchedTempoReadDuration = false) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var call = (target, request.Method.Method, request.RequestUri!.AbsolutePath) switch
             {
+                (IntegrationTarget.Toggl, "GET", _) => "TogglProjects",
                 (IntegrationTarget.Toggl, "POST", _) => "TogglCreate",
                 (IntegrationTarget.Jira, "GET", _) => "JiraGet",
                 (IntegrationTarget.Tempo, "POST", _) => "TempoCreate",
@@ -547,14 +669,17 @@ public sealed class LiveIntegrationValidationServiceTests
                 _ => throw new Xunit.Sdk.XunitException($"Unexpected request: {request.Method} {request.RequestUri}")
             };
             calls.Add(call);
+            if (call == "TogglCreate")
+                captureBody?.Invoke(request.Content!.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult());
 
-            if (failCreate && target == IntegrationTarget.Toggl)
+            if (failCreate && call == "TogglCreate")
                 throw new HttpRequestException("safe failure category");
             if (jiraFailureDetail is not null && target == IntegrationTarget.Jira)
                 throw new HttpRequestException(jiraFailureDetail);
 
             return Task.FromResult(call switch
             {
+                "TogglProjects" => Json(new[] { new TogglProject(314, "GDK") }),
                 "TogglCreate" => Json(new TogglTimeEntry { Id = 123, Description = "Validate integrations", Start = new DateTimeOffset(2026, 8, 14, 9, 0, 0, TimeSpan.Zero), Stop = new DateTimeOffset(2026, 8, 14, 9, 30, 0, TimeSpan.Zero) }),
                 "JiraGet" => Json(new { id = "jira-42", key = "GDK-42", fields = new { summary = "Validation" } }),
                 "TempoCreate" => Json(new TempoWorklog(456, "planner", "jira-42", new DateTime(2026, 8, 14, 9, 0, 0), 1800, "Validate integrations")),
@@ -564,5 +689,10 @@ public sealed class LiveIntegrationValidationServiceTests
         }
 
         private static HttpResponseMessage Json<T>(T value) => new(HttpStatusCode.OK) { Content = JsonContent.Create(value) };
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => value;
     }
 }

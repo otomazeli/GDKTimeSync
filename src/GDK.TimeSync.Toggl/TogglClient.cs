@@ -51,17 +51,26 @@ public sealed class TogglClient : ITogglClient
             throw new ArgumentOutOfRangeException(nameof(request), "Stop must be after start.");
         }
 
-        var payload = new
+        var payload = new Dictionary<string, object>
         {
-            description = request.Description,
-            start = request.Start,
-            stop = request.Stop,
-            duration = (long)(request.Stop - request.Start).TotalSeconds,
-            workspace_id = request.WorkspaceId
+            ["description"] = request.Description,
+            ["start"] = request.Start,
+            ["stop"] = request.Stop,
+            ["duration"] = (long)(request.Stop - request.Start).TotalSeconds,
+            ["workspace_id"] = request.WorkspaceId
         };
+        if (request.ProjectId is { } projectId)
+            payload["project_id"] = projectId;
         using var response = await SendAsync(() => HttpClient.PostAsJsonAsync($"workspaces/{request.WorkspaceId}/time_entries", payload, JsonOptions, cancellationToken));
         return await ReadJsonAsync<TogglTimeEntry>(response, cancellationToken)
             ?? throw new TogglApiException("Toggl returned an empty response.", response.StatusCode);
+    }
+
+    public async Task<IReadOnlyList<TogglProject>> GetProjectsAsync(long workspaceId, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workspaceId);
+        using var response = await SendAsync(() => HttpClient.GetAsync($"workspaces/{workspaceId}/projects", cancellationToken));
+        return await ReadJsonAsync<List<TogglProject>>(response, cancellationToken) ?? [];
     }
 
     private static async Task<T?> ReadJsonAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)

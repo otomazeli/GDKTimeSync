@@ -18,7 +18,7 @@ public sealed class LiveValidationViewModelTests
         var viewModel = CreateViewModel(item, safety);
 
         await viewModel.RefreshAsync();
-        viewModel.SelectItem(item.Id);
+        await viewModel.SelectItemAsync(item.Id);
         viewModel.OpenTogglConfirmation();
 
         Assert.True(viewModel.IsTogglConfirmationVisible);
@@ -27,7 +27,30 @@ public sealed class LiveValidationViewModelTests
     }
 
     [Fact]
-    public async Task Review_navigation_and_selection_do_not_touch_live_factories_settings_or_attempt_storage()
+    public async Task Selecting_an_item_hydrates_durable_state_and_safe_tempo_preview_without_credentials()
+    {
+        var item = CreateItem();
+        var attempt = new DeliveryAttempt(item.Id, 44, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported);
+        var safety = new SafetyProbe
+        {
+            Preview = new LiveValidationPreview(attempt, "planner@example.test", "https://jira.example.test", "DEVELOPMENT")
+        };
+        var viewModel = CreateViewModel(item, safety);
+        await viewModel.RefreshAsync();
+
+        await viewModel.SelectItemAsync(item.Id);
+
+        Assert.Equal(attempt, viewModel.DurableAttempt);
+        Assert.Equal("planner@example.test", viewModel.TempoWorker);
+        Assert.Equal("https://jira.example.test", viewModel.TempoBaseUrl);
+        Assert.Equal("DEVELOPMENT", viewModel.TempoConfigurationCategory);
+        Assert.False(viewModel.CanOpenTogglConfirmation);
+        Assert.True(viewModel.CanOpenTempoConfirmation);
+        Assert.Equal(0, safety.CredentialReads + safety.FactoryCalls + safety.Writes);
+    }
+
+    [Fact]
+    public async Task Review_navigation_and_selection_read_only_safe_preview_without_touching_credentials_or_clients()
     {
         var item = CreateItem();
         var factory = new NoAccessIntegrationClientFactory();
@@ -39,11 +62,13 @@ public sealed class LiveValidationViewModelTests
             validationService: new LiveIntegrationValidationService(factory, settings, attempts));
 
         await review.RefreshAsync();
-        review.LiveValidation.SelectItem(item.Id);
+        await review.LiveValidation.SelectItemAsync(item.Id);
         review.LiveValidation.OpenTogglConfirmation();
         review.LiveValidation.CancelTogglConfirmation();
 
-        Assert.Equal(0, factory.Calls + settings.LoadCalls + settings.SaveCalls + attempts.Calls);
+        Assert.Equal(0, factory.Calls + settings.SaveCalls + attempts.WriteCalls);
+        Assert.Equal(1, settings.LoadCalls);
+        Assert.Equal(1, attempts.ReadCalls);
     }
 
     [Fact]
@@ -55,7 +80,7 @@ public sealed class LiveValidationViewModelTests
 
         await viewModel.ConfirmTogglAsync();
         await viewModel.RefreshAsync();
-        viewModel.SelectItem(item.Id);
+        await viewModel.SelectItemAsync(item.Id);
         await viewModel.ConfirmTogglAsync();
         viewModel.OpenTogglConfirmation();
         await viewModel.ConfirmTogglAsync();
@@ -75,11 +100,11 @@ public sealed class LiveValidationViewModelTests
         var snapshot = new MutablePlanSnapshotProvider(DailyPlan.Create(first.Day, [first, second]));
         var viewModel = new LiveValidationViewModel(snapshot, safety, safety);
         await viewModel.RefreshAsync();
-        viewModel.SelectItem(first.Id);
+        await viewModel.SelectItemAsync(first.Id);
         viewModel.OpenTogglConfirmation();
 
         var confirmation = viewModel.ConfirmTogglAsync();
-        viewModel.SelectItem(second.Id);
+        await viewModel.SelectItemAsync(second.Id);
 
         Assert.Equal(first, viewModel.SelectedItem);
         safety.PendingToggl.SetResult(Result(LiveValidationStep.Toggl, first, DeliveryAttemptStatus.InProgress, togglId: 44));
@@ -95,7 +120,7 @@ public sealed class LiveValidationViewModelTests
         var snapshot = new MutablePlanSnapshotProvider(DailyPlan.Create(first.Day, [first, second]));
         var viewModel = new LiveValidationViewModel(snapshot, safety, safety);
         await viewModel.RefreshAsync();
-        viewModel.SelectItem(first.Id);
+        await viewModel.SelectItemAsync(first.Id);
         viewModel.OpenTogglConfirmation();
 
         var confirmation = viewModel.ConfirmTogglAsync();
@@ -116,7 +141,7 @@ public sealed class LiveValidationViewModelTests
         var snapshot = new MutablePlanSnapshotProvider(DailyPlan.Create(first.Day, [first, second]));
         var review = new ReviewViewModel(snapshot, diagnosticsService: safety, validationService: safety);
         await review.RefreshAsync();
-        review.LiveValidation.SelectItem(first.Id);
+        await review.LiveValidation.SelectItemAsync(first.Id);
         review.LiveValidation.OpenTogglConfirmation();
 
         var confirmation = review.LiveValidation.ConfirmTogglAsync();
@@ -140,13 +165,29 @@ public sealed class LiveValidationViewModelTests
     }
 
     [Fact]
+    public void Review_view_confirmation_panels_show_required_safe_metadata_and_visible_operation_cancellation()
+    {
+        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GDK.TimeSync.Desktop", "Views", "ReviewView.xaml"));
+        var bindings = XDocument.Load(path).Descendants().Attributes().Select(attribute => attribute.Value).ToArray();
+
+        Assert.Contains(bindings, value => value.Contains("IsTogglConfirmationVisible", StringComparison.Ordinal));
+        Assert.Contains(bindings, value => value.Contains("SelectedItem.TogglProject", StringComparison.Ordinal));
+        Assert.Contains(bindings, value => value.Contains("SelectedItem.Start", StringComparison.Ordinal));
+        Assert.Contains(bindings, value => value.Contains("SelectedItem.End", StringComparison.Ordinal));
+        Assert.Contains(bindings, value => value.Contains("IsTempoConfirmationVisible", StringComparison.Ordinal));
+        Assert.Contains(bindings, value => value.Contains("TempoWorker", StringComparison.Ordinal));
+        Assert.Contains(bindings, value => value.Contains("TempoBaseUrl", StringComparison.Ordinal));
+        Assert.Contains(bindings, value => value.Contains("CancelOperationCommand", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Explicit_jira_validation_runs_only_the_read_only_jira_operation()
     {
         var item = CreateItem();
         var safety = new SafetyProbe();
         var viewModel = CreateViewModel(item, safety);
         await viewModel.RefreshAsync();
-        viewModel.SelectItem(item.Id);
+        await viewModel.SelectItemAsync(item.Id);
 
         await viewModel.ValidateJiraAsync();
 
@@ -159,10 +200,15 @@ public sealed class LiveValidationViewModelTests
     public async Task Confirming_tempo_updates_readback_status_without_sending_slack()
     {
         var item = CreateItem();
-        var safety = new SafetyProbe { TempoResult = Result(LiveValidationStep.Tempo, item, DeliveryAttemptStatus.Succeeded, tempoId: 55) };
+        var togglAttempt = new DeliveryAttempt(item.Id, 44, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported);
+        var safety = new SafetyProbe
+        {
+            Preview = new LiveValidationPreview(togglAttempt, "planner", "https://jira.example.test", "DEVELOPMENT"),
+            TempoResult = Result(LiveValidationStep.Tempo, item, DeliveryAttemptStatus.Succeeded, LiveValidationOutcome.Verified, tempoId: 55)
+        };
         var viewModel = CreateViewModel(item, safety);
         await viewModel.RefreshAsync();
-        viewModel.SelectItem(item.Id);
+        await viewModel.SelectItemAsync(item.Id);
         viewModel.OpenTempoConfirmation();
 
         await viewModel.ConfirmTempoAsync();
@@ -174,13 +220,100 @@ public sealed class LiveValidationViewModelTests
     }
 
     [Fact]
+    public async Task Preexisting_succeeded_delivery_shows_manual_review_blocker_not_tempo_verification()
+    {
+        var item = CreateItem();
+        var attempt = new DeliveryAttempt(item.Id, 44, 55, DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported);
+        var safety = new SafetyProbe
+        {
+            Preview = new LiveValidationPreview(attempt, "planner", "https://jira.example.test", "DEVELOPMENT"),
+            TempoResult = new LiveValidationResult(LiveValidationStep.Tempo, attempt, "Existing delivery requires manual review; Tempo was not read back.", LiveValidationOutcome.Blocked)
+        };
+        var viewModel = CreateViewModel(item, safety);
+        await viewModel.RefreshAsync();
+        await viewModel.SelectItemAsync(item.Id);
+
+        await viewModel.ConfirmTempoAsync();
+
+        Assert.NotEqual("Tempo worklog verified.", viewModel.StepStatus);
+        Assert.Contains("manual review", viewModel.RecoveryMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(viewModel.CanOpenTempoConfirmation);
+        Assert.Equal(0, safety.TempoCalls);
+    }
+
+    [Fact]
+    public async Task Blocked_tempo_result_wins_over_succeeded_attempt_status()
+    {
+        var item = CreateItem();
+        var inProgress = new DeliveryAttempt(item.Id, 44, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported);
+        var succeeded = inProgress with { TempoWorklogId = 55, Status = DeliveryAttemptStatus.Succeeded };
+        var safety = new SafetyProbe
+        {
+            Preview = new LiveValidationPreview(inProgress, "planner", "https://jira.example.test", "DEVELOPMENT"),
+            TempoResult = new LiveValidationResult(LiveValidationStep.Tempo, succeeded, "Existing delivery requires manual review; Tempo was not read back.", LiveValidationOutcome.Blocked)
+        };
+        var viewModel = CreateViewModel(item, safety);
+        await viewModel.RefreshAsync();
+        await viewModel.SelectItemAsync(item.Id);
+        viewModel.OpenTempoConfirmation();
+
+        await viewModel.ConfirmTempoAsync();
+
+        Assert.Equal("Existing delivery requires manual review; Tempo was not read back.", viewModel.StepStatus);
+        Assert.Contains("manual review", viewModel.RecoveryMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual("Tempo worklog verified.", viewModel.StepStatus);
+    }
+
+    [Theory]
+    [InlineData(DeliveryAttemptStatus.Cancelled, "cancelled")]
+    [InlineData(DeliveryAttemptStatus.Failed, "failed")]
+    [InlineData(DeliveryAttemptStatus.ReconciliationRequired, "reconciliation")]
+    public async Task Selecting_recorded_non_success_states_shows_useful_recovery(DeliveryAttemptStatus status, string expected)
+    {
+        var item = CreateItem();
+        var failureCode = status == DeliveryAttemptStatus.Cancelled ? DeliveryFailureCode.Cancelled : DeliveryFailureCode.PersistenceFailed;
+        var attempt = new DeliveryAttempt(item.Id, 44, null, status, failureCode, SlackDeliveryState.NotSupported);
+        var safety = new SafetyProbe { Preview = new LiveValidationPreview(attempt, "planner", "https://jira.example.test", "DEVELOPMENT") };
+        var viewModel = CreateViewModel(item, safety);
+        await viewModel.RefreshAsync();
+
+        await viewModel.SelectItemAsync(item.Id);
+
+        Assert.Contains(expected, $"{viewModel.StepStatus} {viewModel.RecoveryMessage}", StringComparison.OrdinalIgnoreCase);
+        Assert.False(viewModel.CanOpenTogglConfirmation);
+    }
+
+    [Fact]
+    public async Task Visible_cancel_operation_cancels_the_owned_token_and_cannot_resend()
+    {
+        var item = CreateItem();
+        var safety = new SafetyProbe { CompleteTogglOnCancellation = true };
+        var viewModel = CreateViewModel(item, safety);
+        await viewModel.RefreshAsync();
+        await viewModel.SelectItemAsync(item.Id);
+        viewModel.OpenTogglConfirmation();
+
+        var operation = viewModel.ConfirmTogglAsync();
+        Assert.True(viewModel.CancelOperationCommand.CanExecute(null));
+        viewModel.CancelOperation();
+        await operation;
+        viewModel.OpenTogglConfirmation();
+        await viewModel.ConfirmTogglAsync();
+
+        Assert.Equal(1, safety.TogglCalls);
+        Assert.True(safety.TogglCancellationObserved);
+        Assert.Contains("reconciliation", viewModel.RecoveryMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(viewModel.CanOpenTogglConfirmation);
+    }
+
+    [Fact]
     public async Task Cancelling_confirmation_hides_it_without_any_service_call()
     {
         var item = CreateItem();
         var safety = new SafetyProbe();
         var viewModel = CreateViewModel(item, safety);
         await viewModel.RefreshAsync();
-        viewModel.SelectItem(item.Id);
+        await viewModel.SelectItemAsync(item.Id);
 
         viewModel.OpenTogglConfirmation();
         viewModel.CancelTogglConfirmation();
@@ -199,7 +332,7 @@ public sealed class LiveValidationViewModelTests
         var safety = new SafetyProbe();
         var viewModel = CreateViewModel(item, safety);
         await viewModel.RefreshAsync();
-        viewModel.SelectItem(item.Id);
+        await viewModel.SelectItemAsync(item.Id);
 
         Assert.Equal(0, safety.DiagnosticsCalls);
         await viewModel.RunDiagnosticsAsync();
@@ -221,7 +354,7 @@ public sealed class LiveValidationViewModelTests
         var viewModel = CreateViewModel(item, safety);
         await viewModel.RunDiagnosticsAsync();
         await viewModel.RefreshAsync();
-        viewModel.SelectItem(item.Id);
+        await viewModel.SelectItemAsync(item.Id);
         viewModel.OpenTogglConfirmation();
 
         await viewModel.ConfirmTogglAsync();
@@ -238,8 +371,8 @@ public sealed class LiveValidationViewModelTests
     private static PlannedWorkItem CreateItem() => PlannedWorkItem.Create(
         new DateOnly(2026, 8, 14), "Validation work", "GDK-42", "Validate integrations", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
 
-    private static LiveValidationResult Result(LiveValidationStep step, PlannedWorkItem item, DeliveryAttemptStatus status, long? togglId = null, long? tempoId = null) =>
-        new(step, new DeliveryAttempt(item.Id, togglId, tempoId, status, null, SlackDeliveryState.NotSupported), "ignored");
+    private static LiveValidationResult Result(LiveValidationStep step, PlannedWorkItem item, DeliveryAttemptStatus status, LiveValidationOutcome? outcome = null, long? togglId = null, long? tempoId = null) =>
+        new(step, new DeliveryAttempt(item.Id, togglId, tempoId, status, null, SlackDeliveryState.NotSupported), "ignored", outcome ?? (step == LiveValidationStep.Jira ? LiveValidationOutcome.Validated : step == LiveValidationStep.Tempo ? LiveValidationOutcome.Verified : LiveValidationOutcome.Created));
 
     private sealed class FixedPlanSnapshotProvider(DailyPlan plan) : ILocalPlanSnapshotProvider
     {
@@ -264,8 +397,14 @@ public sealed class LiveValidationViewModelTests
         public int TempoCalls { get; private set; }
         public IReadOnlyList<IntegrationDiagnosticResult> Diagnostics { get; init; } = [new(IntegrationDiagnosticTarget.Toggl, true, "Available")];
         public LiveValidationResult? TempoResult { get; init; }
+        public LiveValidationPreview? Preview { get; init; }
         public Exception? TogglException { get; init; }
         public TaskCompletionSource<LiveValidationResult>? PendingToggl { get; init; }
+        public bool CompleteTogglOnCancellation { get; init; }
+        public bool TogglCancellationObserved { get; private set; }
+
+        public Task<LiveValidationPreview> LoadPreviewAsync(PlannedWorkItem item, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Preview ?? new LiveValidationPreview(null, "planner", "https://jira.example.test", item.TempoCategory));
 
         public Task<IReadOnlyList<IntegrationDiagnosticResult>> RunAsync(CancellationToken cancellationToken = default)
         {
@@ -277,6 +416,20 @@ public sealed class LiveValidationViewModelTests
         {
             TogglCalls++;
             if (PendingToggl is not null) return PendingToggl.Task;
+            if (CompleteTogglOnCancellation)
+            {
+                var completion = new TaskCompletionSource<LiveValidationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+                cancellationToken.Register(() =>
+                {
+                    TogglCancellationObserved = true;
+                    completion.TrySetResult(new LiveValidationResult(
+                        LiveValidationStep.Toggl,
+                        new DeliveryAttempt(item.Id, 44, null, DeliveryAttemptStatus.ReconciliationRequired, DeliveryFailureCode.Cancelled, SlackDeliveryState.NotSupported),
+                        "Toggl reconciliation is required.",
+                        LiveValidationOutcome.ReconciliationRequired));
+                });
+                return completion.Task;
+            }
             return TogglException is null
                 ? Task.FromResult(Result(LiveValidationStep.Toggl, item, DeliveryAttemptStatus.InProgress, togglId: 44))
                 : Task.FromException<LiveValidationResult>(TogglException);
@@ -285,13 +438,13 @@ public sealed class LiveValidationViewModelTests
         public Task<LiveValidationResult> ValidateJiraAsync(PlannedWorkItem item, CancellationToken cancellationToken = default)
         {
             JiraCalls++;
-            return Task.FromResult(Result(LiveValidationStep.Jira, item, DeliveryAttemptStatus.Succeeded));
+            return Task.FromResult(Result(LiveValidationStep.Jira, item, DeliveryAttemptStatus.Succeeded, LiveValidationOutcome.Validated));
         }
 
         public Task<LiveValidationResult> CreateAndVerifyTempoAsync(PlannedWorkItem item, CancellationToken cancellationToken = default)
         {
             TempoCalls++;
-            return Task.FromResult(TempoResult ?? Result(LiveValidationStep.Tempo, item, DeliveryAttemptStatus.Succeeded, tempoId: 55));
+            return Task.FromResult(TempoResult ?? Result(LiveValidationStep.Tempo, item, DeliveryAttemptStatus.Succeeded, LiveValidationOutcome.Verified, tempoId: 55));
         }
     }
 
@@ -307,16 +460,17 @@ public sealed class LiveValidationViewModelTests
     {
         public int LoadCalls { get; private set; }
         public int SaveCalls { get; private set; }
-        public UserSettings Load() { LoadCalls++; return new UserSettings(); }
+        public UserSettings Load() { LoadCalls++; return new UserSettings { JiraBaseUrl = "https://jira.example.test", JiraUser = "planner", TogglWorkspaceId = 77 }; }
         public void Save(UserSettings settings) => SaveCalls++;
     }
 
     private sealed class TrackingAttemptRepository : IDeliveryAttemptRepository
     {
-        public int Calls { get; private set; }
-        public Task<DeliveryAttempt?> GetAsync(Guid id, CancellationToken cancellationToken = default) { Calls++; throw new InvalidOperationException(); }
-        public Task<IReadOnlyList<DeliveryAttempt>> ListAsync(CancellationToken cancellationToken = default) { Calls++; throw new InvalidOperationException(); }
-        public Task<DeliveryAttemptClaim> ClaimAsync(Guid id, CancellationToken cancellationToken = default) { Calls++; throw new InvalidOperationException(); }
-        public Task SaveAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default) { Calls++; throw new InvalidOperationException(); }
+        public int ReadCalls { get; private set; }
+        public int WriteCalls { get; private set; }
+        public Task<DeliveryAttempt?> GetAsync(Guid id, CancellationToken cancellationToken = default) { ReadCalls++; return Task.FromResult<DeliveryAttempt?>(null); }
+        public Task<IReadOnlyList<DeliveryAttempt>> ListAsync(CancellationToken cancellationToken = default) { ReadCalls++; return Task.FromResult<IReadOnlyList<DeliveryAttempt>>([]); }
+        public Task<DeliveryAttemptClaim> ClaimAsync(Guid id, CancellationToken cancellationToken = default) { WriteCalls++; throw new InvalidOperationException(); }
+        public Task SaveAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default) { WriteCalls++; throw new InvalidOperationException(); }
     }
 }

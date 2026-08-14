@@ -30,7 +30,10 @@ public sealed record DeliveryAttempt(
     long? TempoWorklogId,
     DeliveryAttemptStatus Status,
     DeliveryFailureCode? FailureCode,
-    SlackDeliveryState SlackState);
+    SlackDeliveryState SlackState,
+    DateTimeOffset? TogglWriteRecordedAtUtc = null,
+    DateTimeOffset? TempoWriteRecordedAtUtc = null,
+    DateTimeOffset? ReconciliationRecordedAtUtc = null);
 
 public sealed record DeliveryAttemptClaim(DeliveryAttempt Attempt, bool IsAcquired);
 

@@ -482,8 +482,44 @@ public sealed class SqliteDeliveryAttemptRepositoryTests : IAsyncLifetime
             columns.Add(reader.GetString(0));
 
         Assert.Equal(
-            ["planned_work_item_id", "toggl_entry_id", "tempo_worklog_id", "status", "failure_code", "slack_state"],
+            ["planned_work_item_id", "toggl_entry_id", "tempo_worklog_id", "status", "failure_code", "slack_state", "toggl_write_recorded_at_utc", "tempo_write_recorded_at_utc", "reconciliation_recorded_at_utc"],
             columns);
+    }
+
+    [Fact]
+    public async Task OpenConnectionAsync_MigratesExistingDeliveryAttemptsAndPersistsSafeEvidenceTimestamps()
+    {
+        var itemId = Guid.NewGuid();
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={databasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE delivery_attempts (
+                    planned_work_item_id TEXT PRIMARY KEY,
+                    toggl_entry_id INTEGER NULL,
+                    tempo_worklog_id INTEGER NULL,
+                    status INTEGER NOT NULL,
+                    failure_code INTEGER NULL,
+                    slack_state INTEGER NOT NULL);
+                INSERT INTO delivery_attempts VALUES ($id, 101, NULL, 0, NULL, 0);
+                """;
+            command.Parameters.AddWithValue("$id", itemId.ToString("D"));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var repository = new SqliteDeliveryAttemptRepository(new SqliteDatabase(databasePath));
+        var migrated = await repository.GetAsync(itemId);
+        Assert.NotNull(migrated);
+        Assert.Null(migrated.TogglWriteRecordedAtUtc);
+
+        var togglAt = new DateTimeOffset(2026, 8, 14, 13, 0, 0, TimeSpan.Zero);
+        var reconciliationAt = togglAt.AddMinutes(1);
+        await repository.SaveAsync(migrated with { TogglWriteRecordedAtUtc = togglAt, ReconciliationRecordedAtUtc = reconciliationAt });
+
+        var reopened = await new SqliteDeliveryAttemptRepository(new SqliteDatabase(databasePath)).GetAsync(itemId);
+        Assert.Equal(togglAt, reopened!.TogglWriteRecordedAtUtc);
+        Assert.Equal(reconciliationAt, reopened.ReconciliationRecordedAtUtc);
     }
 
     [Fact]

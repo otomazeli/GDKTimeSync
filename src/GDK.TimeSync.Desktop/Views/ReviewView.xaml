@@ -75,6 +75,9 @@
             <TextBlock Text="{Binding LiveValidation.SelectedItem.JiraIssueKey}" />
             <TextBlock Text="{Binding LiveValidation.SelectedItem.Comment}" TextWrapping="Wrap" />
             <TextBlock Text="{Binding LiveValidation.SelectedItem.Duration, StringFormat={}{0:g}}" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.TogglProject, StringFormat=Toggl project: {0}}" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.Start, StringFormat=Local start: {0:t}}" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.End, StringFormat=Local end: {0:t}}" />
             <StackPanel Orientation="Horizontal"><Button Command="{Binding LiveValidation.ConfirmTogglCommand}">Confirm Toggl entry</Button><Button Margin="8,0,0,0" Command="{Binding LiveValidation.CancelTogglConfirmationCommand}">Cancel</Button></StackPanel>
         </StackPanel>
         <StackPanel Margin="0,8,0,0">
@@ -88,8 +91,21 @@
             <TextBlock Text="{Binding LiveValidation.SelectedItem.JiraIssueKey}" />
             <TextBlock Text="{Binding LiveValidation.SelectedItem.Comment}" TextWrapping="Wrap" />
             <TextBlock Text="{Binding LiveValidation.SelectedItem.Duration, StringFormat={}{0:g}}" />
+            <TextBlock Text="{Binding LiveValidation.SelectedItem.Start, StringFormat=Local start: {0:t}}" />
+            <TextBlock Text="{Binding LiveValidation.TempoWorker, StringFormat=Tempo worker: {0}}" />
+            <TextBlock Text="{Binding LiveValidation.TempoBaseUrl, StringFormat=Tempo server: {0}}" />
+            <TextBlock Text="{Binding LiveValidation.TempoConfigurationCategory, StringFormat=Tempo category: {0}}" />
             <StackPanel Orientation="Horizontal"><Button Command="{Binding LiveValidation.ConfirmTempoCommand}">Confirm Tempo worklog</Button><Button Margin="8,0,0,0" Command="{Binding LiveValidation.CancelTempoConfirmationCommand}">Cancel</Button></StackPanel>
         </StackPanel>
+        <Button Width="170" Margin="0,8,0,0" HorizontalAlignment="Left" Command="{Binding LiveValidation.CancelOperationCommand}">
+            <Button.Style>
+                <Style TargetType="Button">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers><DataTrigger Binding="{Binding LiveValidation.IsInFlight}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                </Style>
+            </Button.Style>
+            Cancel current operation
+        </Button>
         <TextBlock Margin="0,8,0,0" Text="{Binding LiveValidation.StepStatus}" TextWrapping="Wrap" />
         <TextBlock Margin="0,4,0,0" Text="{Binding LiveValidation.RecoveryMessage}" Foreground="Firebrick" TextWrapping="Wrap" />
         <Separator Margin="0,12,0,8" />
