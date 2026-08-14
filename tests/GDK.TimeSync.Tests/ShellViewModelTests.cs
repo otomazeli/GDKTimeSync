@@ -6,6 +6,22 @@ namespace GDK.TimeSync.Tests;
 
 public sealed class ShellViewModelTests
 {
+    [Theory]
+    [InlineData(EndOfDayReminderMode.TrayNotificationOnly, true, false)]
+    [InlineData(EndOfDayReminderMode.OpenReviewOnly, false, true)]
+    [InlineData(EndOfDayReminderMode.Both, true, true)]
+    [InlineData((EndOfDayReminderMode)999, true, true)]
+    public void Review_reminder_mode_selects_the_requested_local_presentation_actions(
+        EndOfDayReminderMode mode,
+        bool showTrayNotification,
+        bool openReviewWindow)
+    {
+        var actions = ReviewReminderActions.From(mode);
+
+        Assert.Equal(showTrayNotification, actions.ShowTrayNotification);
+        Assert.Equal(openReviewWindow, actions.OpenReviewWindow);
+    }
+
     [Fact]
     public void NavigateCommand_SelectsRequestedPage()
     {

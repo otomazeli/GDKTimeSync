@@ -36,6 +36,9 @@ public sealed class TrayIconService : IDisposable
         notifyIcon.Dispose();
     }
 
+    public void ShowReviewReminder() =>
+        notifyIcon.ShowBalloonTip(5000, "GDK TimeSync", "Your end-of-day review is ready.", ToolTipIcon.Info);
+
     private void OnSyncCanExecuteChanged(object? sender, EventArgs e) => UpdateSyncEnabled();
 
     private void UpdateSyncEnabled() => syncItem.Enabled = syncCommand.CanExecute(null);

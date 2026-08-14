@@ -12,7 +12,8 @@ public partial class App : System.Windows.Application
 {
     private ServiceProvider? serviceProvider;
     private TrayIconService? trayIcon;
-    private bool isExiting;
+    private IEndOfDayReminderService? endOfDayReminderService;
+    private volatile bool isExiting;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -31,6 +32,8 @@ public partial class App : System.Windows.Application
         services.AddHttpClient(SlackClientFactory.HttpClientName);
         services.AddSingleton<UserSettingsService>();
         services.AddSingleton<IUserSettingsStore>(provider => provider.GetRequiredService<UserSettingsService>());
+        services.AddSingleton<TimeProvider>(TimeProvider.System);
+        services.AddSingleton<IEndOfDayReminderService, EndOfDayReminderService>();
         services.AddSingleton<WindowsCredentialStore>();
         services.AddSingleton<ICredentialStore>(provider => provider.GetRequiredService<WindowsCredentialStore>());
         services.AddSingleton<IIntegrationClientFactory, IntegrationClientFactory>();
@@ -49,6 +52,9 @@ public partial class App : System.Windows.Application
 
         serviceProvider = services.BuildServiceProvider();
         trayIcon = new TrayIconService(ShowMainWindow, ShowSettings, ExitApplication, serviceProvider.GetRequiredService<MainViewModel>().SyncNowCommand);
+        endOfDayReminderService = serviceProvider.GetRequiredService<IEndOfDayReminderService>();
+        endOfDayReminderService.ReviewDue += OnReviewDue;
+        endOfDayReminderService.StartAsync().GetAwaiter().GetResult();
         ShowMainWindow();
     }
 
@@ -63,6 +69,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        StopEndOfDayReminderAsync().GetAwaiter().GetResult();
         trayIcon?.Dispose();
         serviceProvider?.Dispose();
         base.OnExit(e);
@@ -87,7 +94,45 @@ public partial class App : System.Windows.Application
     {
         if (isExiting) return;
         isExiting = true;
+        await StopEndOfDayReminderAsync();
         await serviceProvider!.GetRequiredService<ShellViewModel>().FlushAsync();
         Shutdown();
+    }
+
+    private void OnReviewDue(object? sender, ReviewDueEventArgs e)
+    {
+        if (isExiting || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        _ = DispatchReviewReminderAsync(e.Mode);
+    }
+
+    private async Task DispatchReviewReminderAsync(EndOfDayReminderMode mode)
+    {
+        try
+        {
+            await Dispatcher.InvokeAsync(() => HandleReviewReminderAsync(mode)).Task.Unwrap();
+        }
+        catch (Exception) when (isExiting || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) { }
+        catch (Exception) { }
+    }
+
+    private async Task HandleReviewReminderAsync(EndOfDayReminderMode mode)
+    {
+        if (isExiting || trayIcon is null || serviceProvider is null) return;
+
+        var actions = ReviewReminderActions.From(mode);
+        if (actions.ShowTrayNotification) trayIcon.ShowReviewReminder();
+        if (!actions.OpenReviewWindow) return;
+
+        ShowMainWindow();
+        await serviceProvider.GetRequiredService<ShellViewModel>().NavigateAsync(NavigationPage.Review);
+    }
+
+    private async Task StopEndOfDayReminderAsync()
+    {
+        if (endOfDayReminderService is null) return;
+
+        endOfDayReminderService.ReviewDue -= OnReviewDue;
+        await endOfDayReminderService.StopAsync();
+        endOfDayReminderService = null;
     }
 }
