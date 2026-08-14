@@ -37,6 +37,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<WindowsCredentialStore>();
         services.AddSingleton<ICredentialStore>(provider => provider.GetRequiredService<WindowsCredentialStore>());
         services.AddSingleton<IIntegrationClientFactory, IntegrationClientFactory>();
+        services.AddSingleton<IIntegrationDiagnosticsService, IntegrationDiagnosticsService>();
         services.AddSingleton<IConfirmedTaskDeliveryService, ConfirmedTaskDeliveryService>();
         services.AddSingleton<ISlackClientFactory, SlackClientFactory>();
         services.AddSingleton<IConfigurationStateService, ConfigurationStateService>();
