@@ -45,7 +45,7 @@ public sealed class EndOfDayReminderService(IUserSettingsStore settingsStore, Ti
         cancellation.Cancel();
         try
         {
-            await loop.WaitAsync(cancellationToken);
+            await loop.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -75,7 +75,7 @@ public sealed class EndOfDayReminderService(IUserSettingsStore settingsStore, Ti
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1), timeProvider);
         try
         {
-            while (await timer.WaitForNextTickAsync(cancellationToken)) CheckNow();
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false)) CheckNow();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }

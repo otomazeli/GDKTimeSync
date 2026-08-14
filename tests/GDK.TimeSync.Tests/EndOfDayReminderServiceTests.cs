@@ -18,6 +18,32 @@ public sealed class EndOfDayReminderServiceTests
     }
 
     [Fact]
+    public async Task StopAsync_completes_timer_cleanup_without_pumping_the_captured_context()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 15, 0, 0, TimeSpan.Zero));
+        var reminder = CreateService("16:00", EndOfDayReminderMode.Both, clock);
+        var previousContext = SynchronizationContext.Current;
+        var stoppedContext = new NonPumpingSynchronizationContext();
+        Task stopTask;
+
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(stoppedContext);
+            Assert.True(reminder.StartAsync().IsCompletedSuccessfully);
+            stopTask = reminder.StopAsync();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+
+        await stopTask.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.True(clock.TimerDisposed);
+        Assert.Equal(0, stoppedContext.PostCalls);
+    }
+
+    [Fact]
     public async Task Stopping_a_faulting_reminder_still_runs_the_remaining_exit_action()
     {
         var reminder = new ThrowingStopReminderService();
@@ -168,6 +194,13 @@ public sealed class EndOfDayReminderServiceTests
 
         public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task StopAsync(CancellationToken cancellationToken = default) { StopCalls++; return stopCompletion.Task; }
+    }
+
+    private sealed class NonPumpingSynchronizationContext : SynchronizationContext
+    {
+        public int PostCalls { get; private set; }
+
+        public override void Post(SendOrPostCallback callback, object? state) => PostCalls++;
     }
 
     private sealed class FakeTimeProvider(DateTimeOffset now) : TimeProvider
