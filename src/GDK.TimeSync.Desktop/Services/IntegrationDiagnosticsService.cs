@@ -24,23 +24,33 @@ public sealed class IntegrationDiagnosticsService(IIntegrationClientFactory clie
         where TClient : IDisposable
     {
         TClient? client = default;
+        IntegrationDiagnosticResult result;
         try
         {
             client = await create(cancellationToken);
             await check(client, cancellationToken);
-            return new IntegrationDiagnosticResult(target, true, "Available");
+            result = new IntegrationDiagnosticResult(target, true, "Available");
         }
         catch (OperationCanceledException)
         {
-            return new IntegrationDiagnosticResult(target, false, "Cancelled");
+            result = new IntegrationDiagnosticResult(target, false, "Cancelled");
         }
         catch
         {
-            return new IntegrationDiagnosticResult(target, false, "Unavailable");
+            result = new IntegrationDiagnosticResult(target, false, "Unavailable");
         }
         finally
         {
-            client?.Dispose();
+            try
+            {
+                client?.Dispose();
+            }
+            catch
+            {
+                result = new IntegrationDiagnosticResult(target, false, "Unavailable");
+            }
         }
+
+        return result;
     }
 }

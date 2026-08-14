@@ -83,10 +83,36 @@ public sealed class IntegrationDiagnosticsServiceTests
         Assert.All(clients.CreatedClients, client => Assert.True(client.WasDisposed));
     }
 
+    [Fact]
+    public async Task RunAsync_contains_client_disposal_failures_and_continues_to_later_targets()
+    {
+        var clients = new RecordingIntegrationClientFactory(throwingDisposeTarget: IntegrationDiagnosticTarget.Jira);
+        var service = new IntegrationDiagnosticsService(clients);
+
+        var results = await service.RunAsync();
+
+        Assert.Equal(
+            [
+                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Toggl, true, "Available"),
+                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Jira, false, "Unavailable"),
+                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Tempo, true, "Available")
+            ],
+            results);
+        Assert.Equal(
+            [
+                "Toggl GET /me/time_entries?start_date=" + DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd") + "&end_date=" + DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd"),
+                "Jira GET /rest/api/2/myself",
+                "Tempo GET /rest/tempo-core/1/work-attribute"
+            ],
+            clients.Requests);
+        Assert.All(clients.CreatedClients, client => Assert.True(client.WasDisposed));
+    }
+
     private sealed class RecordingIntegrationClientFactory(
         IntegrationDiagnosticTarget? failingTarget = null,
         IntegrationDiagnosticTarget? cancellingTarget = null,
-        string? failureDetail = null) : IIntegrationClientFactory
+        string? failureDetail = null,
+        IntegrationDiagnosticTarget? throwingDisposeTarget = null) : IIntegrationClientFactory
     {
         private readonly RecordingHandler handler = new(failingTarget, cancellingTarget, failureDetail);
 
@@ -94,20 +120,20 @@ public sealed class IntegrationDiagnosticsServiceTests
         public IReadOnlyList<string> Requests => handler.Requests;
 
         public Task<ITogglClient> CreateTogglAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<ITogglClient>(new TogglClient(CreateClient(), new TogglOptions { BaseUrl = "https://integrations.example.test/", ApiToken = "unit-token" }));
+            Task.FromResult<ITogglClient>(new TogglClient(CreateClient(IntegrationDiagnosticTarget.Toggl), new TogglOptions { BaseUrl = "https://integrations.example.test/", ApiToken = "unit-token" }));
 
         public Task<JiraClient> CreateJiraAsync(CancellationToken cancellationToken = default)
         {
             ThrowIfFactoryFails(IntegrationDiagnosticTarget.Jira);
-            return Task.FromResult(new JiraClient(CreateClient(), new JiraOptions { BaseUrl = "https://integrations.example.test", PersonalAccessToken = "unit-token" }, new IssueKeyValidator(new IssueKeyValidationOptions())));
+            return Task.FromResult(new JiraClient(CreateClient(IntegrationDiagnosticTarget.Jira), new JiraOptions { BaseUrl = "https://integrations.example.test", PersonalAccessToken = "unit-token" }, new IssueKeyValidator(new IssueKeyValidationOptions())));
         }
 
         public Task<TempoClient> CreateTempoAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new TempoClient(CreateClient(), new TempoOptions { BaseUrl = "https://integrations.example.test", PersonalAccessToken = "unit-token" }));
+            Task.FromResult(new TempoClient(CreateClient(IntegrationDiagnosticTarget.Tempo), new TempoOptions { BaseUrl = "https://integrations.example.test", PersonalAccessToken = "unit-token" }));
 
-        private TrackingHttpClient CreateClient()
+        private TrackingHttpClient CreateClient(IntegrationDiagnosticTarget target)
         {
-            var client = new TrackingHttpClient(handler);
+            var client = new TrackingHttpClient(handler, throwingDisposeTarget == target);
             CreatedClients.Add(client);
             return client;
         }
@@ -154,7 +180,7 @@ public sealed class IntegrationDiagnosticsServiceTests
         private static HttpResponseMessage Json<T>(T value) => new(HttpStatusCode.OK) { Content = JsonContent.Create(value) };
     }
 
-    private sealed class TrackingHttpClient(HttpMessageHandler handler) : HttpClient(handler, disposeHandler: false)
+    private sealed class TrackingHttpClient(HttpMessageHandler handler, bool throwOnDispose = false) : HttpClient(handler, disposeHandler: false)
     {
         public bool WasDisposed { get; private set; }
 
@@ -162,6 +188,7 @@ public sealed class IntegrationDiagnosticsServiceTests
         {
             WasDisposed = true;
             base.Dispose(disposing);
+            if (throwOnDispose) throw new InvalidOperationException("Test disposal failure.");
         }
     }
 }
