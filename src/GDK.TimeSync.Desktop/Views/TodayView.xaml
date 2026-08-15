@@ -1,15 +1,38 @@
 <UserControl x:Class="GDK.TimeSync.Desktop.Views.TodayView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+    </UserControl.Resources>
     <DockPanel>
         <StackPanel DockPanel.Dock="Top">
             <TextBlock Text="Today" FontSize="24" FontWeight="SemiBold" />
             <TextBlock Margin="0,8,0,0" Text="{Binding PlannedSeconds, StringFormat=Planned: {0} seconds}" Foreground="DimGray" />
             <TextBlock Margin="0,4,0,12" Text="Rows are saved locally. Nothing is posted externally." Foreground="DimGray" />
             <TextBlock Margin="0,0,0,8" Text="{Binding PersistenceError}" Foreground="DarkRed" TextWrapping="Wrap" />
-            <Button Width="110" HorizontalAlignment="Left" Command="{Binding AddItemCommand}">Add item</Button>
+            <StackPanel Orientation="Horizontal">
+                <Button Width="110" Command="{Binding AddItemCommand}">Add item</Button>
+                <Button Margin="8,0,0,0" Command="{Binding OpenAiConsentCommand}">Improve description</Button>
+            </StackPanel>
+            <StackPanel Margin="0,8,0,0" Visibility="{Binding IsAiConsentVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <TextBlock Text="Review the selected item before requesting a description suggestion." FontWeight="SemiBold" />
+                <TextBlock Text="{Binding PendingAiRequest.PlannedWorkItemId, StringFormat=Item ID: {0}}" />
+                <TextBlock Text="{Binding PendingAiRequest.TaskName, StringFormat=Task: {0}}" />
+                <TextBlock Text="{Binding PendingAiRequest.JiraIssueKey, StringFormat=Jira key: {0}}" />
+                <TextBlock Text="{Binding PendingAiRequest.CurrentDescription, StringFormat=Current description: {0}}" TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <Button Command="{Binding ConfirmAiConsentCommand}">Continue</Button>
+                    <Button Margin="8,0,0,0" Command="{Binding CancelAiConsentCommand}">Cancel</Button>
+                </StackPanel>
+            </StackPanel>
+            <TextBlock Margin="0,8,0,0" Text="{Binding AiStatus}" Foreground="DimGray" TextWrapping="Wrap" />
+            <StackPanel Visibility="{Binding HasSuggestedDescription, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <TextBlock Text="Suggested description" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding SuggestedDescription}" TextWrapping="Wrap" />
+                <Button Width="110" HorizontalAlignment="Left" Margin="0,4,0,0" Command="{Binding ApplyAiSuggestionCommand}">Apply</Button>
+            </StackPanel>
         </StackPanel>
-        <DataGrid Margin="0,16,0,0" ItemsSource="{Binding Items}" AutoGenerateColumns="False" CanUserAddRows="False">
+        <DataGrid Margin="0,16,0,0" ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedItem, Mode=TwoWay}" AutoGenerateColumns="False" CanUserAddRows="False">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
                 <DataGridTextColumn Header="Jira key" Binding="{Binding JiraIssueKey, UpdateSourceTrigger=PropertyChanged}" />

@@ -2,26 +2,41 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using GDK.TimeSync.Core;
+using GDK.TimeSync.Desktop.Services;
 
 namespace GDK.TimeSync.Desktop.ViewModels;
 
 public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotProvider
 {
     private readonly IDailyPlanRepository? repository;
+    private readonly IAiConsentService? aiConsentService;
+    private readonly IAssistedTextGenerator? assistedTextGenerator;
     private readonly object persistenceLock = new();
     private Task? pendingSave;
     private bool saveRequested;
     private bool isInitialized;
     private string? persistenceError;
+    private PlannedWorkItemViewModel? selectedItem;
+    private DescriptionSuggestionRequest? pendingAiRequest;
+    private string? suggestedDescription;
+    private string? aiStatus;
+    private bool isAiConsentVisible;
+    private Guid? suggestedItemId;
 
-    public TodayViewModel(IDailyPlanRepository? repository = null, DateOnly? date = null)
+    public TodayViewModel(IDailyPlanRepository? repository = null, DateOnly? date = null, IAiConsentService? aiConsentService = null, IAssistedTextGenerator? assistedTextGenerator = null)
     {
         this.repository = repository;
+        this.aiConsentService = aiConsentService;
+        this.assistedTextGenerator = assistedTextGenerator;
         Date = date ?? DateOnly.FromDateTime(DateTime.Today);
         Items.CollectionChanged += OnItemsChanged;
         AddItemCommand = new RelayCommand(_ => Items.Add(new PlannedWorkItemViewModel()));
         RemoveItemCommand = new RelayCommand(RemoveItem);
         AddTemplateCommand = new RelayCommand(AddTemplate);
+        OpenAiConsentCommand = new RelayCommand(OpenAiConsent);
+        ConfirmAiConsentCommand = new RelayCommand(async _ => await ConfirmAiConsentAsync());
+        CancelAiConsentCommand = new RelayCommand(_ => CancelAiConsent());
+        ApplyAiSuggestionCommand = new RelayCommand(_ => ApplyAiSuggestion());
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -31,9 +46,19 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     public RelayCommand AddItemCommand { get; }
     public RelayCommand RemoveItemCommand { get; }
     public RelayCommand AddTemplateCommand { get; }
+    public RelayCommand OpenAiConsentCommand { get; }
+    public RelayCommand ConfirmAiConsentCommand { get; }
+    public RelayCommand CancelAiConsentCommand { get; }
+    public RelayCommand ApplyAiSuggestionCommand { get; }
     public double PlannedSeconds => Items.Sum(item => item.Duration.TotalSeconds);
     public IReadOnlyList<WorkStatusOption> WorkStatuses => WorkStatusOption.All;
     public string? PersistenceError { get => persistenceError; private set => SetField(ref persistenceError, value); }
+    public PlannedWorkItemViewModel? SelectedItem { get => selectedItem; set => SetField(ref selectedItem, value); }
+    public DescriptionSuggestionRequest? PendingAiRequest { get => pendingAiRequest; private set => SetField(ref pendingAiRequest, value); }
+    public string? SuggestedDescription { get => suggestedDescription; private set => SetSuggestedDescription(value); }
+    public bool HasSuggestedDescription => !string.IsNullOrWhiteSpace(SuggestedDescription);
+    public string? AiStatus { get => aiStatus; private set => SetField(ref aiStatus, value); }
+    public bool IsAiConsentVisible { get => isAiConsentVisible; private set => SetField(ref isAiConsentVisible, value); }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -81,6 +106,103 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     {
         if (item is PlannedWorkItemViewModel plannedItem)
             Items.Remove(plannedItem);
+    }
+
+    private void OpenAiConsent(object? _)
+    {
+        if (SelectedItem is null)
+        {
+            AiStatus = "Select an item before requesting an AI suggestion.";
+            return;
+        }
+
+        PendingAiRequest = new DescriptionSuggestionRequest(
+            SelectedItem.Id,
+            SelectedItem.Name,
+            SelectedItem.JiraIssueKey,
+            SelectedItem.Description);
+        SuggestedDescription = null;
+        suggestedItemId = null;
+        AiStatus = null;
+        IsAiConsentVisible = true;
+    }
+
+    private void CancelAiConsent()
+    {
+        PendingAiRequest = null;
+        IsAiConsentVisible = false;
+        AiStatus = null;
+    }
+
+    private async Task ConfirmAiConsentAsync()
+    {
+        var request = PendingAiRequest;
+        PendingAiRequest = null;
+        IsAiConsentVisible = false;
+        SuggestedDescription = null;
+        suggestedItemId = null;
+
+        if (request is null)
+        {
+            AiStatus = "Open the consent preview before continuing.";
+            return;
+        }
+
+        if (aiConsentService is null || assistedTextGenerator is null)
+        {
+            AiStatus = "AI provider is not configured.";
+            return;
+        }
+
+        if (!aiConsentService.CanSubmit(request) ||
+            !aiConsentService.IsEnabled ||
+            string.IsNullOrWhiteSpace(request.TaskName) ||
+            string.IsNullOrWhiteSpace(request.JiraIssueKey) ||
+            string.IsNullOrWhiteSpace(request.CurrentDescription))
+        {
+            AiStatus = "AI suggestions are unavailable for this item.";
+            return;
+        }
+
+        try
+        {
+            var result = await assistedTextGenerator.SuggestAsync(request);
+            if (!result.IsAvailable || string.IsNullOrWhiteSpace(result.SuggestedDescription))
+            {
+                AiStatus = "AI provider is not configured.";
+                return;
+            }
+
+            SuggestedDescription = result.SuggestedDescription;
+            suggestedItemId = request.PlannedWorkItemId;
+            AiStatus = "AI suggestion is ready to review.";
+        }
+        catch
+        {
+            AiStatus = "AI suggestion could not be generated.";
+        }
+    }
+
+    private void ApplyAiSuggestion()
+    {
+        if (SuggestedDescription is null || suggestedItemId is null || SelectedItem?.Id != suggestedItemId)
+        {
+            AiStatus = "Select the item that received the suggestion before applying it.";
+            return;
+        }
+
+        SelectedItem.Description = SuggestedDescription;
+        SuggestedDescription = null;
+        suggestedItemId = null;
+        AiStatus = "AI suggestion applied locally.";
+    }
+
+    private void SetSuggestedDescription(string? value)
+    {
+        if (string.Equals(suggestedDescription, value, StringComparison.Ordinal)) return;
+        suggestedDescription = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SuggestedDescription)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasSuggestedDescription)));
     }
 
     private void OnItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)

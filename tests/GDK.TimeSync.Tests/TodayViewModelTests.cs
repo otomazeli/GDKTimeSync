@@ -1,4 +1,5 @@
 using GDK.TimeSync.Desktop.ViewModels;
+using GDK.TimeSync.Desktop.Services;
 using GDK.TimeSync.Core;
 
 namespace GDK.TimeSync.Tests;
@@ -66,5 +67,177 @@ public sealed class TodayViewModelTests
         item.Duration = TimeSpan.FromMinutes(45);
 
         Assert.Equal(2700, today.PlannedSeconds);
+    }
+
+    [Fact]
+    public void OpeningAndCancellingAiConsent_DoesNotCallServicesOrEditTheSelectedDescription()
+    {
+        var repository = new CountingPlanRepository();
+        var policy = new FakeConsentService(isEnabled: true, canSubmit: true);
+        var generator = new FakeGenerator(new DescriptionSuggestionResult(true, "Suggested", "Ready"));
+        var today = new TodayViewModel(repository, null, policy, generator);
+        var selected = AddSelectedItem(today, "Current description");
+
+        today.OpenAiConsentCommand.Execute(null);
+        Assert.Equal(new DescriptionSuggestionRequest(selected.Id, "Work", "CGMFRAVII-1", "Current description"), today.PendingAiRequest);
+        today.CancelAiConsentCommand.Execute(null);
+
+        Assert.Null(today.PendingAiRequest);
+        Assert.False(today.IsAiConsentVisible);
+        Assert.Equal("Current description", selected.Description);
+        Assert.Equal(0, policy.CanSubmitCalls);
+        Assert.Equal(0, generator.SuggestCalls);
+        Assert.Equal(0, repository.GetCalls);
+        Assert.Equal(0, repository.SaveCalls);
+    }
+
+    [Fact]
+    public void ConfirmedUnavailableAiRequest_UsesTheSelectedPayloadAndDoesNotEditTheDescription()
+    {
+        var policy = new FakeConsentService(isEnabled: true, canSubmit: true);
+        var generator = new FakeGenerator(new DescriptionSuggestionResult(false, null, "AI provider is not configured."));
+        var today = new TodayViewModel(null, null, policy, generator);
+        var selected = AddSelectedItem(today, "Current description");
+
+        today.OpenAiConsentCommand.Execute(null);
+        today.ConfirmAiConsentCommand.Execute(null);
+
+        Assert.Equal(new DescriptionSuggestionRequest(selected.Id, "Work", "CGMFRAVII-1", "Current description"), generator.Request);
+        Assert.Equal("AI provider is not configured.", today.AiStatus);
+        Assert.Null(today.SuggestedDescription);
+        Assert.False(today.IsAiConsentVisible);
+        Assert.Equal("Current description", selected.Description);
+        Assert.Equal(1, policy.CanSubmitCalls);
+        Assert.Equal(1, generator.SuggestCalls);
+    }
+
+    [Fact]
+    public void SuggestedDescription_RequiresExplicitApplyAndUpdatesOnlyTheStillSelectedItem()
+    {
+        var policy = new FakeConsentService(isEnabled: true, canSubmit: true);
+        var generator = new FakeGenerator(new DescriptionSuggestionResult(true, "AI draft", "Ready"));
+        var today = new TodayViewModel(null, null, policy, generator);
+        var selected = AddSelectedItem(today, "Current description");
+        var other = new PlannedWorkItemViewModel("Other", "CGMFRAVII-2", "Other description");
+        today.Items.Add(other);
+
+        today.OpenAiConsentCommand.Execute(null);
+        today.ConfirmAiConsentCommand.Execute(null);
+
+        Assert.Equal("AI draft", today.SuggestedDescription);
+        Assert.Equal("Current description", selected.Description);
+        Assert.Equal("Other description", other.Description);
+
+        today.SelectedItem = other;
+        today.ApplyAiSuggestionCommand.Execute(null);
+
+        Assert.Equal("Current description", selected.Description);
+        Assert.Equal("Other description", other.Description);
+        Assert.Equal("AI draft", today.SuggestedDescription);
+
+        today.SelectedItem = selected;
+        today.ApplyAiSuggestionCommand.Execute(null);
+
+        Assert.Equal("AI draft", selected.Description);
+        Assert.Equal("Other description", other.Description);
+        Assert.Null(today.SuggestedDescription);
+        Assert.Equal(1, policy.CanSubmitCalls);
+        Assert.Equal(1, generator.SuggestCalls);
+    }
+
+    [Theory]
+    [InlineData(false, true, "Work", "CGMFRAVII-1", "Current description")]
+    [InlineData(true, true, "", "CGMFRAVII-1", "Current description")]
+    public void DisabledOrIncompleteAiRequest_BlocksBeforeCallingTheGenerator(bool enabled, bool canSubmit, string name, string jiraKey, string description)
+    {
+        var policy = new FakeConsentService(enabled, canSubmit);
+        var generator = new FakeGenerator(new DescriptionSuggestionResult(true, "AI draft", "Ready"));
+        var today = new TodayViewModel(null, null, policy, generator);
+        var selected = new PlannedWorkItemViewModel(name, jiraKey, description);
+        today.Items.Add(selected);
+        today.SelectedItem = selected;
+
+        today.OpenAiConsentCommand.Execute(null);
+        today.ConfirmAiConsentCommand.Execute(null);
+
+        Assert.Equal(1, policy.CanSubmitCalls);
+        Assert.Equal(0, generator.SuggestCalls);
+        Assert.Null(today.SuggestedDescription);
+        Assert.Equal(description, selected.Description);
+    }
+
+    [Fact]
+    public void GeneratorException_UsesAFixedSafeStatusWithoutEchoingExceptionText()
+    {
+        const string sentinel = "do-not-echo-this-provider-exception";
+        var policy = new FakeConsentService(isEnabled: true, canSubmit: true);
+        var generator = new FakeGenerator(Task.FromException<DescriptionSuggestionResult>(new InvalidOperationException(sentinel)));
+        var today = new TodayViewModel(null, null, policy, generator);
+        var selected = AddSelectedItem(today, "Current description");
+
+        today.OpenAiConsentCommand.Execute(null);
+        today.ConfirmAiConsentCommand.Execute(null);
+
+        Assert.DoesNotContain(sentinel, today.AiStatus, StringComparison.Ordinal);
+        Assert.DoesNotContain(sentinel, today.SuggestedDescription ?? string.Empty, StringComparison.Ordinal);
+        Assert.Equal("Current description", selected.Description);
+        Assert.Equal(1, generator.SuggestCalls);
+    }
+
+    private static PlannedWorkItemViewModel AddSelectedItem(TodayViewModel today, string description)
+    {
+        var item = new PlannedWorkItemViewModel("Work", "CGMFRAVII-1", description);
+        today.Items.Add(item);
+        today.SelectedItem = item;
+        return item;
+    }
+
+    private sealed class FakeConsentService(bool isEnabled, bool canSubmit) : IAiConsentService
+    {
+        public int CanSubmitCalls { get; private set; }
+        public bool IsEnabled { get; } = isEnabled;
+
+        public bool CanSubmit(DescriptionSuggestionRequest request)
+        {
+            CanSubmitCalls++;
+            return canSubmit;
+        }
+    }
+
+    private sealed class FakeGenerator : IAssistedTextGenerator
+    {
+        private readonly Task<DescriptionSuggestionResult> result;
+
+        public FakeGenerator(DescriptionSuggestionResult result) : this(Task.FromResult(result)) { }
+
+        public FakeGenerator(Task<DescriptionSuggestionResult> result) => this.result = result;
+
+        public int SuggestCalls { get; private set; }
+        public DescriptionSuggestionRequest? Request { get; private set; }
+
+        public Task<DescriptionSuggestionResult> SuggestAsync(DescriptionSuggestionRequest request, CancellationToken cancellationToken = default)
+        {
+            SuggestCalls++;
+            Request = request;
+            return result;
+        }
+    }
+
+    private sealed class CountingPlanRepository : IDailyPlanRepository
+    {
+        public int GetCalls { get; private set; }
+        public int SaveCalls { get; private set; }
+
+        public Task<DailyPlan?> GetAsync(DateOnly date, CancellationToken cancellationToken = default)
+        {
+            GetCalls++;
+            return Task.FromResult<DailyPlan?>(null);
+        }
+
+        public Task SaveAsync(DailyPlan plan, CancellationToken cancellationToken = default)
+        {
+            SaveCalls++;
+            return Task.CompletedTask;
+        }
     }
 }
