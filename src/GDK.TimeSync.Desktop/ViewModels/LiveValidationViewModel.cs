@@ -320,7 +320,7 @@ public sealed class LiveValidationViewModel : INotifyPropertyChanged
             { Status: DeliveryAttemptStatus.InProgress, TogglEntryId: not null } =>
                 ("Toggl is recorded; validate Jira, then confirm Tempo.", null),
             { Status: DeliveryAttemptStatus.Succeeded } =>
-                ("Existing delivery is recorded.", "Existing completed delivery requires manual review; this screen has not read Tempo back."),
+                ("Existing delivery is recorded.", RecoveryForDurableAttempt(DurableAttempt)),
             { Status: DeliveryAttemptStatus.ReconciliationRequired } =>
                 ("Reconciliation is required.", RecoveryForAttempt(DurableAttempt)),
             { Status: DeliveryAttemptStatus.Cancelled } =>
@@ -345,7 +345,7 @@ public sealed class LiveValidationViewModel : INotifyPropertyChanged
     private static string? RecoveryForDurableAttempt(DeliveryAttempt? attempt) => attempt switch
     {
         { Status: DeliveryAttemptStatus.Succeeded } =>
-            "Existing completed delivery requires manual review; this screen has not read Tempo back.",
+            "Existing completed delivery requires manual review; this screen has not read Tempo back. Do not resend.",
         { Status: DeliveryAttemptStatus.ReconciliationRequired } => RecoveryForAttempt(attempt),
         { Status: DeliveryAttemptStatus.Cancelled } =>
             "Review the durable attempt before deciding any manual recovery; no automatic resend is available.",

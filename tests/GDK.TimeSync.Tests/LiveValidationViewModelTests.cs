@@ -376,6 +376,7 @@ public sealed class LiveValidationViewModelTests
         await viewModel.ValidateJiraAsync();
 
         Assert.Contains("manual review", viewModel.RecoveryMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("do not resend", viewModel.RecoveryMessage, StringComparison.OrdinalIgnoreCase);
         Assert.False(viewModel.CanOpenTogglConfirmation);
         Assert.False(viewModel.CanOpenTempoConfirmation);
         Assert.Equal(1, safety.JiraCalls);
