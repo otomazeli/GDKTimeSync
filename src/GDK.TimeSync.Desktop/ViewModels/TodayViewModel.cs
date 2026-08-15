@@ -21,6 +21,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     private string? suggestedDescription;
     private string? aiStatus;
     private bool isAiConsentVisible;
+    private Guid? pendingAiItemId;
     private Guid? suggestedItemId;
 
     public TodayViewModel(IDailyPlanRepository? repository = null, DateOnly? date = null, IAiConsentService? aiConsentService = null, IAssistedTextGenerator? assistedTextGenerator = null)
@@ -117,10 +118,10 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
         }
 
         PendingAiRequest = new DescriptionSuggestionRequest(
-            SelectedItem.Id,
             SelectedItem.Name,
             SelectedItem.JiraIssueKey,
             SelectedItem.Description);
+        pendingAiItemId = SelectedItem.Id;
         SuggestedDescription = null;
         suggestedItemId = null;
         AiStatus = null;
@@ -130,6 +131,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     private void CancelAiConsent()
     {
         PendingAiRequest = null;
+        pendingAiItemId = null;
         IsAiConsentVisible = false;
         AiStatus = null;
     }
@@ -137,7 +139,9 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     private async Task ConfirmAiConsentAsync()
     {
         var request = PendingAiRequest;
+        var requestItemId = pendingAiItemId;
         PendingAiRequest = null;
+        pendingAiItemId = null;
         IsAiConsentVisible = false;
         SuggestedDescription = null;
         suggestedItemId = null;
@@ -174,7 +178,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             }
 
             SuggestedDescription = result.SuggestedDescription;
-            suggestedItemId = request.PlannedWorkItemId;
+            suggestedItemId = requestItemId;
             AiStatus = "AI suggestion is ready to review.";
         }
         catch

@@ -1,6 +1,7 @@
 using GDK.TimeSync.Desktop.ViewModels;
 using GDK.TimeSync.Desktop.Services;
 using GDK.TimeSync.Core;
+using System.Xml.Linq;
 
 namespace GDK.TimeSync.Tests;
 
@@ -70,6 +71,29 @@ public sealed class TodayViewModelTests
     }
 
     [Fact]
+    public void Ai_consent_markup_names_the_ai_actions_and_discloses_exactly_three_fields()
+    {
+        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GDK.TimeSync.Desktop", "Views", "TodayView.xaml"));
+        var elements = XDocument.Load(path).Descendants().ToArray();
+        var disclosedBindings = elements
+            .Attributes("Text")
+            .Select(attribute => attribute.Value)
+            .Where(value => value.Contains("PendingAiRequest.", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.Equal([
+            "{Binding PendingAiRequest.TaskName, StringFormat=Task name: {0}}",
+            "{Binding PendingAiRequest.JiraIssueKey, StringFormat=Jira issue key: {0}}",
+            "{Binding PendingAiRequest.CurrentDescription, StringFormat=Current description: {0}}"
+        ], disclosedBindings);
+        Assert.Contains(elements, element => element.Attribute("Text")?.Value == "AI description consent");
+        Assert.Contains(elements, element => element.Attribute("Text")?.Value == "If you continue, AI will receive only these fields from the selected task:");
+        Assert.Equal("Draft AI description", ButtonContent(elements, "{Binding OpenAiConsentCommand}"));
+        Assert.Equal("Continue with AI", ButtonContent(elements, "{Binding ConfirmAiConsentCommand}"));
+        Assert.Equal("Apply to description", ButtonContent(elements, "{Binding ApplyAiSuggestionCommand}"));
+    }
+
+    [Fact]
     public async Task OpeningAndCancellingAiConsent_DoesNotCallServicesOrPersistTheSelectedDescription()
     {
         var date = new DateOnly(2026, 8, 15);
@@ -84,7 +108,7 @@ public sealed class TodayViewModelTests
         today.SelectedItem = selected;
 
         today.OpenAiConsentCommand.Execute(null);
-        Assert.Equal(new DescriptionSuggestionRequest(selected.Id, "Work", "CGMFRAVII-1", "Current description"), today.PendingAiRequest);
+        Assert.Equal(new DescriptionSuggestionRequest("Work", "CGMFRAVII-1", "Current description"), today.PendingAiRequest);
         today.CancelAiConsentCommand.Execute(null);
         await today.FlushAsync();
 
@@ -108,7 +132,7 @@ public sealed class TodayViewModelTests
         today.OpenAiConsentCommand.Execute(null);
         today.ConfirmAiConsentCommand.Execute(null);
 
-        Assert.Equal(new DescriptionSuggestionRequest(selected.Id, "Work", "CGMFRAVII-1", "Current description"), generator.Request);
+        Assert.Equal(new DescriptionSuggestionRequest("Work", "CGMFRAVII-1", "Current description"), generator.Request);
         Assert.Equal("AI provider is not configured.", today.AiStatus);
         Assert.Null(today.SuggestedDescription);
         Assert.False(today.IsAiConsentVisible);
@@ -170,7 +194,7 @@ public sealed class TodayViewModelTests
         today.ApplyAiSuggestionCommand.Execute(null);
         await today.FlushAsync();
 
-        Assert.Equal(new DescriptionSuggestionRequest(selected.Id, "Work", "CGMFRAVII-1", "Current description"), policy.Request);
+        Assert.Equal(new DescriptionSuggestionRequest("Work", "CGMFRAVII-1", "Current description"), policy.Request);
         Assert.Equal(1, policy.CanSubmitCalls);
         Assert.Equal(0, generator.SuggestCalls);
         Assert.Equal(0, repository.GetCalls);
@@ -245,6 +269,12 @@ public sealed class TodayViewModelTests
         today.SelectedItem = item;
         return item;
     }
+
+    private static string? ButtonContent(IEnumerable<XElement> elements, string command) =>
+        elements.Single(element =>
+            element.Name.LocalName == "Button" &&
+            element.Attribute("Command")?.Value == command)
+        .Attribute("Content")?.Value;
 
     private sealed class FakeConsentService(bool isEnabled, bool canSubmit, Exception? canSubmitException = null) : IAiConsentService
     {

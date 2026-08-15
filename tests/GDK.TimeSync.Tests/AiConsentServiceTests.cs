@@ -8,11 +8,23 @@ namespace GDK.TimeSync.Tests;
 public sealed class AiConsentServiceTests
 {
     [Fact]
+    public void Generator_request_discloses_exactly_the_three_selected_task_text_fields()
+    {
+        var fields = typeof(DescriptionSuggestionRequest)
+            .GetProperties()
+            .Select(property => property.Name)
+            .Order()
+            .ToArray();
+
+        Assert.Equal(["CurrentDescription", "JiraIssueKey", "TaskName"], fields);
+    }
+
+    [Fact]
     public async Task Unavailable_generator_returns_the_exact_safe_result_without_echoing_request_content()
     {
         const string sentinel = "do-not-echo-this-secret";
         var generator = new UnavailableAssistedTextGenerator();
-        var request = new DescriptionSuggestionRequest(Guid.NewGuid(), sentinel, "TS-012", sentinel);
+        var request = new DescriptionSuggestionRequest(sentinel, "TS-012", sentinel);
 
         var result = await generator.SuggestAsync(request);
 
@@ -56,7 +68,7 @@ public sealed class AiConsentServiceTests
         string taskName = "Task",
         string jiraIssueKey = "TS-012",
         string currentDescription = "Current description") =>
-        new(Guid.NewGuid(), taskName, jiraIssueKey, currentDescription);
+        new(taskName, jiraIssueKey, currentDescription);
 
     private sealed class FakeSettingsStore(UserSettings settings) : IUserSettingsStore
     {

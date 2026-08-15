@@ -12,18 +12,18 @@
             <TextBlock Margin="0,0,0,8" Text="{Binding PersistenceError}" Foreground="DarkRed" TextWrapping="Wrap" />
             <StackPanel Orientation="Horizontal">
                 <Button Width="110" Command="{Binding AddItemCommand}">Add item</Button>
-                <Button Margin="8,0,0,0" Command="{Binding OpenAiConsentCommand}">Improve description</Button>
+                <Button Margin="8,0,0,0" Command="{Binding OpenAiConsentCommand}" Content="Draft AI description" />
             </StackPanel>
             <StackPanel Margin="0,8,0,0" Visibility="{Binding IsAiConsentVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <TextBlock Text="Review the selected item before requesting a description suggestion." FontWeight="SemiBold" />
-                <TextBlock Text="{Binding PendingAiRequest.PlannedWorkItemId, StringFormat=Item ID: {0}}" />
-                <TextBlock Text="{Binding PendingAiRequest.TaskName, StringFormat=Task: {0}}" />
-                <TextBlock Text="{Binding PendingAiRequest.JiraIssueKey, StringFormat=Jira key: {0}}" />
+                <TextBlock Text="AI description consent" FontWeight="SemiBold" />
+                <TextBlock Text="If you continue, AI will receive only these fields from the selected task:" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding PendingAiRequest.TaskName, StringFormat=Task name: {0}}" />
+                <TextBlock Text="{Binding PendingAiRequest.JiraIssueKey, StringFormat=Jira issue key: {0}}" />
                 <ScrollViewer MaxHeight="120" VerticalScrollBarVisibility="Auto">
                     <TextBlock Text="{Binding PendingAiRequest.CurrentDescription, StringFormat=Current description: {0}}" TextWrapping="Wrap" />
                 </ScrollViewer>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                    <Button Command="{Binding ConfirmAiConsentCommand}">Continue</Button>
+                    <Button Command="{Binding ConfirmAiConsentCommand}" Content="Continue with AI" />
                     <Button Margin="8,0,0,0" Command="{Binding CancelAiConsentCommand}">Cancel</Button>
                 </StackPanel>
             </StackPanel>
@@ -33,7 +33,7 @@
                 <ScrollViewer MaxHeight="120" VerticalScrollBarVisibility="Auto">
                     <TextBlock Text="{Binding SuggestedDescription}" TextWrapping="Wrap" />
                 </ScrollViewer>
-                <Button Width="110" HorizontalAlignment="Left" Margin="0,4,0,0" Command="{Binding ApplyAiSuggestionCommand}">Apply</Button>
+                <Button HorizontalAlignment="Left" Margin="0,4,0,0" Command="{Binding ApplyAiSuggestionCommand}" Content="Apply to description" />
             </StackPanel>
         </StackPanel>
         <DataGrid Margin="0,16,0,0" ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedItem, Mode=TwoWay}" AutoGenerateColumns="False" CanUserAddRows="False">
