@@ -194,6 +194,7 @@ public sealed class LiveValidationViewModelTests
         Assert.Equal(1, safety.JiraCalls);
         Assert.Equal(0, safety.TogglCalls + safety.TempoCalls + safety.SlackPosts);
         Assert.Equal("Jira issue validated.", viewModel.StepStatus);
+        Assert.Null(viewModel.RecoveryMessage);
     }
 
     [Fact]
@@ -339,6 +340,46 @@ public sealed class LiveValidationViewModelTests
 
         Assert.Equal(1, safety.DiagnosticsCalls);
         Assert.Equal([new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Toggl, true, "Available")], viewModel.Diagnostics);
+        Assert.Null(viewModel.RecoveryMessage);
+    }
+
+    [Fact]
+    public async Task Successful_diagnostics_preserve_reconciliation_recovery_guidance()
+    {
+        var item = CreateItem();
+        var attempt = new DeliveryAttempt(item.Id, 44, null, DeliveryAttemptStatus.ReconciliationRequired, DeliveryFailureCode.PersistenceFailed, SlackDeliveryState.NotSupported);
+        var safety = new SafetyProbe { Preview = new LiveValidationPreview(attempt, "planner", "https://jira.example.test", "DEVELOPMENT") };
+        var viewModel = CreateViewModel(item, safety);
+        await viewModel.RefreshAsync();
+        await viewModel.SelectItemAsync(item.Id);
+
+        await viewModel.RunDiagnosticsAsync();
+
+        Assert.Contains("reconciliation", viewModel.RecoveryMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("do not resend", viewModel.RecoveryMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(viewModel.CanOpenTogglConfirmation);
+        Assert.False(viewModel.CanOpenTempoConfirmation);
+        Assert.Equal(1, safety.DiagnosticsCalls);
+        Assert.Equal(0, safety.TogglCalls + safety.JiraCalls + safety.TempoCalls + safety.SlackPosts);
+    }
+
+    [Fact]
+    public async Task Successful_jira_validation_preserves_terminal_recovery_guidance()
+    {
+        var item = CreateItem();
+        var attempt = new DeliveryAttempt(item.Id, 44, 55, DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported);
+        var safety = new SafetyProbe { Preview = new LiveValidationPreview(attempt, "planner", "https://jira.example.test", "DEVELOPMENT") };
+        var viewModel = CreateViewModel(item, safety);
+        await viewModel.RefreshAsync();
+        await viewModel.SelectItemAsync(item.Id);
+
+        await viewModel.ValidateJiraAsync();
+
+        Assert.Contains("manual review", viewModel.RecoveryMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(viewModel.CanOpenTogglConfirmation);
+        Assert.False(viewModel.CanOpenTempoConfirmation);
+        Assert.Equal(1, safety.JiraCalls);
+        Assert.Equal(0, safety.TogglCalls + safety.TempoCalls + safety.SlackPosts);
     }
 
     [Fact]

@@ -238,7 +238,7 @@ public sealed class LiveValidationViewModel : INotifyPropertyChanged
             foreach (var result in results)
                 Diagnostics.Add(new IntegrationDiagnosticResult(result.Target, result.IsSuccessful, SafeDiagnosticMessage(result)));
             StepStatus = "Diagnostics completed.";
-            RecoveryMessage = null;
+            RecoveryMessage = RecoveryForDurableAttempt(DurableAttempt);
         }
         catch (OperationCanceledException)
         {
@@ -300,7 +300,7 @@ public sealed class LiveValidationViewModel : INotifyPropertyChanged
             LiveValidationOutcome.Cancelled => result.SafeMessage,
             _ => result.SafeMessage
         };
-        RecoveryMessage = RecoveryFor(result);
+        RecoveryMessage = RecoveryFor(result) ?? (step == LiveValidationStep.Jira ? RecoveryForDurableAttempt(DurableAttempt) : null);
         NotifyActionCommands();
     }
 
@@ -339,6 +339,18 @@ public sealed class LiveValidationViewModel : INotifyPropertyChanged
         LiveValidationOutcome.Blocked => "Complete the required prior durable step; no write was sent by this blocked action.",
         LiveValidationOutcome.Cancelled => "The operation was cancelled before a confirmed write; select the item again to review durable state.",
         LiveValidationOutcome.Failed => "Review the safe blocker and durable state; no automatic retry is available.",
+        _ => null
+    };
+
+    private static string? RecoveryForDurableAttempt(DeliveryAttempt? attempt) => attempt switch
+    {
+        { Status: DeliveryAttemptStatus.Succeeded } =>
+            "Existing completed delivery requires manual review; this screen has not read Tempo back.",
+        { Status: DeliveryAttemptStatus.ReconciliationRequired } => RecoveryForAttempt(attempt),
+        { Status: DeliveryAttemptStatus.Cancelled } =>
+            "Review the durable attempt before deciding any manual recovery; no automatic resend is available.",
+        { Status: DeliveryAttemptStatus.Failed } =>
+            "Review configuration and durable state; this recorded attempt cannot be resent automatically.",
         _ => null
     };
 
