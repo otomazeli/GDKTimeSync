@@ -70,18 +70,23 @@ public sealed class TodayViewModelTests
     }
 
     [Fact]
-    public void OpeningAndCancellingAiConsent_DoesNotCallServicesOrEditTheSelectedDescription()
+    public async Task OpeningAndCancellingAiConsent_DoesNotCallServicesOrPersistTheSelectedDescription()
     {
-        var repository = new CountingPlanRepository();
-        var integration = new IntegrationCallCounter();
+        var date = new DateOnly(2026, 8, 15);
+        var repository = new CountingPlanRepository(DailyPlan.Create(date,
+        [PlannedWorkItem.Create(date, "Work", "CGMFRAVII-1", "Current description")]));
         var policy = new FakeConsentService(isEnabled: true, canSubmit: true);
         var generator = new FakeGenerator(new DescriptionSuggestionResult(true, "Suggested", "Ready"));
-        var today = new TodayViewModel(repository, null, policy, generator);
-        var selected = AddSelectedItem(today, "Current description");
+        var today = new TodayViewModel(repository, date, policy, generator);
+        await today.InitializeAsync();
+        repository.Reset();
+        var selected = Assert.Single(today.Items);
+        today.SelectedItem = selected;
 
         today.OpenAiConsentCommand.Execute(null);
         Assert.Equal(new DescriptionSuggestionRequest(selected.Id, "Work", "CGMFRAVII-1", "Current description"), today.PendingAiRequest);
         today.CancelAiConsentCommand.Execute(null);
+        await today.FlushAsync();
 
         Assert.Null(today.PendingAiRequest);
         Assert.False(today.IsAiConsentVisible);
@@ -90,7 +95,6 @@ public sealed class TodayViewModelTests
         Assert.Equal(0, generator.SuggestCalls);
         Assert.Equal(0, repository.GetCalls);
         Assert.Equal(0, repository.SaveCalls);
-        Assert.Equal(0, integration.Calls);
     }
 
     [Fact]
@@ -148,22 +152,29 @@ public sealed class TodayViewModelTests
     }
 
     [Fact]
-    public void DeniedAiRequest_RecordsOnlyTheSelectedPayloadAndDoesNotCallTheGenerator()
+    public async Task DeniedAiRequest_RecordsOnlyTheSelectedPayloadAndDoesNotCallTheGeneratorOrPersist()
     {
+        var date = new DateOnly(2026, 8, 15);
+        var repository = new CountingPlanRepository(DailyPlan.Create(date,
+        [PlannedWorkItem.Create(date, "Work", "CGMFRAVII-1", "Current description")]));
         var policy = new FakeConsentService(isEnabled: true, canSubmit: false);
         var generator = new FakeGenerator(new DescriptionSuggestionResult(true, "AI draft", "Ready"));
-        var integration = new IntegrationCallCounter();
-        var today = new TodayViewModel(null, null, policy, generator);
-        var selected = AddSelectedItem(today, "Current description");
+        var today = new TodayViewModel(repository, date, policy, generator);
+        await today.InitializeAsync();
+        repository.Reset();
+        var selected = Assert.Single(today.Items);
+        today.SelectedItem = selected;
 
         today.OpenAiConsentCommand.Execute(null);
         today.ConfirmAiConsentCommand.Execute(null);
         today.ApplyAiSuggestionCommand.Execute(null);
+        await today.FlushAsync();
 
         Assert.Equal(new DescriptionSuggestionRequest(selected.Id, "Work", "CGMFRAVII-1", "Current description"), policy.Request);
         Assert.Equal(1, policy.CanSubmitCalls);
         Assert.Equal(0, generator.SuggestCalls);
-        Assert.Equal(0, integration.Calls);
+        Assert.Equal(0, repository.GetCalls);
+        Assert.Equal(0, repository.SaveCalls);
         Assert.Null(today.SuggestedDescription);
         Assert.Equal("Current description", selected.Description);
     }
@@ -269,7 +280,7 @@ public sealed class TodayViewModelTests
         }
     }
 
-    private sealed class CountingPlanRepository : IDailyPlanRepository
+    private sealed class CountingPlanRepository(DailyPlan? plan = null) : IDailyPlanRepository
     {
         public int GetCalls { get; private set; }
         public int SaveCalls { get; private set; }
@@ -277,7 +288,7 @@ public sealed class TodayViewModelTests
         public Task<DailyPlan?> GetAsync(DateOnly date, CancellationToken cancellationToken = default)
         {
             GetCalls++;
-            return Task.FromResult<DailyPlan?>(null);
+            return Task.FromResult(plan);
         }
 
         public Task SaveAsync(DailyPlan plan, CancellationToken cancellationToken = default)
@@ -285,12 +296,11 @@ public sealed class TodayViewModelTests
             SaveCalls++;
             return Task.CompletedTask;
         }
-    }
 
-    private sealed class IntegrationCallCounter
-    {
-        public int Calls { get; private set; }
-
-        public void Record() => Calls++;
+        public void Reset()
+        {
+            GetCalls = 0;
+            SaveCalls = 0;
+        }
     }
 }
