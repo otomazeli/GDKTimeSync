@@ -19,7 +19,9 @@
                 <TextBlock Text="{Binding PendingAiRequest.PlannedWorkItemId, StringFormat=Item ID: {0}}" />
                 <TextBlock Text="{Binding PendingAiRequest.TaskName, StringFormat=Task: {0}}" />
                 <TextBlock Text="{Binding PendingAiRequest.JiraIssueKey, StringFormat=Jira key: {0}}" />
-                <TextBlock Text="{Binding PendingAiRequest.CurrentDescription, StringFormat=Current description: {0}}" TextWrapping="Wrap" />
+                <ScrollViewer MaxHeight="120" VerticalScrollBarVisibility="Auto">
+                    <TextBlock Text="{Binding PendingAiRequest.CurrentDescription, StringFormat=Current description: {0}}" TextWrapping="Wrap" />
+                </ScrollViewer>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                     <Button Command="{Binding ConfirmAiConsentCommand}">Continue</Button>
                     <Button Margin="8,0,0,0" Command="{Binding CancelAiConsentCommand}">Cancel</Button>
@@ -28,7 +30,9 @@
             <TextBlock Margin="0,8,0,0" Text="{Binding AiStatus}" Foreground="DimGray" TextWrapping="Wrap" />
             <StackPanel Visibility="{Binding HasSuggestedDescription, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <TextBlock Text="Suggested description" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding SuggestedDescription}" TextWrapping="Wrap" />
+                <ScrollViewer MaxHeight="120" VerticalScrollBarVisibility="Auto">
+                    <TextBlock Text="{Binding SuggestedDescription}" TextWrapping="Wrap" />
+                </ScrollViewer>
                 <Button Width="110" HorizontalAlignment="Left" Margin="0,4,0,0" Command="{Binding ApplyAiSuggestionCommand}">Apply</Button>
             </StackPanel>
         </StackPanel>

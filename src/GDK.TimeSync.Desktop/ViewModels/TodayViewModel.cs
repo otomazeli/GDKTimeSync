@@ -154,18 +154,18 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             return;
         }
 
-        if (!aiConsentService.CanSubmit(request) ||
-            !aiConsentService.IsEnabled ||
-            string.IsNullOrWhiteSpace(request.TaskName) ||
-            string.IsNullOrWhiteSpace(request.JiraIssueKey) ||
-            string.IsNullOrWhiteSpace(request.CurrentDescription))
-        {
-            AiStatus = "AI suggestions are unavailable for this item.";
-            return;
-        }
-
         try
         {
+            if (!aiConsentService.CanSubmit(request) ||
+                !aiConsentService.IsEnabled ||
+                string.IsNullOrWhiteSpace(request.TaskName) ||
+                string.IsNullOrWhiteSpace(request.JiraIssueKey) ||
+                string.IsNullOrWhiteSpace(request.CurrentDescription))
+            {
+                AiStatus = "AI suggestions are unavailable for this item.";
+                return;
+            }
+
             var result = await assistedTextGenerator.SuggestAsync(request);
             if (!result.IsAvailable || string.IsNullOrWhiteSpace(result.SuggestedDescription))
             {

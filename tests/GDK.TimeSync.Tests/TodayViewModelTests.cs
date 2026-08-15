@@ -73,6 +73,7 @@ public sealed class TodayViewModelTests
     public void OpeningAndCancellingAiConsent_DoesNotCallServicesOrEditTheSelectedDescription()
     {
         var repository = new CountingPlanRepository();
+        var integration = new IntegrationCallCounter();
         var policy = new FakeConsentService(isEnabled: true, canSubmit: true);
         var generator = new FakeGenerator(new DescriptionSuggestionResult(true, "Suggested", "Ready"));
         var today = new TodayViewModel(repository, null, policy, generator);
@@ -89,6 +90,7 @@ public sealed class TodayViewModelTests
         Assert.Equal(0, generator.SuggestCalls);
         Assert.Equal(0, repository.GetCalls);
         Assert.Equal(0, repository.SaveCalls);
+        Assert.Equal(0, integration.Calls);
     }
 
     [Fact]
@@ -145,6 +147,27 @@ public sealed class TodayViewModelTests
         Assert.Equal(1, generator.SuggestCalls);
     }
 
+    [Fact]
+    public void DeniedAiRequest_RecordsOnlyTheSelectedPayloadAndDoesNotCallTheGenerator()
+    {
+        var policy = new FakeConsentService(isEnabled: true, canSubmit: false);
+        var generator = new FakeGenerator(new DescriptionSuggestionResult(true, "AI draft", "Ready"));
+        var integration = new IntegrationCallCounter();
+        var today = new TodayViewModel(null, null, policy, generator);
+        var selected = AddSelectedItem(today, "Current description");
+
+        today.OpenAiConsentCommand.Execute(null);
+        today.ConfirmAiConsentCommand.Execute(null);
+        today.ApplyAiSuggestionCommand.Execute(null);
+
+        Assert.Equal(new DescriptionSuggestionRequest(selected.Id, "Work", "CGMFRAVII-1", "Current description"), policy.Request);
+        Assert.Equal(1, policy.CanSubmitCalls);
+        Assert.Equal(0, generator.SuggestCalls);
+        Assert.Equal(0, integration.Calls);
+        Assert.Null(today.SuggestedDescription);
+        Assert.Equal("Current description", selected.Description);
+    }
+
     [Theory]
     [InlineData(false, true, "Work", "CGMFRAVII-1", "Current description")]
     [InlineData(true, true, "", "CGMFRAVII-1", "Current description")]
@@ -184,6 +207,26 @@ public sealed class TodayViewModelTests
         Assert.Equal(1, generator.SuggestCalls);
     }
 
+    [Fact]
+    public void PolicyException_UsesAFixedSafeStatusWithoutEchoingExceptionText()
+    {
+        const string sentinel = "do-not-echo-this-policy-exception";
+        var policy = new FakeConsentService(isEnabled: true, canSubmit: true, canSubmitException: new InvalidOperationException(sentinel));
+        var generator = new FakeGenerator(new DescriptionSuggestionResult(true, "AI draft", "Ready"));
+        var today = new TodayViewModel(null, null, policy, generator);
+        var selected = AddSelectedItem(today, "Current description");
+
+        today.OpenAiConsentCommand.Execute(null);
+        today.ConfirmAiConsentCommand.Execute(null);
+
+        Assert.Equal("AI suggestion could not be generated.", today.AiStatus);
+        Assert.DoesNotContain(sentinel, today.AiStatus, StringComparison.Ordinal);
+        Assert.DoesNotContain(sentinel, today.SuggestedDescription ?? string.Empty, StringComparison.Ordinal);
+        Assert.Equal("Current description", selected.Description);
+        Assert.Equal(1, policy.CanSubmitCalls);
+        Assert.Equal(0, generator.SuggestCalls);
+    }
+
     private static PlannedWorkItemViewModel AddSelectedItem(TodayViewModel today, string description)
     {
         var item = new PlannedWorkItemViewModel("Work", "CGMFRAVII-1", description);
@@ -192,14 +235,17 @@ public sealed class TodayViewModelTests
         return item;
     }
 
-    private sealed class FakeConsentService(bool isEnabled, bool canSubmit) : IAiConsentService
+    private sealed class FakeConsentService(bool isEnabled, bool canSubmit, Exception? canSubmitException = null) : IAiConsentService
     {
         public int CanSubmitCalls { get; private set; }
+        public DescriptionSuggestionRequest? Request { get; private set; }
         public bool IsEnabled { get; } = isEnabled;
 
         public bool CanSubmit(DescriptionSuggestionRequest request)
         {
             CanSubmitCalls++;
+            Request = request;
+            if (canSubmitException is not null) throw canSubmitException;
             return canSubmit;
         }
     }
@@ -239,5 +285,12 @@ public sealed class TodayViewModelTests
             SaveCalls++;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class IntegrationCallCounter
+    {
+        public int Calls { get; private set; }
+
+        public void Record() => Calls++;
     }
 }
