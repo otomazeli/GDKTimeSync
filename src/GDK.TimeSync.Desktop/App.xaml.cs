@@ -21,6 +21,18 @@ public partial class App : System.Windows.Application
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
         var services = new ServiceCollection();
+        ConfigureServices(services);
+
+        serviceProvider = services.BuildServiceProvider();
+        trayIcon = new TrayIconService(ShowMainWindow, ShowSettings, ExitApplication, serviceProvider.GetRequiredService<MainViewModel>().SyncNowCommand);
+        endOfDayReminderService = serviceProvider.GetRequiredService<IEndOfDayReminderService>();
+        endOfDayReminderService.ReviewDue += OnReviewDue;
+        endOfDayReminderService.StartAsync().GetAwaiter().GetResult();
+        ShowMainWindow();
+    }
+
+    internal static void ConfigureServices(IServiceCollection services)
+    {
         services.AddTimeSyncCore();
         services.AddTimeSyncPersistence(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -32,6 +44,8 @@ public partial class App : System.Windows.Application
         services.AddHttpClient(SlackClientFactory.HttpClientName);
         services.AddSingleton<UserSettingsService>();
         services.AddSingleton<IUserSettingsStore>(provider => provider.GetRequiredService<UserSettingsService>());
+        services.AddSingleton<IAiConsentService, AiConsentService>();
+        services.AddSingleton<IAssistedTextGenerator, UnavailableAssistedTextGenerator>();
         services.AddSingleton<TimeProvider>(TimeProvider.System);
         services.AddSingleton<IEndOfDayReminderService, EndOfDayReminderService>();
         services.AddSingleton<WindowsCredentialStore>();
@@ -51,13 +65,6 @@ public partial class App : System.Windows.Application
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<MainWindow>();
         services.AddTransient<SettingsWindow>();
-
-        serviceProvider = services.BuildServiceProvider();
-        trayIcon = new TrayIconService(ShowMainWindow, ShowSettings, ExitApplication, serviceProvider.GetRequiredService<MainViewModel>().SyncNowCommand);
-        endOfDayReminderService = serviceProvider.GetRequiredService<IEndOfDayReminderService>();
-        endOfDayReminderService.ReviewDue += OnReviewDue;
-        endOfDayReminderService.StartAsync().GetAwaiter().GetResult();
-        ShowMainWindow();
     }
 
     internal static void RegisterReviewServices(IServiceCollection services) =>
