@@ -16,7 +16,8 @@ public enum DeliveryFailureCode
     JiraIssueNotFound,
     TempoFailed,
     PersistenceFailed,
-    Cancelled
+    Cancelled,
+    RemoteChangedAfterDelivery
 }
 
 public enum SlackDeliveryState
