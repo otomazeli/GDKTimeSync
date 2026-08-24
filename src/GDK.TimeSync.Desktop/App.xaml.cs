@@ -24,11 +24,11 @@ public partial class App : System.Windows.Application
         ConfigureServices(services);
 
         serviceProvider = services.BuildServiceProvider();
-        trayIcon = new TrayIconService(ShowMainWindow, ShowSettings, ExitApplication, serviceProvider.GetRequiredService<MainViewModel>().SyncNowCommand);
         endOfDayReminderService = serviceProvider.GetRequiredService<IEndOfDayReminderService>();
         endOfDayReminderService.ReviewDue += OnReviewDue;
         endOfDayReminderService.StartAsync().GetAwaiter().GetResult();
         ShowMainWindow();
+        Dispatcher.BeginInvoke(InitializeTrayIcon);
     }
 
     internal static void ConfigureServices(IServiceCollection services)
@@ -50,7 +50,12 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IEndOfDayReminderService, EndOfDayReminderService>();
         services.AddSingleton<WindowsCredentialStore>();
         services.AddSingleton<ICredentialStore>(provider => provider.GetRequiredService<WindowsCredentialStore>());
-        services.AddSingleton<IIntegrationClientFactory, IntegrationClientFactory>();
+        services.AddSingleton<IIntegrationClientFactory>(provider => new IntegrationClientFactory(
+            provider.GetRequiredService<ICredentialStore>(),
+            provider.GetRequiredService<IUserSettingsStore>(),
+            null,
+            null,
+            provider));
         services.AddSingleton<IIntegrationDiagnosticsService, IntegrationDiagnosticsService>();
         services.AddSingleton<ILiveIntegrationValidationService, LiveIntegrationValidationService>();
         services.AddSingleton<IConfirmedTaskDeliveryService, ConfirmedTaskDeliveryService>();
@@ -126,6 +131,19 @@ public partial class App : System.Windows.Application
         if (isExiting) return;
         isExiting = true;
         await ReminderLifecycle.StopThenAsync(DetachReminderService(), OnReviewDue, FlushAndShutdownAsync);
+    }
+
+    private void InitializeTrayIcon()
+    {
+        if (trayIcon is not null || serviceProvider is null || isExiting) return;
+        try
+        {
+            trayIcon = new TrayIconService(ShowMainWindow, ShowSettings, ExitApplication, serviceProvider.GetRequiredService<MainViewModel>().SyncNowCommand);
+        }
+        catch
+        {
+            trayIcon = null;
+        }
     }
 
     private void OnReviewDue(object? sender, ReviewDueEventArgs e)

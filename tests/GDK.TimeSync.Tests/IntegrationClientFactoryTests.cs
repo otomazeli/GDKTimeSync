@@ -9,6 +9,14 @@ namespace GDK.TimeSync.Tests;
 public sealed class IntegrationClientFactoryTests
 {
     [Fact]
+    public void Construction_does_not_resolve_http_or_issue_key_services()
+    {
+        var factory = new IntegrationClientFactory(new FakeCredentialStore(), new FakeSettingsStore(new UserSettings()), null, null);
+
+        Assert.NotNull(factory);
+    }
+
+    [Fact]
     public async Task Create_clients_reads_credentials_only_when_invoked_and_sends_no_requests()
     {
         var credentials = new FakeCredentialStore
