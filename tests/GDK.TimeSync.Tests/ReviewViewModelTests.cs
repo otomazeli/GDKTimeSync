@@ -42,6 +42,19 @@ public sealed class ReviewViewModelTests
     }
 
     [Fact]
+    public void Task_with_a_known_toggl_entry_is_confirmation_eligible_even_when_not_marked_for_toggl()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT") with { PostToToggl = false, TogglEntryId = 42 };
+        var review = CreateReview(DailyPlan.Create(date, [item]));
+
+        review.OpenTaskConfirmation(item.Id);
+
+        Assert.True(review.IsTaskConfirmationVisible);
+        Assert.Null(review.TaskDeliveryError);
+    }
+
+    [Fact]
     public async Task Task_confirmation_projects_selected_details_and_the_safe_completed_result()
     {
         var date = new DateOnly(2026, 8, 13);

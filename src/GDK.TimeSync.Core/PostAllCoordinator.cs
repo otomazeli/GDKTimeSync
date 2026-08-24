@@ -92,17 +92,24 @@ public sealed class PostAllCoordinator(
             return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
 
         long togglEntryId;
-        try
+        if (item.TogglEntryId is { } knownTogglEntryId)
         {
-            togglEntryId = await toggl.CreateAsync(item, cancellationToken);
+            togglEntryId = knownTogglEntryId;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        else
         {
-            return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
-        }
-        catch (Exception)
-        {
-            return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed);
+            try
+            {
+                togglEntryId = await toggl.CreateAsync(item, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
+            }
+            catch (Exception)
+            {
+                return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed);
+            }
         }
 
         current = await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.InProgress, null);

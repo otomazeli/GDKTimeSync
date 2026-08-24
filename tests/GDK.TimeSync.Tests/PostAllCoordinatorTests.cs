@@ -29,6 +29,26 @@ public sealed class PostAllCoordinatorTests
     }
 
     [Fact]
+    public async Task PostAsync_ReusesAKnownTogglEntryInsteadOfCreatingANewOne()
+    {
+        var item = CreateItem() with { TogglEntryId = 999, PostToToggl = false };
+        var attempts = new InMemoryDeliveryAttemptRepository();
+        var toggl = new RecordingTogglClient([]);
+        var jira = new RecordingJiraClient([]);
+        var tempo = new RecordingTempoClient([]);
+        var coordinator = new PostAllCoordinator(toggl, jira, tempo, attempts);
+
+        var result = await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]));
+
+        var attempt = Assert.Single(result.Attempts);
+        Assert.Equal(0, toggl.CreateCount);
+        Assert.Equal(999, attempt.TogglEntryId);
+        Assert.Equal(DeliveryAttemptStatus.Succeeded, attempt.Status);
+        Assert.Equal(1, jira.LookupCount);
+        Assert.Equal(1, tempo.CreateCount);
+    }
+
+    [Fact]
     public async Task PostAsync_SkipsAnAlreadySuccessfulItem()
     {
         var item = CreateItem();

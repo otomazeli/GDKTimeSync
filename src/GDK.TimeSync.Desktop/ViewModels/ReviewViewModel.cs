@@ -138,7 +138,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     {
         var item = planProvider?.GetSnapshot().Items.SingleOrDefault(value => value.Id == itemId);
         if (item is null) return;
-        if (!item.PostToToggl)
+        if (!item.PostToToggl && item.TogglEntryId is null)
         {
             TaskDeliveryError = "Task is not marked for Toggl delivery.";
             IsTaskConfirmationVisible = false;
