@@ -62,6 +62,31 @@
         </Border>
         <DataGrid Margin="0,16,0,0" ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedItem, Mode=TwoWay}" AutoGenerateColumns="False" CanUserAddRows="False" CanUserResizeColumns="True" HorizontalScrollBarVisibility="Auto">
             <DataGrid.Columns>
+                <DataGridTemplateColumn Header="Source" Width="70">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Border Padding="6,1" CornerRadius="3" HorizontalAlignment="Left" Background="Transparent">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Source}" Value="Toggl"><Setter Property="Background" Value="#FFDCEEFF" /></DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock FontSize="11" Foreground="#FF1D4ED8">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Source}" Value="Toggl"><Setter Property="Text" Value="Toggl" /></DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Border>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
                 <DataGridTextColumn Header="Name" Width="170" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
                 <DataGridTextColumn Header="Jira key" Width="140" Binding="{Binding JiraIssueKey, UpdateSourceTrigger=PropertyChanged}" />
                 <DataGridTextColumn Header="Description" Width="300" Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}" />

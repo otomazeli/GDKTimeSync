@@ -134,6 +134,29 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
         item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable, item.Status)
         { TogglProjectId = item.TogglProjectId, PostToToggl = item.PostToToggl, TogglEntryId = item.TogglEntryId, Source = item.Source }).ToArray());
 
+    public TodaySyncMergeResult ApplyPullResult(TogglSyncPullResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        foreach (var updated in result.ItemsToUpdate)
+        {
+            var existing = Items.FirstOrDefault(item => item.Id == updated.Id);
+            if (existing is null) continue;
+            existing.Start = updated.Start;
+            existing.End = updated.End;
+            existing.Description = updated.Comment;
+            existing.TogglEntryId = updated.TogglEntryId;
+        }
+
+        foreach (var added in result.ItemsToAdd)
+            Items.Add(new PlannedWorkItemViewModel(
+                added.Name, added.JiraIssueKey, added.Comment, added.Duration, added.TogglProject, added.TempoCategory,
+                added.Id, added.Start, added.End, added.IsBillable, added.Status,
+                added.TogglProjectId, added.PostToToggl, added.TogglEntryId, added.Source));
+
+        return new TodaySyncMergeResult(result.ItemsToAdd.Count, result.ItemsToUpdate.Count, result.ReconciliationFlaggedCount);
+    }
+
     private void AddTemplate(object? template)
     {
         if (template is not RecurringTaskTemplateViewModel source) return;
@@ -349,3 +372,5 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 }
+
+public sealed record TodaySyncMergeResult(int Imported, int Updated, int ReconciliationFlagged);

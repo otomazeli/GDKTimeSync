@@ -199,6 +199,54 @@ public sealed class TodayViewModelTests
     }
 
     [Fact]
+    public void ApplyPullResult_AddsImportedItemsNotMarkedForTogglPosting()
+    {
+        var today = new TodayViewModel();
+        var date = today.Date;
+        var added = PlannedWorkItem.Create(date, "Investigate bug", comment: "Investigate bug") with
+        {
+            TogglEntryId = 555,
+            Source = ItemSource.Toggl,
+            PostToToggl = false
+        };
+
+        var merge = today.ApplyPullResult(new TogglSyncPullResult([added], [], 0, null));
+
+        var item = Assert.Single(today.Items);
+        Assert.Equal(555, item.TogglEntryId);
+        Assert.Equal(ItemSource.Toggl, item.Source);
+        Assert.False(item.PostToToggl);
+        Assert.Equal(1, merge.Imported);
+        Assert.Equal(0, merge.Updated);
+        Assert.Equal(0, merge.ReconciliationFlagged);
+    }
+
+    [Fact]
+    public void ApplyPullResult_UpdatesAMatchedItemInPlaceWithoutChangingItemCount()
+    {
+        var today = new TodayViewModel();
+        today.AddItemCommand.Execute(null);
+        var existing = Assert.Single(today.Items);
+        existing.Description = "Old description";
+        var updated = PlannedWorkItem.Create(today.Date, comment: "New description", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30)) with
+        {
+            Id = existing.Id,
+            TogglEntryId = 555
+        };
+
+        var merge = today.ApplyPullResult(new TogglSyncPullResult([], [updated], 1, null));
+
+        Assert.Single(today.Items);
+        Assert.Equal("New description", existing.Description);
+        Assert.Equal(new TimeOnly(9, 0), existing.Start);
+        Assert.Equal(new TimeOnly(9, 30), existing.End);
+        Assert.Equal(555, existing.TogglEntryId);
+        Assert.Equal(0, merge.Imported);
+        Assert.Equal(1, merge.Updated);
+        Assert.Equal(1, merge.ReconciliationFlagged);
+    }
+
+    [Fact]
     public async Task OpeningAndCancellingAiConsent_DoesNotCallServicesOrPersistTheSelectedDescription()
     {
         var date = new DateOnly(2026, 8, 15);

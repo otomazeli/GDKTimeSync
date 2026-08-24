@@ -60,6 +60,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ILiveIntegrationValidationService, LiveIntegrationValidationService>();
         services.AddSingleton<IConfirmedTaskDeliveryService, ConfirmedTaskDeliveryService>();
         services.AddSingleton<ISlackClientFactory, SlackClientFactory>();
+        services.AddSingleton<ITogglSyncService, TogglSyncService>();
         services.AddSingleton<ConnectionStatusViewModel>();
         services.AddSingleton<IConfigurationStateService, ConfigurationStateService>();
         services.AddSingleton<MainViewModel>();
