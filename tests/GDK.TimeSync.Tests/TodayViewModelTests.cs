@@ -25,6 +25,16 @@ public sealed class TodayViewModelTests
     }
 
     [Fact]
+    public void AddItemCommand_selects_the_new_item_for_editor_form()
+    {
+        var today = new TodayViewModel();
+
+        today.AddItemCommand.Execute(null);
+
+        Assert.Same(Assert.Single(today.Items), today.SelectedItem);
+    }
+
+    [Fact]
     public void RemoveItemCommand_RemovesItemAndUpdatesPlannedSeconds()
     {
         var today = new TodayViewModel();

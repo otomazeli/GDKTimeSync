@@ -37,7 +37,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
         this.settingsStore = settingsStore;
         Date = date ?? DateOnly.FromDateTime(DateTime.Today);
         Items.CollectionChanged += OnItemsChanged;
-        AddItemCommand = new RelayCommand(_ => Items.Add(new PlannedWorkItemViewModel()));
+        AddItemCommand = new RelayCommand(_ => AddItem());
         RemoveItemCommand = new RelayCommand(RemoveItem);
         AddTemplateCommand = new RelayCommand(AddTemplate);
         OpenAiConsentCommand = new RelayCommand(OpenAiConsent);
@@ -138,6 +138,13 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     {
         if (template is not RecurringTaskTemplateViewModel source) return;
         Items.Add(new PlannedWorkItemViewModel(source.Name, source.JiraIssueKey, source.Description, source.Duration, source.TogglProject, source.TempoCategory, isBillable: source.IsBillable, status: source.Status, togglProjectId: source.TogglProjectId));
+    }
+
+    private void AddItem()
+    {
+        var item = new PlannedWorkItemViewModel();
+        Items.Add(item);
+        SelectedItem = item;
     }
 
     private void RemoveItem(object? item)

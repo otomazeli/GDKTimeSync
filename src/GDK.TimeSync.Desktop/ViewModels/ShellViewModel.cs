@@ -12,6 +12,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     private readonly ReviewViewModel review;
     private readonly SettingsViewModel? settings;
     private readonly HistoryViewModel? history;
+    public ConnectionStatusViewModel? ConnectionStatus { get; }
 
     public ShellViewModel(
         IConfigurationStateService configurationState,
@@ -19,7 +20,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         TemplatesViewModel? templates = null,
         ReviewViewModel? review = null,
         SettingsViewModel? settings = null,
-        HistoryViewModel? history = null)
+        HistoryViewModel? history = null,
+        ConnectionStatusViewModel? connectionStatus = null)
     {
         _ = configurationState;
         this.today = today ?? new TodayViewModel();
@@ -27,6 +29,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         this.review = review ?? new ReviewViewModel();
         this.settings = settings;
         this.history = history;
+        ConnectionStatus = connectionStatus;
         NavigateCommand = new RelayCommand(value => _ = NavigateAsync(value));
     }
 
@@ -61,6 +64,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         await templates.InitializeAsync(cancellationToken);
         await today.InitializeAsync(cancellationToken);
         if (settings is not null) await settings.LoadAsync(cancellationToken);
+        if (ConnectionStatus is not null) await ConnectionStatus.RefreshAsync(cancellationToken);
     }
 
     public Task FlushAsync() => Task.WhenAll(today.FlushAsync(), templates.FlushAsync());

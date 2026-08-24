@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:viewModels="clr-namespace:GDK.TimeSync.Desktop.ViewModels"
         xmlns:views="clr-namespace:GDK.TimeSync.Desktop.Views"
-        Title="GDK TimeSync" Height="420" Width="760" MinHeight="420" MinWidth="700"
+        Title="GDK TimeSync" Height="650" Width="1080" MinHeight="560" MinWidth="900"
         Closing="OnClosing" Loaded="OnLoaded">
     <Window.Resources>
         <DataTemplate x:Key="TodayTemplate"><views:TodayView /></DataTemplate>
@@ -26,6 +26,28 @@
                 <Button Margin="0,8,0,0" Command="{Binding NavigateCommand}" CommandParameter="{x:Static viewModels:NavigationPage.History}">History</Button>
                 <Button Margin="0,8,0,0" Command="{Binding NavigateCommand}" CommandParameter="{x:Static viewModels:NavigationPage.Settings}">Settings</Button>
                 <Button Margin="0,8,0,0" Command="{Binding NavigateCommand}" CommandParameter="{x:Static viewModels:NavigationPage.Review}">End-of-day review</Button>
+                <TextBlock Margin="0,28,0,8" Text="Connections" Foreground="#FFD1D5DB" FontWeight="SemiBold" />
+                <ItemsControl ItemsSource="{Binding ConnectionStatus.Items}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                                <Ellipse Width="10" Height="10" Margin="0,0,7,0" VerticalAlignment="Center">
+                                    <Ellipse.Style>
+                                        <Style TargetType="Ellipse"><Setter Property="Fill" Value="#FF9CA3AF" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Status}" Value="Connected"><Setter Property="Fill" Value="#FF22C55E" /></DataTrigger>
+                                                <DataTrigger Binding="{Binding Status}" Value="Failed"><Setter Property="Fill" Value="#FFEF4444" /></DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Ellipse.Style>
+                                </Ellipse>
+                                <TextBlock Text="{Binding Name}" Foreground="White" Width="54" />
+                                <TextBlock Text="{Binding Message}" Foreground="#FFD1D5DB" FontSize="11" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Button Margin="0,10,0,0" Command="{Binding ConnectionStatus.RefreshCommand}" Content="Refresh connections" />
             </StackPanel>
         </Border>
         <Grid Grid.Column="1" Margin="28">
