@@ -84,7 +84,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
                 Items.Add(new PlannedWorkItemViewModel());
             else
                 foreach (var item in plan.Items)
-                    Items.Add(new PlannedWorkItemViewModel(item.Name, item.JiraIssueKey, item.Comment, item.Duration, item.TogglProject, item.TempoCategory, item.Id, item.Start, item.End, item.IsBillable, item.Status));
+                    Items.Add(new PlannedWorkItemViewModel(item.Name, item.JiraIssueKey, item.Comment, item.Duration, item.TogglProject, item.TempoCategory, item.Id, item.Start, item.End, item.IsBillable, item.Status, item.TogglProjectId, item.PostToToggl, item.TogglEntryId, item.Source));
             isInitialized = true;
             PersistenceError = null;
             await LoadProjectsAsync(cancellationToken);
@@ -132,7 +132,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     public DailyPlan GetSnapshot() => DailyPlan.Create(Date, Items.Select(item => new PlannedWorkItem(
         item.Id, Date, item.Start, item.End, item.Name, item.JiraIssueKey, item.Description,
         item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable, item.Status)
-        { TogglProjectId = item.TogglProjectId, PostToToggl = item.PostToToggl }).ToArray());
+        { TogglProjectId = item.TogglProjectId, PostToToggl = item.PostToToggl, TogglEntryId = item.TogglEntryId, Source = item.Source }).ToArray());
 
     private void AddTemplate(object? template)
     {
@@ -323,7 +323,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
                 var plan = DailyPlan.Create(Date, Items.Select(item => new PlannedWorkItem(
                     item.Id, Date, item.Start, item.End, item.Name, item.JiraIssueKey, item.Description,
                     item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable, item.Status)
-                    { TogglProjectId = item.TogglProjectId, PostToToggl = item.PostToToggl }).ToArray());
+                    { TogglProjectId = item.TogglProjectId, PostToToggl = item.PostToToggl, TogglEntryId = item.TogglEntryId, Source = item.Source }).ToArray());
                 await repository!.SaveAsync(plan);
                 PersistenceError = null;
             }

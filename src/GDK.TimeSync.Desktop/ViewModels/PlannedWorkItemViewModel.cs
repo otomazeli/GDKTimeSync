@@ -18,8 +18,10 @@ public sealed class PlannedWorkItemViewModel : INotifyPropertyChanged
     private WorkStatus status;
     private long? togglProjectId;
     private bool postToToggl;
+    private long? togglEntryId;
+    private ItemSource source;
 
-    public PlannedWorkItemViewModel(string name = "", string jiraIssueKey = "", string description = "", TimeSpan? duration = null, string togglProject = "", string tempoCategory = "", Guid? id = null, TimeOnly? start = null, TimeOnly? end = null, bool isBillable = true, WorkStatus status = WorkStatus.InProgress, long? togglProjectId = null, bool postToToggl = true)
+    public PlannedWorkItemViewModel(string name = "", string jiraIssueKey = "", string description = "", TimeSpan? duration = null, string togglProject = "", string tempoCategory = "", Guid? id = null, TimeOnly? start = null, TimeOnly? end = null, bool isBillable = true, WorkStatus status = WorkStatus.InProgress, long? togglProjectId = null, bool postToToggl = true, long? togglEntryId = null, ItemSource source = ItemSource.Local)
     {
         Id = id ?? Guid.NewGuid();
         this.name = name;
@@ -34,6 +36,8 @@ public sealed class PlannedWorkItemViewModel : INotifyPropertyChanged
         this.status = status;
         this.togglProjectId = togglProjectId;
         this.postToToggl = postToToggl;
+        this.togglEntryId = togglEntryId;
+        this.source = source;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -53,6 +57,8 @@ public sealed class PlannedWorkItemViewModel : INotifyPropertyChanged
     public WorkStatus Status { get => status; set => SetField(ref status, value); }
     public long? TogglProjectId { get => togglProjectId; set => SetField(ref togglProjectId, value); }
     public bool PostToToggl { get => postToToggl; set => SetField(ref postToToggl, value); }
+    public long? TogglEntryId { get => togglEntryId; set => SetField(ref togglEntryId, value); }
+    public ItemSource Source { get => source; set => SetField(ref source, value); }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {

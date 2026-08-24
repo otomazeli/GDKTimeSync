@@ -176,6 +176,29 @@ public sealed class TodayViewModelTests
     }
 
     [Fact]
+    public async Task InitializeAsync_PreservesTogglProjectPostingIntentAndSyncLinkAcrossReload()
+    {
+        var date = new DateOnly(2026, 8, 24);
+        var item = PlannedWorkItem.Create(date, "Work", "CGMFRAVII-1", "Description") with
+        {
+            TogglProjectId = 9,
+            PostToToggl = false,
+            TogglEntryId = 555,
+            Source = ItemSource.Toggl
+        };
+        var repository = new CountingPlanRepository(DailyPlan.Create(date, [item]));
+        var today = new TodayViewModel(repository, date);
+
+        await today.InitializeAsync();
+
+        var loaded = Assert.Single(today.Items);
+        Assert.Equal(9, loaded.TogglProjectId);
+        Assert.False(loaded.PostToToggl);
+        Assert.Equal(555, loaded.TogglEntryId);
+        Assert.Equal(ItemSource.Toggl, loaded.Source);
+    }
+
+    [Fact]
     public async Task OpeningAndCancellingAiConsent_DoesNotCallServicesOrPersistTheSelectedDescription()
     {
         var date = new DateOnly(2026, 8, 15);

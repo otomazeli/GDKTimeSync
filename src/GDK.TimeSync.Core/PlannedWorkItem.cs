@@ -1,5 +1,7 @@
 namespace GDK.TimeSync.Core;
 
+public enum ItemSource { Local, Toggl }
+
 public sealed record PlannedWorkItem(
     Guid Id,
     DateOnly Day,
@@ -16,6 +18,8 @@ public sealed record PlannedWorkItem(
 {
     public long? TogglProjectId { get; init; }
     public bool PostToToggl { get; init; } = true;
+    public long? TogglEntryId { get; init; }
+    public ItemSource Source { get; init; } = ItemSource.Local;
 
     public static PlannedWorkItem Create(
         DateOnly day,

@@ -94,6 +94,34 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SaveAsync_RoundTripsTogglEntryLinkAndSource()
+    {
+        var repository = CreatePlanRepository();
+        var date = new DateOnly(2026, 8, 24);
+        var item = PlannedWorkItem.Create(date) with { TogglEntryId = 555, Source = ItemSource.Toggl };
+
+        await repository.SaveAsync(DailyPlan.Create(date, [item]));
+
+        var loaded = Assert.Single((await repository.GetAsync(date))!.Items);
+        Assert.Equal(555, loaded.TogglEntryId);
+        Assert.Equal(ItemSource.Toggl, loaded.Source);
+    }
+
+    [Fact]
+    public async Task SaveAsync_DefaultsTogglEntryLinkAndSourceWhenNotSet()
+    {
+        var repository = CreatePlanRepository();
+        var date = new DateOnly(2026, 8, 24);
+        var item = PlannedWorkItem.Create(date);
+
+        await repository.SaveAsync(DailyPlan.Create(date, [item]));
+
+        var loaded = Assert.Single((await repository.GetAsync(date))!.Items);
+        Assert.Null(loaded.TogglEntryId);
+        Assert.Equal(ItemSource.Local, loaded.Source);
+    }
+
+    [Fact]
     public async Task SaveAsync_RoundTripsTemplateWorkStatus()
     {
         var repository = CreateTemplateRepository();

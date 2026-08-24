@@ -92,6 +92,8 @@ public sealed class SqliteDatabase
                     await EnsureWorkStatusColumnsAsync(connection, cancellationToken);
                     await EnsureProjectIdColumnsAsync(connection, cancellationToken);
                     await EnsureColumnAsync(connection, "planned_work_items", "post_to_toggl", "INTEGER NOT NULL DEFAULT 1", cancellationToken);
+                    await EnsureColumnAsync(connection, "planned_work_items", "toggl_entry_id", "INTEGER NULL", cancellationToken);
+                    await EnsureColumnAsync(connection, "planned_work_items", "source", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
                     await EnsureDeliveryAttemptTimestampColumnsAsync(connection, cancellationToken);
                     await CommitAsync(connection, cancellationToken);
                 }
