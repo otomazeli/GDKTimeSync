@@ -43,7 +43,7 @@
                 <TextBlock Text="What are you working on?" FontWeight="SemiBold" />
                 <Grid Margin="0,8,0,0">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="2*" /><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="8" /><RowDefinition Height="Auto" /><RowDefinition Height="8" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="20" /><RowDefinition Height="Auto" /><RowDefinition Height="20" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                     <TextBox Grid.Column="0" Text="{Binding SelectedItem.Description, UpdateSourceTrigger=PropertyChanged}" ToolTip="Worklog description" />
                     <TextBox Grid.Column="1" Margin="8,0,0,0" Text="{Binding SelectedItem.JiraIssueKey, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jira issue key" />
                     <ComboBox Grid.Column="2" Margin="8,0,0,0" ItemsSource="{Binding TogglProjects}" DisplayMemberPath="Name" SelectedValuePath="Id" SelectedValue="{Binding SelectedItem.TogglProjectId, UpdateSourceTrigger=PropertyChanged}" />
@@ -60,32 +60,32 @@
                 </Grid>
             </StackPanel>
         </Border>
-        <DataGrid Margin="0,16,0,0" ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedItem, Mode=TwoWay}" AutoGenerateColumns="False" CanUserAddRows="False">
+        <DataGrid Margin="0,16,0,0" ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedItem, Mode=TwoWay}" AutoGenerateColumns="False" CanUserAddRows="False" CanUserResizeColumns="True" HorizontalScrollBarVisibility="Auto">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
-                <DataGridTextColumn Header="Jira key" Binding="{Binding JiraIssueKey, UpdateSourceTrigger=PropertyChanged}" />
-                <DataGridTextColumn Header="Description" Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}" />
-                <DataGridTextColumn Header="Start" Binding="{Binding Start, UpdateSourceTrigger=PropertyChanged}" />
-                <DataGridTextColumn Header="End" Binding="{Binding End, UpdateSourceTrigger=PropertyChanged}" />
-                <DataGridTextColumn Header="Duration" Binding="{Binding Duration, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="True" />
-                <DataGridTemplateColumn Header="Toggl project">
+                <DataGridTextColumn Header="Name" Width="170" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Jira key" Width="140" Binding="{Binding JiraIssueKey, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Description" Width="300" Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Start" Width="70" Binding="{Binding Start, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="End" Width="70" Binding="{Binding End, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Duration" Width="90" Binding="{Binding Duration, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="True" />
+                <DataGridTemplateColumn Header="Toggl project" Width="160">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <ComboBox ItemsSource="{Binding DataContext.TogglProjects, RelativeSource={RelativeSource AncestorType=UserControl}}" DisplayMemberPath="Name" SelectedValuePath="Id" SelectedValue="{Binding TogglProjectId, UpdateSourceTrigger=PropertyChanged}" />
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Header="Tempo category" Binding="{Binding TempoCategory, UpdateSourceTrigger=PropertyChanged}" />
-                <DataGridCheckBoxColumn Header="Billable" Binding="{Binding IsBillable, UpdateSourceTrigger=PropertyChanged}" />
-                <DataGridCheckBoxColumn Header="Post to Toggl" Binding="{Binding PostToToggl, UpdateSourceTrigger=PropertyChanged}" />
-                <DataGridTemplateColumn Header="Status">
+                <DataGridTextColumn Header="Tempo category" Width="130" Binding="{Binding TempoCategory, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridCheckBoxColumn Header="Billable" Width="75" Binding="{Binding IsBillable, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridCheckBoxColumn Header="Post to Toggl" Width="95" Binding="{Binding PostToToggl, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTemplateColumn Header="Status" Width="115">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <ComboBox ItemsSource="{Binding DataContext.WorkStatuses, RelativeSource={RelativeSource AncestorType=UserControl}}" DisplayMemberPath="DisplayName" SelectedValuePath="Value" SelectedValue="{Binding Status, UpdateSourceTrigger=PropertyChanged}" />
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTemplateColumn Header="">
+                <DataGridTemplateColumn Header="" Width="85">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate><Button Command="{Binding DataContext.RemoveItemCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">Remove</Button></DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>

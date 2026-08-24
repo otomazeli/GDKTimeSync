@@ -163,6 +163,19 @@ public sealed class TodayViewModelTests
     }
 
     [Fact]
+    public void Today_editor_uses_non_overlapping_rows_and_readable_grid_columns()
+    {
+        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GDK.TimeSync.Desktop", "Views", "TodayView.xaml"));
+        var markup = File.ReadAllText(path);
+
+        Assert.DoesNotContain("<RowDefinition Height=\"8\" />", markup, StringComparison.Ordinal);
+        Assert.Contains("<RowDefinition Height=\"20\" />", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Jira key\" Width=\"140\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Description\" Width=\"300\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Toggl project\" Width=\"160\"", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task OpeningAndCancellingAiConsent_DoesNotCallServicesOrPersistTheSelectedDescription()
     {
         var date = new DateOnly(2026, 8, 15);
