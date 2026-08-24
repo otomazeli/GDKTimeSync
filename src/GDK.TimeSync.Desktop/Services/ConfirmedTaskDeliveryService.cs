@@ -81,7 +81,8 @@ public sealed class ConfirmedTaskDeliveryService(
                 workspaceId,
                 item.Comment,
                 new DateTimeOffset(start, offset),
-                new DateTimeOffset(start.Add(item.Duration), offset)), cancellationToken);
+                new DateTimeOffset(item.End is { } end ? item.Day.ToDateTime(end) : start.Add(item.Duration), offset),
+                item.TogglProjectId), cancellationToken);
             return entry.Id;
         }
     }

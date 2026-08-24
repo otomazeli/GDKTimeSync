@@ -14,6 +14,9 @@ public sealed record PlannedWorkItem(
     bool IsBillable,
     WorkStatus Status = WorkStatus.InProgress)
 {
+    public long? TogglProjectId { get; init; }
+    public bool PostToToggl { get; init; } = true;
+
     public static PlannedWorkItem Create(
         DateOnly day,
         string name = "",

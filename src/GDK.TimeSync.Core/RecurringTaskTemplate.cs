@@ -11,6 +11,8 @@ public sealed record RecurringTaskTemplate(
     bool IsBillable = true,
     WorkStatus Status = WorkStatus.InProgress)
 {
+    public long? TogglProjectId { get; init; }
+
     public static RecurringTaskTemplate Create(
         string name,
         string jiraIssueKey,

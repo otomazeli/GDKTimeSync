@@ -13,6 +13,7 @@ public sealed class RecurringTaskTemplateViewModel : INotifyPropertyChanged
     private string togglProject;
     private string tempoCategory;
     private WorkStatus status;
+    private long? togglProjectId;
 
     public RecurringTaskTemplateViewModel(
         string name = "",
@@ -23,7 +24,8 @@ public sealed class RecurringTaskTemplateViewModel : INotifyPropertyChanged
         string tempoCategory = "",
         bool isBillable = true,
         Guid? id = null,
-        WorkStatus status = WorkStatus.InProgress)
+        WorkStatus status = WorkStatus.InProgress,
+        long? togglProjectId = null)
     {
         Id = id ?? Guid.NewGuid();
         this.name = name;
@@ -34,6 +36,7 @@ public sealed class RecurringTaskTemplateViewModel : INotifyPropertyChanged
         this.tempoCategory = tempoCategory;
         IsBillable = isBillable;
         this.status = status;
+        this.togglProjectId = togglProjectId;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -47,6 +50,7 @@ public sealed class RecurringTaskTemplateViewModel : INotifyPropertyChanged
     public string TempoCategory { get => tempoCategory; set => SetField(ref tempoCategory, value); }
     public bool IsBillable { get; }
     public WorkStatus Status { get => status; set => SetField(ref status, value); }
+    public long? TogglProjectId { get => togglProjectId; set => SetField(ref togglProjectId, value); }
 
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {

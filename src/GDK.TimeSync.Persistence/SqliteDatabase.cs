@@ -17,8 +17,10 @@ public sealed class SqliteDatabase
             comment TEXT NOT NULL,
             duration_seconds INTEGER NOT NULL,
             toggl_project TEXT NOT NULL,
+            toggl_project_id INTEGER NULL,
             tempo_category TEXT NOT NULL,
             is_billable INTEGER NOT NULL,
+            post_to_toggl INTEGER NOT NULL DEFAULT 1,
             work_status INTEGER NOT NULL DEFAULT 0 CHECK (work_status IN (0, 1, 2, 3, 4)));
         CREATE INDEX IF NOT EXISTS ix_planned_work_items_plan_date ON planned_work_items(plan_date);
         CREATE TABLE IF NOT EXISTS recurring_task_templates (
@@ -28,6 +30,7 @@ public sealed class SqliteDatabase
             description TEXT NOT NULL,
             duration_seconds INTEGER NOT NULL,
             toggl_project TEXT NOT NULL,
+            toggl_project_id INTEGER NULL,
             tempo_category TEXT NOT NULL,
             is_billable INTEGER NOT NULL,
             work_status INTEGER NOT NULL DEFAULT 0 CHECK (work_status IN (0, 1, 2, 3, 4)));
@@ -87,6 +90,8 @@ public sealed class SqliteDatabase
                     }
 
                     await EnsureWorkStatusColumnsAsync(connection, cancellationToken);
+                    await EnsureProjectIdColumnsAsync(connection, cancellationToken);
+                    await EnsureColumnAsync(connection, "planned_work_items", "post_to_toggl", "INTEGER NOT NULL DEFAULT 1", cancellationToken);
                     await EnsureDeliveryAttemptTimestampColumnsAsync(connection, cancellationToken);
                     await CommitAsync(connection, cancellationToken);
                 }
@@ -136,6 +141,12 @@ public sealed class SqliteDatabase
         await EnsureColumnAsync(connection, "delivery_attempts", "toggl_write_recorded_at_utc", "TEXT NULL", cancellationToken);
         await EnsureColumnAsync(connection, "delivery_attempts", "tempo_write_recorded_at_utc", "TEXT NULL", cancellationToken);
         await EnsureColumnAsync(connection, "delivery_attempts", "reconciliation_recorded_at_utc", "TEXT NULL", cancellationToken);
+    }
+
+    private static async Task EnsureProjectIdColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await EnsureColumnAsync(connection, "planned_work_items", "toggl_project_id", "INTEGER NULL", cancellationToken);
+        await EnsureColumnAsync(connection, "recurring_task_templates", "toggl_project_id", "INTEGER NULL", cancellationToken);
     }
 
     private static async Task EnsureColumnAsync(SqliteConnection connection, string tableName, string columnName, string definition, CancellationToken cancellationToken)

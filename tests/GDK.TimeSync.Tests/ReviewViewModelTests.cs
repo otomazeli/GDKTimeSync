@@ -26,6 +26,22 @@ public sealed class ReviewViewModelTests
     }
 
     [Fact]
+    public async Task Task_not_marked_for_toggl_is_not_confirmation_eligible()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT") with { PostToToggl = false };
+        var delivery = new RecordingConfirmedDeliveryService();
+        var review = CreateReview(DailyPlan.Create(date, [item]), delivery);
+
+        review.OpenTaskConfirmation(item.Id);
+        await review.ConfirmTaskAsync();
+
+        Assert.False(review.IsTaskConfirmationVisible);
+        Assert.Empty(delivery.DeliveredItemIds);
+        Assert.Equal("Task is not marked for Toggl delivery.", review.TaskDeliveryError);
+    }
+
+    [Fact]
     public async Task Task_confirmation_projects_selected_details_and_the_safe_completed_result()
     {
         var date = new DateOnly(2026, 8, 13);

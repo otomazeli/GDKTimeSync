@@ -18,7 +18,7 @@ public sealed class SqliteDailyPlanRepository(SqliteDatabase database) : IDailyP
 
         await using var itemCommand = connection.CreateCommand();
         itemCommand.CommandText = """
-            SELECT id, start_time, end_time, name, jira_issue_key, comment, duration_seconds, toggl_project, tempo_category, is_billable, work_status
+            SELECT id, start_time, end_time, name, jira_issue_key, comment, duration_seconds, toggl_project, toggl_project_id, tempo_category, is_billable, post_to_toggl, work_status
             FROM planned_work_items
             WHERE plan_date = $date
             ORDER BY rowid
@@ -38,9 +38,10 @@ public sealed class SqliteDailyPlanRepository(SqliteDatabase database) : IDailyP
                 reader.GetString(5),
                 TimeSpan.FromSeconds(reader.GetInt64(6)),
                 reader.GetString(7),
-                reader.GetString(8),
-                reader.GetBoolean(9),
-                ReadWorkStatus(reader.IsDBNull(10) ? 0 : reader.GetInt32(10))));
+                reader.GetString(9),
+                reader.GetBoolean(10),
+                ReadWorkStatus(reader.IsDBNull(12) ? 0 : reader.GetInt32(12)))
+                { TogglProjectId = reader.IsDBNull(8) ? null : reader.GetInt64(8), PostToToggl = reader.GetBoolean(11) });
         }
 
         return DailyPlan.Create(date, items);
@@ -79,8 +80,8 @@ public sealed class SqliteDailyPlanRepository(SqliteDatabase database) : IDailyP
             await using var insertCommand = connection.CreateCommand();
             insertCommand.Transaction = transaction;
             insertCommand.CommandText = """
-                INSERT INTO planned_work_items(id, plan_date, start_time, end_time, name, jira_issue_key, comment, duration_seconds, toggl_project, tempo_category, is_billable, work_status)
-                VALUES ($id, $date, $start, $end, $name, $jiraIssueKey, $comment, $durationSeconds, $togglProject, $tempoCategory, $isBillable, $workStatus)
+                INSERT INTO planned_work_items(id, plan_date, start_time, end_time, name, jira_issue_key, comment, duration_seconds, toggl_project, toggl_project_id, tempo_category, is_billable, post_to_toggl, work_status)
+                VALUES ($id, $date, $start, $end, $name, $jiraIssueKey, $comment, $durationSeconds, $togglProject, $togglProjectId, $tempoCategory, $isBillable, $postToToggl, $workStatus)
                 """;
             insertCommand.Parameters.AddWithValue("$id", item.Id.ToString("D"));
             insertCommand.Parameters.AddWithValue("$date", dateValue);
@@ -91,8 +92,10 @@ public sealed class SqliteDailyPlanRepository(SqliteDatabase database) : IDailyP
             insertCommand.Parameters.AddWithValue("$comment", item.Comment);
             insertCommand.Parameters.AddWithValue("$durationSeconds", Convert.ToInt64(item.Duration.TotalSeconds));
             insertCommand.Parameters.AddWithValue("$togglProject", item.TogglProject);
+            insertCommand.Parameters.AddWithValue("$togglProjectId", (object?)item.TogglProjectId ?? DBNull.Value);
             insertCommand.Parameters.AddWithValue("$tempoCategory", item.TempoCategory);
             insertCommand.Parameters.AddWithValue("$isBillable", item.IsBillable);
+            insertCommand.Parameters.AddWithValue("$postToToggl", item.PostToToggl);
             insertCommand.Parameters.AddWithValue("$workStatus", (int)item.Status);
             await insertCommand.ExecuteNonQueryAsync(cancellationToken);
         }

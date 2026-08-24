@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
+using GDK.TimeSync.Toggl;
 
 namespace GDK.TimeSync.Desktop.ViewModels;
 
@@ -23,12 +24,17 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     private bool isAiConsentVisible;
     private Guid? pendingAiItemId;
     private Guid? suggestedItemId;
+    private readonly IIntegrationClientFactory? integrationClients;
+    private readonly IUserSettingsStore? settingsStore;
+    private string? projectLoadError;
 
-    public TodayViewModel(IDailyPlanRepository? repository = null, DateOnly? date = null, IAiConsentService? aiConsentService = null, IAssistedTextGenerator? assistedTextGenerator = null)
+    public TodayViewModel(IDailyPlanRepository? repository = null, DateOnly? date = null, IAiConsentService? aiConsentService = null, IAssistedTextGenerator? assistedTextGenerator = null, IIntegrationClientFactory? integrationClients = null, IUserSettingsStore? settingsStore = null)
     {
         this.repository = repository;
         this.aiConsentService = aiConsentService;
         this.assistedTextGenerator = assistedTextGenerator;
+        this.integrationClients = integrationClients;
+        this.settingsStore = settingsStore;
         Date = date ?? DateOnly.FromDateTime(DateTime.Today);
         Items.CollectionChanged += OnItemsChanged;
         AddItemCommand = new RelayCommand(_ => Items.Add(new PlannedWorkItemViewModel()));
@@ -38,11 +44,13 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
         ConfirmAiConsentCommand = new RelayCommand(async _ => await ConfirmAiConsentAsync());
         CancelAiConsentCommand = new RelayCommand(_ => CancelAiConsent());
         ApplyAiSuggestionCommand = new RelayCommand(_ => ApplyAiSuggestion());
+        RefreshProjectsCommand = new RelayCommand(_ => _ = LoadProjectsAsync());
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public ObservableCollection<PlannedWorkItemViewModel> Items { get; } = [];
+    public ObservableCollection<TogglProject> TogglProjects { get; } = [];
     public DateOnly Date { get; }
     public RelayCommand AddItemCommand { get; }
     public RelayCommand RemoveItemCommand { get; }
@@ -51,9 +59,11 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     public RelayCommand ConfirmAiConsentCommand { get; }
     public RelayCommand CancelAiConsentCommand { get; }
     public RelayCommand ApplyAiSuggestionCommand { get; }
+    public RelayCommand RefreshProjectsCommand { get; }
     public double PlannedSeconds => Items.Sum(item => item.Duration.TotalSeconds);
     public IReadOnlyList<WorkStatusOption> WorkStatuses => WorkStatusOption.All;
     public string? PersistenceError { get => persistenceError; private set => SetField(ref persistenceError, value); }
+    public string? ProjectLoadError { get => projectLoadError; private set => SetField(ref projectLoadError, value); }
     public PlannedWorkItemViewModel? SelectedItem { get => selectedItem; set => SetField(ref selectedItem, value); }
     public DescriptionSuggestionRequest? PendingAiRequest { get => pendingAiRequest; private set => SetField(ref pendingAiRequest, value); }
     public string? SuggestedDescription { get => suggestedDescription; private set => SetSuggestedDescription(value); }
@@ -77,6 +87,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
                     Items.Add(new PlannedWorkItemViewModel(item.Name, item.JiraIssueKey, item.Comment, item.Duration, item.TogglProject, item.TempoCategory, item.Id, item.Start, item.End, item.IsBillable, item.Status));
             isInitialized = true;
             PersistenceError = null;
+            await LoadProjectsAsync(cancellationToken);
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -93,14 +104,40 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             return pendingSave ?? Task.CompletedTask;
     }
 
+    public async Task LoadProjectsAsync(CancellationToken cancellationToken = default)
+    {
+        TogglProjects.Clear();
+        ProjectLoadError = null;
+        if (integrationClients is null || settingsStore is null) return;
+
+        try
+        {
+            var workspaceId = settingsStore.Load().TogglWorkspaceId;
+            if (workspaceId is not > 0) return;
+            using var toggl = await integrationClients.CreateTogglAsync(cancellationToken);
+            foreach (var project in await toggl.GetProjectsAsync(workspaceId.Value, cancellationToken))
+                TogglProjects.Add(project);
+            ApplyProjectNames();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            ProjectLoadError = "Could not load Toggl projects.";
+        }
+    }
+
     public DailyPlan GetSnapshot() => DailyPlan.Create(Date, Items.Select(item => new PlannedWorkItem(
         item.Id, Date, item.Start, item.End, item.Name, item.JiraIssueKey, item.Description,
-        item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable, item.Status)).ToArray());
+        item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable, item.Status)
+        { TogglProjectId = item.TogglProjectId, PostToToggl = item.PostToToggl }).ToArray());
 
     private void AddTemplate(object? template)
     {
         if (template is not RecurringTaskTemplateViewModel source) return;
-        Items.Add(new PlannedWorkItemViewModel(source.Name, source.JiraIssueKey, source.Description, source.Duration, source.TogglProject, source.TempoCategory, isBillable: source.IsBillable, status: source.Status));
+        Items.Add(new PlannedWorkItemViewModel(source.Name, source.JiraIssueKey, source.Description, source.Duration, source.TogglProject, source.TempoCategory, isBillable: source.IsBillable, status: source.Status, togglProjectId: source.TogglProjectId));
     }
 
     private void RemoveItem(object? item)
@@ -225,7 +262,22 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     {
         if (e.PropertyName == nameof(PlannedWorkItemViewModel.Duration))
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PlannedSeconds)));
+        if (e.PropertyName == nameof(PlannedWorkItemViewModel.TogglProjectId))
+            ApplyProjectName((PlannedWorkItemViewModel)sender!);
         SaveAfterUserAction();
+    }
+
+    private void ApplyProjectNames()
+    {
+        foreach (var item in Items) ApplyProjectName(item);
+    }
+
+    private void ApplyProjectName(PlannedWorkItemViewModel item)
+    {
+        if (item.TogglProjectId is not { } id) return;
+        var project = TogglProjects.FirstOrDefault(value => value.Id == id);
+        if (project is not null && !string.Equals(item.TogglProject, project.Name, StringComparison.Ordinal))
+            item.TogglProject = project.Name;
     }
 
     private void SaveAfterUserAction()
@@ -263,7 +315,8 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             {
                 var plan = DailyPlan.Create(Date, Items.Select(item => new PlannedWorkItem(
                     item.Id, Date, item.Start, item.End, item.Name, item.JiraIssueKey, item.Description,
-                    item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable, item.Status)).ToArray());
+                    item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable, item.Status)
+                    { TogglProjectId = item.TogglProjectId, PostToToggl = item.PostToToggl }).ToArray());
                 await repository!.SaveAsync(plan);
                 PersistenceError = null;
             }

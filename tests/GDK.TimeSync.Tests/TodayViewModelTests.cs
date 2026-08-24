@@ -1,6 +1,11 @@
+using System.Net;
+using System.Net.Http.Json;
 using GDK.TimeSync.Desktop.ViewModels;
 using GDK.TimeSync.Desktop.Services;
 using GDK.TimeSync.Core;
+using GDK.TimeSync.Jira;
+using GDK.TimeSync.Tempo;
+using GDK.TimeSync.Toggl;
 using System.Xml.Linq;
 
 namespace GDK.TimeSync.Tests;
@@ -68,6 +73,60 @@ public sealed class TodayViewModelTests
         item.Duration = TimeSpan.FromMinutes(45);
 
         Assert.Equal(2700, today.PlannedSeconds);
+    }
+
+    [Fact]
+    public void SettingStartAndEnd_RecalculatesDuration()
+    {
+        var today = new TodayViewModel();
+        var item = new PlannedWorkItemViewModel();
+        today.Items.Add(item);
+
+        item.Start = new TimeOnly(8, 15);
+        item.End = new TimeOnly(8, 45);
+
+        Assert.Equal(TimeSpan.FromMinutes(30), item.Duration);
+        Assert.Equal(1800, today.PlannedSeconds);
+    }
+
+    [Fact]
+    public void Snapshot_PreservesProjectIdentityTimingBillableAndTogglIntent()
+    {
+        var today = new TodayViewModel(null, new DateOnly(2026, 8, 20));
+        var item = new PlannedWorkItemViewModel(
+            jiraIssueKey: "CGMFRAVII-2767",
+            description: "Knowledge transfer",
+            togglProject: "CGM",
+            togglProjectId: 123,
+            start: new TimeOnly(8, 15),
+            end: new TimeOnly(8, 45),
+            isBillable: false,
+            postToToggl: true);
+        today.Items.Add(item);
+
+        var snapshot = Assert.Single(today.GetSnapshot().Items);
+
+        Assert.Equal(123, snapshot.TogglProjectId);
+        Assert.Equal(new TimeOnly(8, 15), snapshot.Start);
+        Assert.Equal(new TimeOnly(8, 45), snapshot.End);
+        Assert.False(snapshot.IsBillable);
+        Assert.True(snapshot.PostToToggl);
+    }
+
+    [Fact]
+    public async Task LoadProjectsAsync_PopulatesTheConfiguredWorkspaceProjects()
+    {
+        var today = new TodayViewModel(
+            date: new DateOnly(2026, 8, 20),
+            integrationClients: new ProjectFactory(),
+            settingsStore: new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42 }));
+
+        await today.LoadProjectsAsync();
+
+        var project = Assert.Single(today.TogglProjects);
+        Assert.Equal(77, project.Id);
+        Assert.Equal("CGM", project.Name);
+        Assert.Null(today.ProjectLoadError);
     }
 
     [Fact]
@@ -332,5 +391,29 @@ public sealed class TodayViewModelTests
             GetCalls = 0;
             SaveCalls = 0;
         }
+    }
+
+    private sealed class FixedSettingsStore(UserSettings settings) : IUserSettingsStore
+    {
+        public UserSettings Load() => settings;
+        public void Save(UserSettings value) { }
+    }
+
+    private sealed class ProjectFactory : IIntegrationClientFactory
+    {
+        public Task<ITogglClient> CreateTogglAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<ITogglClient>(new TogglClient(new HttpClient(new ProjectHandler()) { BaseAddress = new Uri("https://toggl.example.test/") }, new TogglOptions { ApiToken = "unit-token" }));
+
+        public Task<JiraClient> CreateJiraAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<TempoClient> CreateTempoAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class ProjectHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new[] { new TogglProject(77, "CGM") })
+            });
     }
 }

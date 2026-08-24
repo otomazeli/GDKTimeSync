@@ -10,8 +10,10 @@
             <TextBlock Margin="0,8,0,0" Text="{Binding PlannedSeconds, StringFormat=Planned: {0} seconds}" Foreground="DimGray" />
             <TextBlock Margin="0,4,0,12" Text="Rows are saved locally. Nothing is posted externally." Foreground="DimGray" />
             <TextBlock Margin="0,0,0,8" Text="{Binding PersistenceError}" Foreground="DarkRed" TextWrapping="Wrap" />
+            <TextBlock Margin="0,0,0,8" Text="{Binding ProjectLoadError}" Foreground="DarkRed" TextWrapping="Wrap" />
             <StackPanel Orientation="Horizontal">
                 <Button Width="110" Command="{Binding AddItemCommand}">Add item</Button>
+                <Button Margin="8,0,0,0" Command="{Binding RefreshProjectsCommand}">Refresh Toggl projects</Button>
                 <Button Margin="8,0,0,0" Command="{Binding OpenAiConsentCommand}" Content="Draft AI description" />
             </StackPanel>
             <StackPanel Margin="0,8,0,0" Visibility="{Binding IsAiConsentVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
@@ -41,9 +43,19 @@
                 <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
                 <DataGridTextColumn Header="Jira key" Binding="{Binding JiraIssueKey, UpdateSourceTrigger=PropertyChanged}" />
                 <DataGridTextColumn Header="Description" Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}" />
-                <DataGridTextColumn Header="Duration" Binding="{Binding Duration, UpdateSourceTrigger=PropertyChanged}" />
-                <DataGridTextColumn Header="Toggl project" Binding="{Binding TogglProject, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Start" Binding="{Binding Start, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="End" Binding="{Binding End, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Duration" Binding="{Binding Duration, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="True" />
+                <DataGridTemplateColumn Header="Toggl project">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ComboBox ItemsSource="{Binding DataContext.TogglProjects, RelativeSource={RelativeSource AncestorType=UserControl}}" DisplayMemberPath="Name" SelectedValuePath="Id" SelectedValue="{Binding TogglProjectId, UpdateSourceTrigger=PropertyChanged}" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
                 <DataGridTextColumn Header="Tempo category" Binding="{Binding TempoCategory, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridCheckBoxColumn Header="Billable" Binding="{Binding IsBillable, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridCheckBoxColumn Header="Post to Toggl" Binding="{Binding PostToToggl, UpdateSourceTrigger=PropertyChanged}" />
                 <DataGridTemplateColumn Header="Status">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>

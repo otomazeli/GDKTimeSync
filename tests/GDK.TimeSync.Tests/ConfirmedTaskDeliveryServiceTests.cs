@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
 using GDK.TimeSync.Jira;
@@ -46,6 +47,25 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         Assert.Equal(3, clients.CreatedClients.Count);
     }
 
+    [Fact]
+    public async Task DeliverConfirmedAsync_uses_explicit_end_time_and_selected_toggl_project()
+    {
+        var item = PlannedWorkItem.Create(
+            new DateOnly(2026, 8, 13), "Planning", "CGM-1", "Reviewed work", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT",
+            start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        item = item with { TogglProjectId = 77, PostToToggl = true };
+        var clients = new RecordingIntegrationClientFactory();
+        var service = new ConfirmedTaskDeliveryService(
+            clients,
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "planner" }),
+            new InMemoryAttemptRepository());
+
+        await service.DeliverConfirmedAsync(item);
+
+        Assert.Equal(77, clients.LastTogglRequest?.ProjectId);
+        Assert.Equal(new TimeOnly(9, 30), TimeOnly.FromDateTime(clients.LastTogglRequest!.Stop.LocalDateTime));
+    }
+
     private sealed class FixedSettingsStore(UserSettings settings) : IUserSettingsStore
     {
         public UserSettings Load() => settings;
@@ -60,6 +80,7 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         public int TogglRequests => handler.TogglRequests;
         public int JiraIssueRequests => handler.JiraIssueRequests;
         public int TempoWorklogRequests => handler.TempoWorklogRequests;
+        public TogglCreateTimeEntryRequest? LastTogglRequest => handler.LastTogglRequest;
 
         public Task<ITogglClient> CreateTogglAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<ITogglClient>(new TogglClient(CreateClient(), new TogglOptions { ApiToken = "unit-token" }));
@@ -83,12 +104,20 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         public int TogglRequests { get; private set; }
         public int JiraIssueRequests { get; private set; }
         public int TempoWorklogRequests { get; private set; }
+        public TogglCreateTimeEntryRequest? LastTogglRequest { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             if (request.RequestUri!.AbsolutePath.Contains("time_entries", StringComparison.Ordinal))
             {
                 TogglRequests++;
+                var payload = request.Content!.ReadFromJsonAsync<JsonElement>(cancellationToken).GetAwaiter().GetResult();
+                LastTogglRequest = new TogglCreateTimeEntryRequest(
+                    payload.GetProperty("workspace_id").GetInt64(),
+                    payload.GetProperty("description").GetString()!,
+                    payload.GetProperty("start").GetDateTimeOffset(),
+                    payload.GetProperty("stop").GetDateTimeOffset(),
+                    payload.TryGetProperty("project_id", out var projectId) ? projectId.GetInt64() : null);
                 return Json(new { id = 101L });
             }
             if (request.RequestUri.AbsolutePath.Contains("issue", StringComparison.Ordinal))
