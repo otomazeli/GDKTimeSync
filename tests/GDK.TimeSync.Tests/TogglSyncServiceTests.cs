@@ -48,6 +48,34 @@ public sealed class TogglSyncServiceTests
     }
 
     [Fact]
+    public async Task PullAsync_ExtractsALeadingJiraKeyWhenOnlySpaceSeparatedFromTheDescription()
+    {
+        var entry = CreateEntry(id: 555, projectId: 9, description: "CGMFRAVII-8139 Proxy DMP : Impact et endpoints (Clean Architecture) - Planning", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var toggl = new FakeTogglClient([entry]);
+        var service = CreateService(toggl, new InMemoryAttemptRepository());
+
+        var result = await service.PullAsync(Date, []);
+
+        var added = Assert.Single(result.ItemsToAdd);
+        Assert.Equal("CGMFRAVII-8139", added.JiraIssueKey);
+        Assert.Equal("Proxy DMP : Impact et endpoints (Clean Architecture) - Planning", added.Comment);
+    }
+
+    [Fact]
+    public async Task PullAsync_ExtractsALeadingJiraKeyWhenPipeSeparatedFromTheDescription()
+    {
+        var entry = CreateEntry(id: 555, projectId: 9, description: "CGMFRAVII-8424 | DMP — Infrastructure : DTOs JSON et mapper (TDD)", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var toggl = new FakeTogglClient([entry]);
+        var service = CreateService(toggl, new InMemoryAttemptRepository());
+
+        var result = await service.PullAsync(Date, []);
+
+        var added = Assert.Single(result.ItemsToAdd);
+        Assert.Equal("CGMFRAVII-8424", added.JiraIssueKey);
+        Assert.Equal("DMP — Infrastructure : DTOs JSON et mapper (TDD)", added.Comment);
+    }
+
+    [Fact]
     public async Task PullAsync_LeavesJiraKeyEmptyWhenTheLeadingTokenDoesNotLookLikeAnIssueKey()
     {
         var entry = CreateEntry(id: 555, projectId: 9, description: "Team sync - weekly planning", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));

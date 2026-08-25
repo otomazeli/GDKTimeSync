@@ -145,22 +145,30 @@ public sealed class TogglSyncService(
         };
     }
 
-    // Entries typed directly in Toggl commonly lead with the Jira key, e.g.
-    // "CGMFRAVII-2763 - AxiSanté Agile Meetings and Activities 2026 - Daily Squad".
-    // Extract that leading key using the same pattern the app validates keys against
-    // elsewhere, and drop it from the comment so it isn't duplicated once the key has
-    // its own field (Slack/Tempo formatting already prepends the key separately).
+    // Entries typed directly in Toggl commonly lead with the Jira key, in one of several
+    // shapes: "CGMFRAVII-8139 Proxy DMP : Impact et endpoints" (plain space),
+    // "CGMFRAVII-2763 - AxiSanté Agile Meetings" (dash-separated), or
+    // "CGMFRAVII-8424 | DMP — Infrastructure" (pipe-separated). Extract the leading
+    // whitespace-delimited token using the same pattern the app validates keys against
+    // elsewhere; if it looks like a key, drop it (and an optional following "-"/"|") from
+    // the comment so it isn't duplicated once the key has its own field (Slack/Tempo
+    // formatting already prepends the key separately).
+    private static readonly char[] DescriptionSeparators = ['-', '|'];
+
     private (string JiraIssueKey, string Comment) ParseDescription(string description)
     {
         if (string.IsNullOrWhiteSpace(description)) return ("", description ?? "");
 
-        var separatorIndex = description.IndexOf(" - ", StringComparison.Ordinal);
-        if (separatorIndex <= 0) return ("", description);
-
-        var candidate = description[..separatorIndex];
+        var trimmed = description.TrimStart();
+        var spaceIndex = trimmed.IndexOf(' ');
+        var candidate = spaceIndex < 0 ? trimmed : trimmed[..spaceIndex];
         if (!issueKeyValidator.IsValid(candidate)) return ("", description);
 
-        return (candidate, description[(separatorIndex + 3)..].Trim());
+        var remainder = spaceIndex < 0 ? "" : trimmed[(spaceIndex + 1)..].TrimStart();
+        if (remainder.Length > 0 && DescriptionSeparators.Contains(remainder[0]))
+            remainder = remainder[1..].TrimStart();
+
+        return (candidate, remainder);
     }
 
     private static (TimeOnly Start, TimeOnly End) ToLocalRange(DateTimeOffset start, DateTimeOffset end) =>
