@@ -4,6 +4,7 @@ using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
 using GDK.TimeSync.Desktop.ViewModels;
 using GDK.TimeSync.Persistence;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GDK.TimeSync.Desktop;
@@ -36,6 +37,10 @@ public partial class App : System.Windows.Application
 
     internal static void ConfigureServices(IServiceCollection services)
     {
+        // IssueKeyValidationOptions.BindConfiguration (in AddTimeSyncCore) requires an
+        // IConfiguration to be registered, even though this desktop app has no config file
+        // to bind -- an empty configuration leaves IssueKeyValidationOptions at its defaults.
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddTimeSyncCore();
         services.AddTimeSyncPersistence(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
