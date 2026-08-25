@@ -36,9 +36,20 @@ public sealed class TogglClient : ITogglClient
             throw new ArgumentOutOfRangeException(nameof(endDate));
         }
 
-        var path = $"me/time_entries?start_date={startDate:yyyy-MM-dd}&end_date={endDate:yyyy-MM-dd}";
+        // Toggl's end_date query parameter must be strictly after start_date or the API returns
+        // zero entries, even for a same-day range that has entries. Widen the request by one day
+        // and filter back down to the requested [startDate, endDate] window using each entry's
+        // local start date, so callers keep an inclusive-both-ends contract.
+        var path = $"me/time_entries?start_date={startDate:yyyy-MM-dd}&end_date={endDate.AddDays(1):yyyy-MM-dd}";
         using var response = await SendAsync(() => HttpClient.GetAsync(path, cancellationToken));
-        return await ReadJsonAsync<List<TogglTimeEntry>>(response, cancellationToken) ?? [];
+        var entries = await ReadJsonAsync<List<TogglTimeEntry>>(response, cancellationToken) ?? [];
+        return entries.Where(entry => IsWithinLocalDateRange(entry.Start, startDate, endDate)).ToList();
+    }
+
+    private static bool IsWithinLocalDateRange(DateTimeOffset start, DateOnly startDate, DateOnly endDate)
+    {
+        var localDate = DateOnly.FromDateTime(start.LocalDateTime);
+        return localDate >= startDate && localDate <= endDate;
     }
 
     public async Task<TogglTimeEntry> CreateTimeEntryAsync(TogglCreateTimeEntryRequest request, CancellationToken cancellationToken = default)

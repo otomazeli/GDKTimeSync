@@ -28,7 +28,7 @@ public sealed class IntegrationDiagnosticsServiceTests
             results);
         Assert.Equal(
             [
-                $"Toggl GET /me/time_entries?start_date={today:yyyy-MM-dd}&end_date={today:yyyy-MM-dd}",
+                $"Toggl GET /me/time_entries?start_date={today:yyyy-MM-dd}&end_date={today.AddDays(1):yyyy-MM-dd}",
                 "Jira GET /rest/api/2/myself",
                 "Tempo GET /rest/tempo-core/1/work-attribute"
             ],
@@ -53,7 +53,7 @@ public sealed class IntegrationDiagnosticsServiceTests
                 new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Tempo, true, "Available")
             ],
             results);
-        Assert.Equal(["Toggl GET /me/time_entries?start_date=" + DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd") + "&end_date=" + DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd"), "Tempo GET /rest/tempo-core/1/work-attribute"], clients.Requests);
+        Assert.Equal(["Toggl GET /me/time_entries?start_date=" + DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd") + "&end_date=" + DateOnly.FromDateTime(DateTime.Today).AddDays(1).ToString("yyyy-MM-dd"), "Tempo GET /rest/tempo-core/1/work-attribute"], clients.Requests);
         Assert.DoesNotContain(results, result => result.SafeMessage.Contains(secret, StringComparison.Ordinal));
         Assert.All(clients.CreatedClients, client => Assert.True(client.WasDisposed));
     }
@@ -75,7 +75,7 @@ public sealed class IntegrationDiagnosticsServiceTests
             results);
         Assert.Equal(
             [
-                "Toggl GET /me/time_entries?start_date=" + DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd") + "&end_date=" + DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd"),
+                "Toggl GET /me/time_entries?start_date=" + DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd") + "&end_date=" + DateOnly.FromDateTime(DateTime.Today).AddDays(1).ToString("yyyy-MM-dd"),
                 "Jira GET /rest/api/2/myself",
                 "Tempo GET /rest/tempo-core/1/work-attribute"
             ],
@@ -100,7 +100,7 @@ public sealed class IntegrationDiagnosticsServiceTests
             results);
         Assert.Equal(
             [
-                "Toggl GET /me/time_entries?start_date=" + DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd") + "&end_date=" + DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd"),
+                "Toggl GET /me/time_entries?start_date=" + DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd") + "&end_date=" + DateOnly.FromDateTime(DateTime.Today).AddDays(1).ToString("yyyy-MM-dd"),
                 "Jira GET /rest/api/2/myself",
                 "Tempo GET /rest/tempo-core/1/work-attribute"
             ],

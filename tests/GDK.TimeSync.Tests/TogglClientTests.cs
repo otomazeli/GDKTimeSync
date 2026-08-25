@@ -22,8 +22,37 @@ public sealed class TogglClientTests
         Assert.Equal(new DateTimeOffset(2026, 8, 7, 8, 45, 0, TimeSpan.FromHours(-4)), entry.Stop);
         Assert.Equal(1800, entry.DurationSeconds);
         Assert.Equal("/api/v9/me/time_entries", handler.LastRequest!.RequestUri!.AbsolutePath);
-        Assert.Equal("start_date=2026-08-07&end_date=2026-08-07", handler.LastRequest.RequestUri.Query.TrimStart('?'));
         Assert.Equal("Basic", handler.LastRequest.Headers.Authorization!.Scheme);
+    }
+
+    [Fact]
+    public async Task GetTimeEntriesAsync_widens_the_toggl_query_by_one_day_since_a_same_day_range_returns_nothing()
+    {
+        var date = new DateOnly(2026, 8, 25);
+        var handler = new StubHttpMessageHandler(_ => TimeEntriesResponse((1, "Today", ToOffset(date, new TimeOnly(8, 0)), ToOffset(date, new TimeOnly(8, 30)))));
+        using var httpClient = CreateHttpClient(handler);
+        using var client = CreateClient(httpClient);
+
+        var result = await client.GetTimeEntriesAsync(date, date);
+
+        Assert.Single(result);
+        Assert.Equal("start_date=2026-08-25&end_date=2026-08-26", handler.LastRequest!.RequestUri!.Query.TrimStart('?'));
+    }
+
+    [Fact]
+    public async Task GetTimeEntriesAsync_excludes_entries_outside_the_requested_local_date_range()
+    {
+        var date = new DateOnly(2026, 8, 25);
+        var handler = new StubHttpMessageHandler(_ => TimeEntriesResponse(
+            (1, "In range", ToOffset(date, new TimeOnly(8, 0)), ToOffset(date, new TimeOnly(8, 30))),
+            (2, "Widened-in day", ToOffset(date.AddDays(1), new TimeOnly(0, 15)), ToOffset(date.AddDays(1), new TimeOnly(0, 30)))));
+        using var httpClient = CreateHttpClient(handler);
+        using var client = CreateClient(httpClient);
+
+        var result = await client.GetTimeEntriesAsync(date, date);
+
+        var entry = Assert.Single(result);
+        Assert.Equal(1, entry.Id);
     }
 
     [Fact]
@@ -140,6 +169,16 @@ public sealed class TogglClientTests
 
     private static HttpResponseMessage JsonResponse(string json) =>
         new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+
+    private static HttpResponseMessage TimeEntriesResponse(params (long Id, string Description, DateTimeOffset Start, DateTimeOffset Stop)[] entries)
+    {
+        var items = entries.Select(e =>
+            $"{{\"id\":{e.Id},\"description\":\"{e.Description}\",\"start\":\"{e.Start:O}\",\"stop\":\"{e.Stop:O}\",\"duration\":{(long)(e.Stop - e.Start).TotalSeconds}}}");
+        return JsonResponse("[" + string.Join(",", items) + "]");
+    }
+
+    private static DateTimeOffset ToOffset(DateOnly date, TimeOnly time) =>
+        new(date.ToDateTime(time), TimeZoneInfo.Local.GetUtcOffset(date.ToDateTime(time)));
 
     private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
     {
