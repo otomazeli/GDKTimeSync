@@ -13,6 +13,7 @@ public partial class App : System.Windows.Application
     private ServiceProvider? serviceProvider;
     private TrayIconService? trayIcon;
     private IEndOfDayReminderService? endOfDayReminderService;
+    private ITogglAutoSyncService? togglAutoSyncService;
     private volatile bool isExiting;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -27,6 +28,8 @@ public partial class App : System.Windows.Application
         endOfDayReminderService = serviceProvider.GetRequiredService<IEndOfDayReminderService>();
         endOfDayReminderService.ReviewDue += OnReviewDue;
         endOfDayReminderService.StartAsync().GetAwaiter().GetResult();
+        togglAutoSyncService = serviceProvider.GetRequiredService<ITogglAutoSyncService>();
+        togglAutoSyncService.StartAsync().GetAwaiter().GetResult();
         ShowMainWindow();
         Dispatcher.BeginInvoke(InitializeTrayIcon);
     }
@@ -61,6 +64,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IConfirmedTaskDeliveryService, ConfirmedTaskDeliveryService>();
         services.AddSingleton<ISlackClientFactory, SlackClientFactory>();
         services.AddSingleton<ITogglSyncService, TogglSyncService>();
+        services.AddSingleton<ITogglAutoSyncService, TogglAutoSyncService>();
         services.AddSingleton<ConnectionStatusViewModel>();
         services.AddSingleton<IConfigurationStateService, ConfigurationStateService>();
         services.AddSingleton<MainViewModel>();
@@ -95,22 +99,47 @@ public partial class App : System.Windows.Application
         {
             try
             {
-                trayIcon?.Dispose();
+                _ = StopAutoSyncIgnoringFailureAsync();
             }
-            catch (Exception) { }
             finally
             {
                 try
                 {
-                    serviceProvider?.Dispose();
+                    trayIcon?.Dispose();
                 }
                 catch (Exception) { }
                 finally
                 {
-                    base.OnExit(e);
+                    try
+                    {
+                        serviceProvider?.Dispose();
+                    }
+                    catch (Exception) { }
+                    finally
+                    {
+                        base.OnExit(e);
+                    }
                 }
             }
         }
+    }
+
+    private ITogglAutoSyncService? DetachAutoSyncService()
+    {
+        var service = togglAutoSyncService;
+        togglAutoSyncService = null;
+        return service;
+    }
+
+    private async Task StopAutoSyncIgnoringFailureAsync()
+    {
+        var service = DetachAutoSyncService();
+        if (service is null) return;
+        try
+        {
+            await service.StopAsync().ConfigureAwait(false);
+        }
+        catch (Exception) { }
     }
 
     private void ShowMainWindow()
@@ -132,6 +161,7 @@ public partial class App : System.Windows.Application
     {
         if (isExiting) return;
         isExiting = true;
+        await StopAutoSyncIgnoringFailureAsync();
         await ReminderLifecycle.StopThenAsync(DetachReminderService(), OnReviewDue, FlushAndShutdownAsync);
     }
 

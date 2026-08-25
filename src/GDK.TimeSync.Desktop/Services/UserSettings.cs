@@ -11,7 +11,7 @@ public sealed record UserSettings
     public string DefaultTempoWorkCategory { get; init; } = "DEVELOPMENT";
     public bool AiEnabled { get; init; }
     public bool AutoSyncEnabled { get; init; } = true;
-    public int SyncIntervalMinutes { get; init; } = 15;
+    public int SyncIntervalMinutes { get; init; } = 5;
     public string SlackTitle { get; init; } = "Daily update";
     public string SlackTaskHeading { get; init; } = "Completed tasks";
     public IReadOnlyList<string> SlackExtraLines { get; init; } = [];
