@@ -33,6 +33,65 @@ public sealed class TogglSyncServiceTests
     }
 
     [Fact]
+    public async Task PullAsync_ExtractsALeadingJiraKeyFromTheDescriptionOnImport()
+    {
+        var entry = CreateEntry(id: 555, projectId: 9, description: "CGMFRAVII-2763 - AxiSanté Agile Meetings and Activities 2026 - Daily Squad Ségur 1", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var toggl = new FakeTogglClient([entry]);
+        var service = CreateService(toggl, new InMemoryAttemptRepository());
+
+        var result = await service.PullAsync(Date, []);
+
+        var added = Assert.Single(result.ItemsToAdd);
+        Assert.Equal("CGMFRAVII-2763", added.JiraIssueKey);
+        Assert.Equal("AxiSanté Agile Meetings and Activities 2026 - Daily Squad Ségur 1", added.Comment);
+        Assert.Equal(added.Comment, added.Name);
+    }
+
+    [Fact]
+    public async Task PullAsync_LeavesJiraKeyEmptyWhenTheLeadingTokenDoesNotLookLikeAnIssueKey()
+    {
+        var entry = CreateEntry(id: 555, projectId: 9, description: "Team sync - weekly planning", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var toggl = new FakeTogglClient([entry]);
+        var service = CreateService(toggl, new InMemoryAttemptRepository());
+
+        var result = await service.PullAsync(Date, []);
+
+        var added = Assert.Single(result.ItemsToAdd);
+        Assert.Equal("", added.JiraIssueKey);
+        Assert.Equal("Team sync - weekly planning", added.Comment);
+    }
+
+    [Fact]
+    public async Task PullAsync_BackfillsAnEmptyJiraKeyOnAnAlreadyLinkedItemOnASubsequentSync()
+    {
+        var localItem = PlannedWorkItem.Create(Date, "Work", jiraIssueKey: "", comment: "Investigate bug") with { TogglEntryId = 555 };
+        var entry = CreateEntry(id: 555, projectId: null, description: "CGMFRAVII-2763 - Investigate bug", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var toggl = new FakeTogglClient([entry]);
+        var service = CreateService(toggl, new InMemoryAttemptRepository());
+
+        var result = await service.PullAsync(Date, [localItem]);
+
+        var updated = Assert.Single(result.ItemsToUpdate);
+        Assert.Equal("CGMFRAVII-2763", updated.JiraIssueKey);
+        Assert.Equal("Investigate bug", updated.Comment);
+    }
+
+    [Fact]
+    public async Task PullAsync_NeverOverwritesAnAlreadySetLocalJiraKey()
+    {
+        var localItem = PlannedWorkItem.Create(Date, "Work", jiraIssueKey: "CGM-999", comment: "Old description") with { TogglEntryId = 555 };
+        var entry = CreateEntry(id: 555, projectId: null, description: "CGMFRAVII-2763 - New description", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var toggl = new FakeTogglClient([entry]);
+        var service = CreateService(toggl, new InMemoryAttemptRepository());
+
+        var result = await service.PullAsync(Date, [localItem]);
+
+        var updated = Assert.Single(result.ItemsToUpdate);
+        Assert.Equal("CGM-999", updated.JiraIssueKey);
+        Assert.Equal("New description", updated.Comment);
+    }
+
+    [Fact]
     public async Task PullAsync_RefreshesAMatchedNotYetDeliveredItemInPlace()
     {
         var localItem = PlannedWorkItem.Create(Date, "Work", "CGM-1", "Old description") with { TogglEntryId = 555 };
@@ -124,7 +183,7 @@ public sealed class TogglSyncServiceTests
     {
         var toggl = new FakeTogglClient([]);
         var factory = new FakeIntegrationClientFactory(toggl);
-        var service = new TogglSyncService(factory, new FixedSettingsStore(new UserSettings()), new InMemoryAttemptRepository());
+        var service = new TogglSyncService(factory, new FixedSettingsStore(new UserSettings()), new InMemoryAttemptRepository(), CreateIssueKeyValidator());
 
         var result = await service.PullAsync(Date, []);
 
@@ -134,7 +193,9 @@ public sealed class TogglSyncServiceTests
     }
 
     private static TogglSyncService CreateService(ITogglClient toggl, IDeliveryAttemptRepository attempts) =>
-        new(new FakeIntegrationClientFactory(toggl), new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42 }), attempts);
+        new(new FakeIntegrationClientFactory(toggl), new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42 }), attempts, CreateIssueKeyValidator());
+
+    private static IssueKeyValidator CreateIssueKeyValidator() => new(new IssueKeyValidationOptions());
 
     private static TogglTimeEntry CreateEntry(long id, long? projectId, string description, TimeOnly start, TimeOnly end) => new()
     {
