@@ -231,7 +231,8 @@ public sealed class TodayViewModelTests
         var updated = PlannedWorkItem.Create(today.Date, comment: "New description", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30)) with
         {
             Id = existing.Id,
-            TogglEntryId = 555
+            TogglEntryId = 555,
+            JiraIssueKey = "CGMFRAVII-2763"
         };
 
         var merge = today.ApplyPullResult(new TogglSyncPullResult([], [updated], 1, null));
@@ -241,6 +242,7 @@ public sealed class TodayViewModelTests
         Assert.Equal(new TimeOnly(9, 0), existing.Start);
         Assert.Equal(new TimeOnly(9, 30), existing.End);
         Assert.Equal(555, existing.TogglEntryId);
+        Assert.Equal("CGMFRAVII-2763", existing.JiraIssueKey);
         Assert.Equal(0, merge.Imported);
         Assert.Equal(1, merge.Updated);
         Assert.Equal(1, merge.ReconciliationFlagged);

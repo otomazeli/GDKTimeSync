@@ -146,6 +146,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             existing.End = updated.End;
             existing.Description = updated.Comment;
             existing.TogglEntryId = updated.TogglEntryId;
+            existing.JiraIssueKey = updated.JiraIssueKey;
         }
 
         foreach (var added in result.ItemsToAdd)
