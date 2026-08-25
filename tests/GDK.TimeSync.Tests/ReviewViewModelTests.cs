@@ -252,7 +252,7 @@ public sealed class ReviewViewModelTests
     }
 
     [Fact]
-    public async Task Slack_preview_excludes_non_tempo_succeeded_tasks_and_shows_a_safe_blocker()
+    public async Task Slack_preview_includes_non_tempo_succeeded_tasks_marked_as_not_posted_and_shows_a_safe_blocker()
     {
         var date = new DateOnly(2026, 8, 13);
         var succeeded = PlannedWorkItem.Create(date, "Done", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
@@ -264,8 +264,22 @@ public sealed class ReviewViewModelTests
         await review.ComposeSlackPreviewAsync();
 
         Assert.Contains("GDK | CGM-1 Completed | *In Progress*", review.SlackPreview!.SlackExtraLines);
-        Assert.DoesNotContain("CGM-2", review.SlackPreview.SlackExtraLines);
+        Assert.Contains("GDK | CGM-2 Not completed | *In Progress* (not posted in Jira)", review.SlackPreview.SlackExtraLines);
         Assert.Single(review.SlackBlockers);
+    }
+
+    [Fact]
+    public async Task Slack_preview_composes_even_when_no_task_has_been_posted_to_jira_yet()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var pending = PlannedWorkItem.Create(date, "Work", "CGM-1", "Not yet delivered", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var review = CreateReview(DailyPlan.Create(date, [pending]));
+
+        await review.ComposeSlackPreviewAsync();
+
+        Assert.NotNull(review.SlackPreview);
+        Assert.Contains("(not posted in Jira)", review.SlackPreview!.SlackExtraLines);
+        Assert.True(review.CanConfirmSlack);
     }
 
     [Theory]

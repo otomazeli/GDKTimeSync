@@ -55,6 +55,19 @@ public sealed class SlackDailyUpdateComposerTests
     }
 
     [Fact]
+    public void Compose_MarksAnItemNotPostedToJiraWithoutOmittingItFromTheDigest()
+    {
+        var update = composer.Compose(new DateOnly(2026, 8, 13), [
+            new("CGM", "CGM-1", "Delivered", WorkStatus.Done, PostedToJira: true),
+            new("CGM", "CGM-2", "Not yet delivered", WorkStatus.InProgress, PostedToJira: false)]);
+
+        Assert.Equal("""
+            CGM | CGM-1 Delivered | *Done*
+            CGM | CGM-2 Not yet delivered | *In Progress* (not posted in Jira)
+            """, update!.SlackExtraLines);
+    }
+
+    [Fact]
     public void Compose_ReturnsNullWhenThereAreNoCompletedItems()
     {
         var update = composer.Compose(new DateOnly(2026, 8, 13), []);

@@ -21,7 +21,10 @@ public sealed class SlackDailyUpdateComposer
         foreach (var item in completedItems)
         {
             ArgumentNullException.ThrowIfNull(item);
-            lines.Add($"{item.TogglProject} | {item.JiraIssueKey} {item.Description} | *{DisplayName(item.Status)}*");
+            var line = $"{item.TogglProject} | {item.JiraIssueKey} {item.Description} | *{DisplayName(item.Status)}*";
+            if (!item.PostedToJira)
+                line += " (not posted in Jira)";
+            lines.Add(line);
         }
 
         return new SlackDailyUpdate(date, options?.Title ?? "", options?.Header ?? "", string.Join("\n", lines), options?.JiraUser ?? "");

@@ -212,21 +212,25 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
             }
 
             var completed = new List<SlackDailyCompletedItem>();
+            var notPostedCount = 0;
             foreach (var item in plan.Items)
             {
                 var attempt = await attempts.GetAsync(item.Id, cancellationToken);
-                if (attempt is { Status: DeliveryAttemptStatus.Succeeded, TempoWorklogId: not null })
-                    completed.Add(new SlackDailyCompletedItem(item.TogglProject, item.JiraIssueKey, item.Comment, item.Status));
-                else
-                    SlackBlockers.Add("A pending or unsuccessful task delivery is excluded from Slack.");
+                var postedToJira = attempt is { Status: DeliveryAttemptStatus.Succeeded, TempoWorklogId: not null };
+                if (!postedToJira)
+                    notPostedCount++;
+                completed.Add(new SlackDailyCompletedItem(item.TogglProject, item.JiraIssueKey, item.Comment, item.Status, postedToJira));
             }
+
+            if (notPostedCount > 0)
+                SlackBlockers.Add($"{notPostedCount} task(s) not yet posted to Jira/Tempo are included, marked \"not posted in Jira.\"");
 
             var preferences = settings?.Load() ?? new UserSettings();
             SlackPreview = new SlackDailyUpdateComposer().Compose(plan.Date, completed,
                 new SlackDailyUpdateOptions(preferences.SlackTitle, preferences.SlackTaskHeading, preferences.SlackExtraLines, preferences.JiraUser));
             if (SlackPreview is null)
             {
-                SlackBlockers.Add("No Tempo-succeeded tasks are available for Slack.");
+                SlackBlockers.Add("No tasks are available for Slack.");
                 return;
             }
 
