@@ -147,6 +147,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             existing.Description = updated.Comment;
             existing.TogglEntryId = updated.TogglEntryId;
             existing.JiraIssueKey = updated.JiraIssueKey;
+            existing.TempoCategory = updated.TempoCategory;
         }
 
         foreach (var added in result.ItemsToAdd)
@@ -154,6 +155,10 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
                 added.Name, added.JiraIssueKey, added.Comment, added.Duration, added.TogglProject, added.TempoCategory,
                 added.Id, added.Start, added.End, added.IsBillable, added.Status,
                 added.TogglProjectId, added.PostToToggl, added.TogglEntryId, added.Source));
+
+        // TogglProjectId is set on import/update, but the display name is resolved from the
+        // already-loaded TogglProjects list, same as the existing per-property-change path.
+        ApplyProjectNames();
 
         return new TodaySyncMergeResult(result.ItemsToAdd.Count, result.ItemsToUpdate.Count, result.ReconciliationFlaggedCount);
     }

@@ -228,7 +228,7 @@ public sealed class TodayViewModelTests
         today.AddItemCommand.Execute(null);
         var existing = Assert.Single(today.Items);
         existing.Description = "Old description";
-        var updated = PlannedWorkItem.Create(today.Date, comment: "New description", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30)) with
+        var updated = PlannedWorkItem.Create(today.Date, comment: "New description", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30), tempoCategory: "DEVELOPMENT") with
         {
             Id = existing.Id,
             TogglEntryId = 555,
@@ -243,9 +243,28 @@ public sealed class TodayViewModelTests
         Assert.Equal(new TimeOnly(9, 30), existing.End);
         Assert.Equal(555, existing.TogglEntryId);
         Assert.Equal("CGMFRAVII-2763", existing.JiraIssueKey);
+        Assert.Equal("DEVELOPMENT", existing.TempoCategory);
         Assert.Equal(0, merge.Imported);
         Assert.Equal(1, merge.Updated);
         Assert.Equal(1, merge.ReconciliationFlagged);
+    }
+
+    [Fact]
+    public void ApplyPullResult_ResolvesTheTogglProjectNameForAnImportedItem()
+    {
+        var today = new TodayViewModel();
+        today.TogglProjects.Add(new TogglProject(314, "GDK"));
+        var added = PlannedWorkItem.Create(today.Date, "Investigate bug", comment: "Investigate bug") with
+        {
+            TogglEntryId = 555,
+            TogglProjectId = 314,
+            Source = ItemSource.Toggl
+        };
+
+        today.ApplyPullResult(new TogglSyncPullResult([added], [], 0, null));
+
+        var item = Assert.Single(today.Items);
+        Assert.Equal("GDK", item.TogglProject);
     }
 
     [Fact]

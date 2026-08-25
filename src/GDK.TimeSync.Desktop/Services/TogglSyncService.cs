@@ -14,12 +14,16 @@ public sealed class TogglSyncService(
         ArgumentNullException.ThrowIfNull(localItems);
 
         long workspaceId;
+        string defaultTempoCategory;
         try
         {
             var configuration = settings.Load();
             if (configuration.TogglWorkspaceId is not > 0)
                 return TogglSyncPullResult.Empty("Toggl is not configured.");
             workspaceId = configuration.TogglWorkspaceId.Value;
+            defaultTempoCategory = string.IsNullOrWhiteSpace(configuration.DefaultTempoWorkCategory)
+                ? "DEVELOPMENT"
+                : configuration.DefaultTempoWorkCategory;
         }
         catch
         {
@@ -60,21 +64,24 @@ public sealed class TogglSyncService(
 
             if (!linkIndex.TryGetValue(entry.Id, out var localItem))
             {
-                itemsToAdd.Add(BuildImportedItem(date, entry, stop));
+                itemsToAdd.Add(BuildImportedItem(date, entry, stop, defaultTempoCategory));
                 continue;
             }
 
             var attempt = await TryGetAttemptAsync(localItem.Id, cancellationToken);
             var (entryStart, entryEnd) = ToLocalRange(entry.Start, stop);
             var (parsedJiraKey, parsedComment) = ParseDescription(entry.Description);
-            var jiraKeyToFill = string.IsNullOrWhiteSpace(localItem.JiraIssueKey) && !string.IsNullOrEmpty(parsedJiraKey) ? parsedJiraKey : null;
-            var changed = localItem.Start != entryStart || localItem.End != entryEnd ||
-                          !string.Equals(localItem.Comment, parsedComment, StringComparison.Ordinal) ||
-                          jiraKeyToFill is not null;
+
+            // Whether the remote entry itself drifted from what was already delivered -- the
+            // only thing that matters for the Succeeded/reconciliation decision below. Local
+            // field backfills (jiraKeyToFill/tempoCategoryToFill) are not a "the remote changed"
+            // signal and must never trigger reconciliation on an already-succeeded delivery.
+            var remoteChanged = localItem.Start != entryStart || localItem.End != entryEnd ||
+                                 !string.Equals(localItem.Comment, parsedComment, StringComparison.Ordinal);
 
             if (attempt is { Status: DeliveryAttemptStatus.Succeeded })
             {
-                if (changed && attempt.FailureCode != DeliveryFailureCode.RemoteChangedAfterDelivery)
+                if (remoteChanged && attempt.FailureCode != DeliveryFailureCode.RemoteChangedAfterDelivery)
                 {
                     try
                     {
@@ -93,6 +100,10 @@ public sealed class TogglSyncService(
                 continue;
             }
 
+            var jiraKeyToFill = string.IsNullOrWhiteSpace(localItem.JiraIssueKey) && !string.IsNullOrEmpty(parsedJiraKey) ? parsedJiraKey : null;
+            var tempoCategoryToFill = string.IsNullOrWhiteSpace(localItem.TempoCategory) ? defaultTempoCategory : null;
+            var changed = remoteChanged || jiraKeyToFill is not null || tempoCategoryToFill is not null;
+
             if (!changed && localItem.TogglEntryId == entry.Id)
                 continue;
 
@@ -103,7 +114,8 @@ public sealed class TogglSyncService(
                 Comment = parsedComment,
                 Duration = stop - entry.Start,
                 TogglEntryId = entry.Id,
-                JiraIssueKey = jiraKeyToFill ?? localItem.JiraIssueKey
+                JiraIssueKey = jiraKeyToFill ?? localItem.JiraIssueKey,
+                TempoCategory = tempoCategoryToFill ?? localItem.TempoCategory
             });
         }
 
@@ -125,7 +137,7 @@ public sealed class TogglSyncService(
         }
     }
 
-    private PlannedWorkItem BuildImportedItem(DateOnly date, TogglTimeEntry entry, DateTimeOffset stop)
+    private PlannedWorkItem BuildImportedItem(DateOnly date, TogglTimeEntry entry, DateTimeOffset stop, string defaultTempoCategory)
     {
         var (start, end) = ToLocalRange(entry.Start, stop);
         var (jiraIssueKey, comment) = ParseDescription(entry.Description);
@@ -135,6 +147,7 @@ public sealed class TogglSyncService(
             jiraIssueKey: jiraIssueKey,
             comment: comment,
             duration: stop - entry.Start,
+            tempoCategory: defaultTempoCategory,
             start: start,
             end: end) with
         {

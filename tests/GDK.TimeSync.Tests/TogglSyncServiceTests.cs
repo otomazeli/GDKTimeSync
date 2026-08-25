@@ -28,7 +28,7 @@ public sealed class TogglSyncServiceTests
         Assert.False(added.PostToToggl);
         Assert.Equal("Investigate bug", added.Comment);
         Assert.Equal("", added.JiraIssueKey);
-        Assert.Equal("", added.TempoCategory);
+        Assert.Equal("DEVELOPMENT", added.TempoCategory);
         Assert.Equal(0, toggl.CreateCount);
     }
 
@@ -117,6 +117,60 @@ public sealed class TogglSyncServiceTests
         var updated = Assert.Single(result.ItemsToUpdate);
         Assert.Equal("CGM-999", updated.JiraIssueKey);
         Assert.Equal("New description", updated.Comment);
+    }
+
+    [Fact]
+    public async Task PullAsync_UsesTheConfiguredDefaultTempoCategoryOnImport()
+    {
+        var entry = CreateEntry(id: 555, projectId: 9, description: "Investigate bug", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var toggl = new FakeTogglClient([entry]);
+        var service = CreateService(toggl, new InMemoryAttemptRepository(), new UserSettings { TogglWorkspaceId = 42, DefaultTempoWorkCategory = "SUPPORT" });
+
+        var result = await service.PullAsync(Date, []);
+
+        var added = Assert.Single(result.ItemsToAdd);
+        Assert.Equal("SUPPORT", added.TempoCategory);
+    }
+
+    [Fact]
+    public async Task PullAsync_FallsBackToDevelopmentWhenNoDefaultTempoCategoryIsConfigured()
+    {
+        var entry = CreateEntry(id: 555, projectId: 9, description: "Investigate bug", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var toggl = new FakeTogglClient([entry]);
+        var service = CreateService(toggl, new InMemoryAttemptRepository(), new UserSettings { TogglWorkspaceId = 42, DefaultTempoWorkCategory = "" });
+
+        var result = await service.PullAsync(Date, []);
+
+        var added = Assert.Single(result.ItemsToAdd);
+        Assert.Equal("DEVELOPMENT", added.TempoCategory);
+    }
+
+    [Fact]
+    public async Task PullAsync_BackfillsAnEmptyTempoCategoryOnAnAlreadyLinkedItemOnASubsequentSync()
+    {
+        var localItem = PlannedWorkItem.Create(Date, "Work", jiraIssueKey: "CGM-1", comment: "Investigate bug", tempoCategory: "") with { TogglEntryId = 555 };
+        var entry = CreateEntry(id: 555, projectId: null, description: "Investigate bug", start: new TimeOnly(9, 0), end: new TimeOnly(9, 45));
+        var toggl = new FakeTogglClient([entry]);
+        var service = CreateService(toggl, new InMemoryAttemptRepository());
+
+        var result = await service.PullAsync(Date, [localItem]);
+
+        var updated = Assert.Single(result.ItemsToUpdate);
+        Assert.Equal("DEVELOPMENT", updated.TempoCategory);
+    }
+
+    [Fact]
+    public async Task PullAsync_NeverOverwritesAnAlreadySetLocalTempoCategory()
+    {
+        var localItem = PlannedWorkItem.Create(Date, "Work", jiraIssueKey: "CGM-1", comment: "Investigate bug", tempoCategory: "SUPPORT") with { TogglEntryId = 555 };
+        var entry = CreateEntry(id: 555, projectId: null, description: "Investigate bug changed", start: new TimeOnly(9, 0), end: new TimeOnly(9, 45));
+        var toggl = new FakeTogglClient([entry]);
+        var service = CreateService(toggl, new InMemoryAttemptRepository());
+
+        var result = await service.PullAsync(Date, [localItem]);
+
+        var updated = Assert.Single(result.ItemsToUpdate);
+        Assert.Equal("SUPPORT", updated.TempoCategory);
     }
 
     [Fact]
@@ -221,7 +275,10 @@ public sealed class TogglSyncServiceTests
     }
 
     private static TogglSyncService CreateService(ITogglClient toggl, IDeliveryAttemptRepository attempts) =>
-        new(new FakeIntegrationClientFactory(toggl), new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42 }), attempts, CreateIssueKeyValidator());
+        CreateService(toggl, attempts, new UserSettings { TogglWorkspaceId = 42 });
+
+    private static TogglSyncService CreateService(ITogglClient toggl, IDeliveryAttemptRepository attempts, UserSettings settings) =>
+        new(new FakeIntegrationClientFactory(toggl), new FixedSettingsStore(settings), attempts, CreateIssueKeyValidator());
 
     private static IssueKeyValidator CreateIssueKeyValidator() => new(new IssueKeyValidationOptions());
 
