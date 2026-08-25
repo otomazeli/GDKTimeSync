@@ -12,7 +12,10 @@ public sealed class SlackDailyUpdateComposerTests
     {
         var update = composer.Compose(new DateOnly(2026, 8, 13), [new SlackDailyCompletedItem("CGM", "CGMFRAVII-2767", "Knowledge transfer", WorkStatus.Done)]);
 
-        Assert.Equal("CGM | CGMFRAVII-2767 Knowledge transfer | *Done*", update!.Text);
+        Assert.Equal("CGM | CGMFRAVII-2767 Knowledge transfer | *Done*", update!.SlackExtraLines);
+        Assert.Equal("", update.SlackTitle);
+        Assert.Equal("", update.SlackTaskHeading);
+        Assert.Equal("", update.SlackUser);
     }
 
     [Fact]
@@ -31,23 +34,24 @@ public sealed class SlackDailyUpdateComposerTests
             CGM | CGM-3 Complete | *Done*
             CGM | CGM-4 Build | *In Progress*
             CGM | CGM-5 Blocked | *Waiting*
-            """, update!.Text);
+            """, update!.SlackExtraLines);
     }
 
     [Fact]
-    public void Compose_ExcludesBlankOptionalLines()
+    public void Compose_PutsTitleAndHeadingInTheirOwnFieldsAndTaskLinesAfterExtraLines()
     {
         var update = composer.Compose(
             new DateOnly(2026, 8, 13),
             [new("CGM", "CGM-1", "Build", WorkStatus.InProgress)],
-            new SlackDailyUpdateOptions("Daily update", "Completed work", ["", "  ", "Follow up tomorrow"]));
+            new SlackDailyUpdateOptions("Daily update", "Completed work", ["", "  ", "Follow up tomorrow"], "planner"));
 
+        Assert.Equal("Daily update", update!.SlackTitle);
+        Assert.Equal("Completed work", update.SlackTaskHeading);
+        Assert.Equal("planner", update.SlackUser);
         Assert.Equal("""
-            Daily update
-            Completed work
             Follow up tomorrow
             CGM | CGM-1 Build | *In Progress*
-            """, update!.Text);
+            """, update.SlackExtraLines);
     }
 
     [Fact]

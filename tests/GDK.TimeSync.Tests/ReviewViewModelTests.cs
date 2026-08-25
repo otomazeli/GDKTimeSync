@@ -168,7 +168,9 @@ public sealed class ReviewViewModelTests
 
         await review.ComposeSlackPreviewAsync();
 
-        Assert.Equal("Daily delivery\nCompleted work\nThank you, team.\nGDK | CGM-1 Completed | *In Progress*", review.SlackPreview!.Text);
+        Assert.Equal("Daily delivery", review.SlackPreview!.SlackTitle);
+        Assert.Equal("Completed work", review.SlackPreview.SlackTaskHeading);
+        Assert.Equal("Thank you, team.\nGDK | CGM-1 Completed | *In Progress*", review.SlackPreview.SlackExtraLines);
     }
 
     [Fact]
@@ -187,8 +189,8 @@ public sealed class ReviewViewModelTests
 
             await review.ComposeSlackPreviewAsync();
 
-            Assert.DoesNotContain(sentinel, review.SlackPreview!.Text, StringComparison.Ordinal);
-            Assert.StartsWith("Daily update", review.SlackPreview.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(sentinel, review.SlackPreview!.SlackTitle, StringComparison.Ordinal);
+            Assert.Equal("Daily update", review.SlackPreview.SlackTitle);
         }
         finally
         {
@@ -261,8 +263,8 @@ public sealed class ReviewViewModelTests
 
         await review.ComposeSlackPreviewAsync();
 
-        Assert.Contains("GDK | CGM-1 Completed | *In Progress*", review.SlackPreview!.Text);
-        Assert.DoesNotContain("CGM-2", review.SlackPreview.Text);
+        Assert.Contains("GDK | CGM-1 Completed | *In Progress*", review.SlackPreview!.SlackExtraLines);
+        Assert.DoesNotContain("CGM-2", review.SlackPreview.SlackExtraLines);
         Assert.Single(review.SlackBlockers);
     }
 

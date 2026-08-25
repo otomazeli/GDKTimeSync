@@ -223,7 +223,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
             var preferences = settings?.Load() ?? new UserSettings();
             SlackPreview = new SlackDailyUpdateComposer().Compose(plan.Date, completed,
-                new SlackDailyUpdateOptions(preferences.SlackTitle, preferences.SlackTaskHeading, preferences.SlackExtraLines));
+                new SlackDailyUpdateOptions(preferences.SlackTitle, preferences.SlackTaskHeading, preferences.SlackExtraLines, preferences.JiraUser));
             if (SlackPreview is null)
             {
                 SlackBlockers.Add("No Tempo-succeeded tasks are available for Slack.");

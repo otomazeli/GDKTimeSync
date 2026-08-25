@@ -14,8 +14,6 @@ public sealed class SlackDailyUpdateComposer
             return null;
 
         var lines = new List<string>();
-        AddIfPresent(lines, options?.Title);
-        AddIfPresent(lines, options?.Header);
         if (options?.ExtraLines is not null)
             foreach (var extraLine in options.ExtraLines)
                 AddIfPresent(lines, extraLine);
@@ -26,7 +24,7 @@ public sealed class SlackDailyUpdateComposer
             lines.Add($"{item.TogglProject} | {item.JiraIssueKey} {item.Description} | *{DisplayName(item.Status)}*");
         }
 
-        return new SlackDailyUpdate(date, string.Join("\n", lines));
+        return new SlackDailyUpdate(date, options?.Title ?? "", options?.Header ?? "", string.Join("\n", lines), options?.JiraUser ?? "");
     }
 
     private static void AddIfPresent(ICollection<string> lines, string? value)

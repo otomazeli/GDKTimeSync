@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using GDK.TimeSync.Slack;
 
 namespace GDK.TimeSync.Tests;
@@ -7,27 +8,39 @@ namespace GDK.TimeSync.Tests;
 public sealed class SlackClientTests
 {
     [Fact]
-    public async Task PostAsync_SendsOnlyTheTextPayload()
+    public async Task PostAsync_SendsTheWorkflowBuilderDataVariables()
     {
         HttpRequestMessage? request = null;
         using var client = CreateClient(new StubHttpMessageHandler(message =>
         {
             request = message;
-            return PlainTextResponse("ok");
+            return new HttpResponseMessage(HttpStatusCode.OK);
         }));
 
-        await client.PostAsync(new SlackDailyUpdate(new DateOnly(2026, 8, 13), "Daily update"));
+        await client.PostAsync(new SlackDailyUpdate(new DateOnly(2026, 8, 13), "Daily update", "Completed tasks", "GDK | CGM-1 Work | *Done*", "planner"));
 
         Assert.Equal(HttpMethod.Post, request!.Method);
-        Assert.Equal("{\"text\":\"Daily update\"}", await request.Content!.ReadAsStringAsync());
+        var raw = await request.Content!.ReadAsStringAsync();
+        var body = JsonDocument.Parse(raw).RootElement;
+        Assert.Equal("Daily update", body.GetProperty("SlackTitle").GetString());
+        Assert.Equal("Completed tasks", body.GetProperty("SlackTaskHeading").GetString());
+        Assert.Equal("GDK | CGM-1 Work | *Done*", body.GetProperty("SlackExtraLines").GetString());
+        Assert.Equal("planner", body.GetProperty("SlackUser").GetString());
+        Assert.Equal("", body.GetProperty("TogglProject").GetString());
+        Assert.Equal("", body.GetProperty("JiraIssueKey").GetString());
+        Assert.Equal("", body.GetProperty("Description").GetString());
+        Assert.Equal("", body.GetProperty("Status").GetString());
     }
 
     [Fact]
-    public async Task PostAsync_AcceptsTheExpectedSuccessResponse()
+    public async Task PostAsync_TreatsAnySuccessStatusAsSuccessRegardlessOfResponseBody()
     {
-        using var client = CreateClient(new StubHttpMessageHandler(_ => PlainTextResponse("ok")));
+        using var client = CreateClient(new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"ok\":true}", Encoding.UTF8, "application/json")
+        }));
 
-        await client.PostAsync(new SlackDailyUpdate(new DateOnly(2026, 8, 13), "Daily update"));
+        await client.PostAsync(SampleUpdate());
     }
 
     [Fact]
@@ -36,20 +49,10 @@ public sealed class SlackClientTests
         const string webhook = "https://hooks.slack.com/services/private";
         using var client = CreateClient(new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.BadGateway)), webhook);
 
-        var exception = await Assert.ThrowsAsync<SlackApiException>(() => client.PostAsync(new SlackDailyUpdate(new DateOnly(2026, 8, 13), "Daily update")));
+        var exception = await Assert.ThrowsAsync<SlackApiException>(() => client.PostAsync(SampleUpdate()));
 
         Assert.Equal(SlackFailureCode.UnsuccessfulResponse, exception.FailureCode);
         Assert.DoesNotContain("hooks.slack.com", exception.ToString(), StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task PostAsync_MalformedSuccessResponse_IsSafeFailure()
-    {
-        using var client = CreateClient(new StubHttpMessageHandler(_ => PlainTextResponse("unexpected response")));
-
-        var exception = await Assert.ThrowsAsync<SlackApiException>(() => client.PostAsync(new SlackDailyUpdate(new DateOnly(2026, 8, 13), "Daily update")));
-
-        Assert.Equal(SlackFailureCode.InvalidResponse, exception.FailureCode);
     }
 
     [Fact]
@@ -58,7 +61,7 @@ public sealed class SlackClientTests
         const string secret = "https://hooks.slack.com/services/private";
         using var client = CreateClient(new ThrowingHttpMessageHandler(new HttpRequestException(secret)));
 
-        var exception = await Assert.ThrowsAsync<SlackApiException>(() => client.PostAsync(new SlackDailyUpdate(new DateOnly(2026, 8, 13), "Daily update")));
+        var exception = await Assert.ThrowsAsync<SlackApiException>(() => client.PostAsync(SampleUpdate()));
 
         Assert.Equal(SlackFailureCode.Transport, exception.FailureCode);
         Assert.DoesNotContain(secret, exception.ToString(), StringComparison.Ordinal);
@@ -70,7 +73,7 @@ public sealed class SlackClientTests
         const string secret = "handler-secret-must-not-leak";
         using var client = CreateClient(new ThrowingHttpMessageHandler(new InvalidOperationException(secret)));
 
-        var exception = await Assert.ThrowsAsync<SlackApiException>(() => client.PostAsync(new SlackDailyUpdate(new DateOnly(2026, 8, 13), "Daily update")));
+        var exception = await Assert.ThrowsAsync<SlackApiException>(() => client.PostAsync(SampleUpdate()));
 
         Assert.Equal(SlackFailureCode.Transport, exception.FailureCode);
         Assert.DoesNotContain(secret, exception.ToString(), StringComparison.Ordinal);
@@ -83,7 +86,7 @@ public sealed class SlackClientTests
         var injected = new SlackApiException(sentinel, SlackFailureCode.InvalidResponse);
         using var client = CreateClient(new ThrowingHttpMessageHandler(injected));
 
-        var exception = await Assert.ThrowsAsync<SlackApiException>(() => client.PostAsync(new SlackDailyUpdate(new DateOnly(2026, 8, 13), "Daily update")));
+        var exception = await Assert.ThrowsAsync<SlackApiException>(() => client.PostAsync(SampleUpdate()));
 
         Assert.NotSame(injected, exception);
         Assert.Equal(SlackFailureCode.Transport, exception.FailureCode);
@@ -98,19 +101,16 @@ public sealed class SlackClientTests
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
-        var exception = await Assert.ThrowsAsync<SlackApiException>(() => client.PostAsync(new SlackDailyUpdate(new DateOnly(2026, 8, 13), "Daily update"), cancellation.Token));
+        var exception = await Assert.ThrowsAsync<SlackApiException>(() => client.PostAsync(SampleUpdate(), cancellation.Token));
 
         Assert.Equal(SlackFailureCode.Cancelled, exception.FailureCode);
     }
 
+    private static SlackDailyUpdate SampleUpdate() =>
+        new(new DateOnly(2026, 8, 13), "Daily update", "Completed tasks", "GDK | CGM-1 Work | *Done*", "planner");
+
     private static SlackClient CreateClient(HttpMessageHandler handler, string baseAddress = "https://slack.invalid/") =>
         new(new HttpClient(handler) { BaseAddress = new Uri(baseAddress) });
-
-    private static HttpResponseMessage PlainTextResponse(string body) => new()
-    {
-        StatusCode = HttpStatusCode.OK,
-        Content = new StringContent(body, Encoding.UTF8, "text/plain")
-    };
 
     private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
     {

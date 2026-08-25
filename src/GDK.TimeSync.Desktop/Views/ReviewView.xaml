@@ -144,7 +144,10 @@
                     </Style.Triggers>
                 </Style>
             </StackPanel.Style>
-            <TextBlock Text="{Binding SlackPreview.Text}" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding SlackPreview.SlackTitle}" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding SlackPreview.SlackTaskHeading}" TextWrapping="Wrap" />
+            <TextBlock Margin="0,4,0,0" Text="{Binding SlackPreview.SlackExtraLines}" TextWrapping="Wrap" />
+            <TextBlock Margin="0,4,0,0" Text="{Binding SlackPreview.SlackUser, StringFormat=From: {0}}" Foreground="DimGray" TextWrapping="Wrap" />
             <StackPanel Orientation="Horizontal"><Button Command="{Binding ConfirmSlackCommand}">Send daily Slack update</Button><Button Margin="8,0,0,0" Command="{Binding CancelSlackConfirmationCommand}">Cancel</Button></StackPanel>
         </StackPanel>
         <TextBlock Margin="0,8,0,0" Text="{Binding SlackDeliveryError}" Foreground="Firebrick" TextWrapping="Wrap" />
