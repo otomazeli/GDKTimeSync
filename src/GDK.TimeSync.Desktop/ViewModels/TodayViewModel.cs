@@ -146,6 +146,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             existing.End = updated.End;
             existing.Description = updated.Comment;
             existing.TogglEntryId = updated.TogglEntryId;
+            existing.TogglProjectId = updated.TogglProjectId;
             existing.JiraIssueKey = updated.JiraIssueKey;
             existing.TempoCategory = updated.TempoCategory;
         }

@@ -232,6 +232,7 @@ public sealed class TodayViewModelTests
         {
             Id = existing.Id,
             TogglEntryId = 555,
+            TogglProjectId = 200556941,
             JiraIssueKey = "CGMFRAVII-2763"
         };
 
@@ -242,11 +243,31 @@ public sealed class TodayViewModelTests
         Assert.Equal(new TimeOnly(9, 0), existing.Start);
         Assert.Equal(new TimeOnly(9, 30), existing.End);
         Assert.Equal(555, existing.TogglEntryId);
+        Assert.Equal(200556941, existing.TogglProjectId);
         Assert.Equal("CGMFRAVII-2763", existing.JiraIssueKey);
         Assert.Equal("DEVELOPMENT", existing.TempoCategory);
         Assert.Equal(0, merge.Imported);
         Assert.Equal(1, merge.Updated);
         Assert.Equal(1, merge.ReconciliationFlagged);
+    }
+
+    [Fact]
+    public void ApplyPullResult_ResolvesTheTogglProjectNameForAnUpdatedItem()
+    {
+        var today = new TodayViewModel();
+        today.TogglProjects.Add(new TogglProject(200556941, "CompuGroup Delphi developments (BR) (FIX)"));
+        today.AddItemCommand.Execute(null);
+        var existing = Assert.Single(today.Items);
+        var updated = PlannedWorkItem.Create(today.Date, comment: "Description") with
+        {
+            Id = existing.Id,
+            TogglEntryId = 555,
+            TogglProjectId = 200556941
+        };
+
+        today.ApplyPullResult(new TogglSyncPullResult([], [updated], 0, null));
+
+        Assert.Equal("CompuGroup Delphi developments (BR) (FIX)", existing.TogglProject);
     }
 
     [Fact]

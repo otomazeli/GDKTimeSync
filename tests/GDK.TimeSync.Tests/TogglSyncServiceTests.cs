@@ -193,6 +193,34 @@ public sealed class TogglSyncServiceTests
     }
 
     [Fact]
+    public async Task PullAsync_RefreshesTheTogglProjectIdOnAnAlreadyLinkedItemThatWasImportedWithoutOne()
+    {
+        var localItem = PlannedWorkItem.Create(Date, "Work", "CGM-1", "Same description", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30)) with { TogglEntryId = 555, TogglProjectId = null };
+        var entry = CreateEntry(id: 555, projectId: 200556941, description: "Same description", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var toggl = new FakeTogglClient([entry]);
+        var service = CreateService(toggl, new InMemoryAttemptRepository());
+
+        var result = await service.PullAsync(Date, [localItem]);
+
+        var updated = Assert.Single(result.ItemsToUpdate);
+        Assert.Equal(200556941, updated.TogglProjectId);
+    }
+
+    [Fact]
+    public async Task PullAsync_UpdatesTheTogglProjectIdWhenItChangesInToggl()
+    {
+        var localItem = PlannedWorkItem.Create(Date, "Work", "CGM-1", "Same description", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30)) with { TogglEntryId = 555, TogglProjectId = 111 };
+        var entry = CreateEntry(id: 555, projectId: 222, description: "Same description", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var toggl = new FakeTogglClient([entry]);
+        var service = CreateService(toggl, new InMemoryAttemptRepository());
+
+        var result = await service.PullAsync(Date, [localItem]);
+
+        var updated = Assert.Single(result.ItemsToUpdate);
+        Assert.Equal(222, updated.TogglProjectId);
+    }
+
+    [Fact]
     public async Task PullAsync_FlagsReconciliationWhenARemoteChangeFollowsASuccessfulDelivery()
     {
         var localItem = PlannedWorkItem.Create(Date, "Work", "CGM-1", "Old description", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));

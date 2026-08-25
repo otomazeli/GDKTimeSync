@@ -77,7 +77,8 @@ public sealed class TogglSyncService(
             // field backfills (jiraKeyToFill/tempoCategoryToFill) are not a "the remote changed"
             // signal and must never trigger reconciliation on an already-succeeded delivery.
             var remoteChanged = localItem.Start != entryStart || localItem.End != entryEnd ||
-                                 !string.Equals(localItem.Comment, parsedComment, StringComparison.Ordinal);
+                                 !string.Equals(localItem.Comment, parsedComment, StringComparison.Ordinal) ||
+                                 localItem.TogglProjectId != entry.ProjectId;
 
             if (attempt is { Status: DeliveryAttemptStatus.Succeeded })
             {
@@ -114,6 +115,7 @@ public sealed class TogglSyncService(
                 Comment = parsedComment,
                 Duration = stop - entry.Start,
                 TogglEntryId = entry.Id,
+                TogglProjectId = entry.ProjectId,
                 JiraIssueKey = jiraKeyToFill ?? localItem.JiraIssueKey,
                 TempoCategory = tempoCategoryToFill ?? localItem.TempoCategory
             });
