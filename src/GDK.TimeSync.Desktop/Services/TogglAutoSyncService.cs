@@ -1,8 +1,15 @@
+using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.ViewModels;
 
 namespace GDK.TimeSync.Desktop.Services;
 
-public sealed class TogglAutoSyncService(MainViewModel mainViewModel, IUserSettingsStore settingsStore, TimeProvider timeProvider) : ITogglAutoSyncService
+public sealed class TogglAutoSyncService(
+    MainViewModel mainViewModel,
+    TodayViewModel today,
+    ITogglSyncService syncService,
+    IDailyPlanRepository planRepository,
+    IUserSettingsStore settingsStore,
+    TimeProvider timeProvider) : ITogglAutoSyncService
 {
     private readonly object syncRoot = new();
     private DateTimeOffset? lastSyncedAt;
@@ -63,9 +70,13 @@ public sealed class TogglAutoSyncService(MainViewModel mainViewModel, IUserSetti
             lastSyncedAt = now;
         }
 
+        var realToday = DateOnly.FromDateTime(timeProvider.GetLocalNow().DateTime);
         try
         {
-            await mainViewModel.SyncNowAsync().ConfigureAwait(false);
+            if (today.Date == realToday)
+                await mainViewModel.SyncNowAsync().ConfigureAwait(false);
+            else
+                await SyncDateDirectlyAsync(realToday).ConfigureAwait(false);
         }
         catch
         {
@@ -74,6 +85,28 @@ public sealed class TogglAutoSyncService(MainViewModel mainViewModel, IUserSetti
         }
 
         return true;
+    }
+
+    // The user may leave Today showing a past date to finish/post it. Auto-sync must still keep
+    // real-today's Toggl entries up to date without going through TodayViewModel (which represents
+    // a different date at that moment) -- that would either corrupt the displayed date or get
+    // clobbered by TodayViewModel's own next debounced save for that other date.
+    private async Task SyncDateDirectlyAsync(DateOnly date)
+    {
+        var plan = await planRepository.GetAsync(date).ConfigureAwait(false) ?? DailyPlan.Create(date, []);
+        var result = await syncService.PullAsync(date, plan.Items).ConfigureAwait(false);
+        if (result.Error is not null || (result.ItemsToAdd.Count == 0 && result.ItemsToUpdate.Count == 0))
+            return;
+
+        var merged = plan.Items.ToList();
+        foreach (var updated in result.ItemsToUpdate)
+        {
+            var index = merged.FindIndex(item => item.Id == updated.Id);
+            if (index >= 0) merged[index] = updated;
+        }
+        merged.AddRange(result.ItemsToAdd);
+
+        await planRepository.SaveAsync(DailyPlan.Create(date, merged)).ConfigureAwait(false);
     }
 
     private async Task RunTimerAsync(CancellationToken cancellationToken)

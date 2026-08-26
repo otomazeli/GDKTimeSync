@@ -7,6 +7,11 @@
     <DockPanel>
         <StackPanel DockPanel.Dock="Top">
             <TextBlock Text="Today" FontSize="24" FontWeight="SemiBold" />
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0" VerticalAlignment="Center">
+                <TextBlock Text="Date:" VerticalAlignment="Center" />
+                <DatePicker Margin="8,0,0,0" Width="130" SelectedDate="{Binding SelectedDateTime}" />
+                <Button Margin="8,0,0,0" Command="{Binding GoToTodayCommand}" Content="Today" />
+            </StackPanel>
             <TextBlock Margin="0,8,0,0" Text="{Binding PlannedSeconds, StringFormat=Planned: {0} seconds}" Foreground="DimGray" />
             <TextBlock Margin="0,4,0,12" Text="Rows are saved locally. Nothing is posted externally." Foreground="DimGray" />
             <TextBlock Margin="0,0,0,8" Text="{Binding PersistenceError}" Foreground="DarkRed" TextWrapping="Wrap" />

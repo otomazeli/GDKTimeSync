@@ -176,6 +176,18 @@ public sealed class TodayViewModelTests
     }
 
     [Fact]
+    public void Today_view_offers_a_date_picker_and_a_quick_jump_back_to_today()
+    {
+        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GDK.TimeSync.Desktop", "Views", "TodayView.xaml"));
+        var elements = XDocument.Load(path).Descendants().ToArray();
+
+        Assert.Contains(elements, element =>
+            element.Name.LocalName == "DatePicker" &&
+            element.Attribute("SelectedDate")?.Value == "{Binding SelectedDateTime}");
+        Assert.Equal("Today", ButtonContent(elements, "{Binding GoToTodayCommand}"));
+    }
+
+    [Fact]
     public async Task InitializeAsync_PreservesTogglProjectPostingIntentAndSyncLinkAcrossReload()
     {
         var date = new DateOnly(2026, 8, 24);
@@ -457,6 +469,100 @@ public sealed class TodayViewModelTests
         Assert.Equal(0, generator.SuggestCalls);
     }
 
+    [Fact]
+    public async Task SelectDateAsync_FlushesPendingSaveForOldDateBeforeLoadingTheNewDate()
+    {
+        var oldDate = new DateOnly(2026, 8, 24);
+        var newDate = new DateOnly(2026, 8, 20);
+        var plans = new Dictionary<DateOnly, DailyPlan>
+        {
+            [newDate] = DailyPlan.Create(newDate, [PlannedWorkItem.Create(newDate, "Yesterday work", comment: "Yesterday work")])
+        };
+        var repository = new RecordingPlanRepository(plans);
+        var today = new TodayViewModel(repository, oldDate);
+        await today.InitializeAsync();
+        Assert.Single(today.Items).Description = "Edited before switching date";
+
+        await today.SelectDateAsync(newDate);
+
+        Assert.Contains(repository.SavedPlans, plan => plan.Date == oldDate);
+        Assert.Equal(newDate, today.Date);
+        Assert.Equal("Yesterday work", Assert.Single(today.Items).Description);
+    }
+
+    [Fact]
+    public async Task SelectDateAsync_ClearsExistingItemsAndLoadsTheNewDatesPlanFresh()
+    {
+        var oldDate = new DateOnly(2026, 8, 24);
+        var newDate = new DateOnly(2026, 8, 20);
+        var plans = new Dictionary<DateOnly, DailyPlan>
+        {
+            [newDate] = DailyPlan.Create(newDate, [PlannedWorkItem.Create(newDate, "Yesterday work", comment: "Yesterday work")])
+        };
+        var repository = new RecordingPlanRepository(plans);
+        var today = new TodayViewModel(repository, oldDate);
+        await today.InitializeAsync();
+        today.AddItemCommand.Execute(null);
+        today.AddItemCommand.Execute(null);
+        Assert.Equal(3, today.Items.Count);
+
+        await today.SelectDateAsync(newDate);
+
+        var item = Assert.Single(today.Items);
+        Assert.Equal("Yesterday work", item.Description);
+    }
+
+    [Fact]
+    public async Task SelectDateAsync_ReloadingTheNewDateDoesNotQueueASpuriousSave()
+    {
+        var oldDate = new DateOnly(2026, 8, 24);
+        var newDate = new DateOnly(2026, 8, 20);
+        var plans = new Dictionary<DateOnly, DailyPlan>
+        {
+            [newDate] = DailyPlan.Create(newDate, [PlannedWorkItem.Create(newDate, "Yesterday work", comment: "Yesterday work")])
+        };
+        var repository = new RecordingPlanRepository(plans);
+        var today = new TodayViewModel(repository, oldDate);
+        await today.InitializeAsync();
+
+        await today.SelectDateAsync(newDate);
+        await today.FlushAsync();
+
+        Assert.Empty(repository.SavedPlans);
+    }
+
+    [Fact]
+    public async Task SelectDateAsync_ToTheSameDate_IsANoOp()
+    {
+        var date = new DateOnly(2026, 8, 24);
+        var repository = new CountingPlanRepository(DailyPlan.Create(date, []));
+        var today = new TodayViewModel(repository, date);
+        await today.InitializeAsync();
+        var getCallsBefore = repository.GetCalls;
+
+        await today.SelectDateAsync(date);
+
+        Assert.Equal(getCallsBefore, repository.GetCalls);
+    }
+
+    [Fact]
+    public void GoToTodayCommand_ReturnsToTodaysDateAndReloads()
+    {
+        var past = DateOnly.FromDateTime(DateTime.Today).AddDays(-3);
+        var realToday = DateOnly.FromDateTime(DateTime.Today);
+        var plans = new Dictionary<DateOnly, DailyPlan>
+        {
+            [realToday] = DailyPlan.Create(realToday, [PlannedWorkItem.Create(realToday, "Today work", comment: "Today work")])
+        };
+        var repository = new RecordingPlanRepository(plans);
+        var today = new TodayViewModel(repository, past);
+
+        today.GoToTodayCommand.Execute(null);
+
+        Assert.Equal(realToday, today.Date);
+        Assert.Equal("Today work", Assert.Single(today.Items).Description);
+    }
+
     private static PlannedWorkItemViewModel AddSelectedItem(TodayViewModel today, string description)
     {
         var item = new PlannedWorkItemViewModel("Work", "CGMFRAVII-1", description);
@@ -526,6 +632,23 @@ public sealed class TodayViewModelTests
         {
             GetCalls = 0;
             SaveCalls = 0;
+        }
+    }
+
+    private sealed class RecordingPlanRepository(IReadOnlyDictionary<DateOnly, DailyPlan> plans) : IDailyPlanRepository
+    {
+        public List<DailyPlan> SavedPlans { get; } = [];
+
+        public Task<DailyPlan?> GetAsync(DateOnly date, CancellationToken cancellationToken = default)
+        {
+            plans.TryGetValue(date, out var plan);
+            return Task.FromResult(plan);
+        }
+
+        public Task SaveAsync(DailyPlan plan, CancellationToken cancellationToken = default)
+        {
+            SavedPlans.Add(plan);
+            return Task.CompletedTask;
         }
     }
 

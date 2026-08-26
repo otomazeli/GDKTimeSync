@@ -26,6 +26,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     private bool isSlackConfirmationVisible;
     private bool canConfirmSlack;
     private bool isTaskDeliveryInFlight;
+    private DateOnly? planDate;
 
     public ReviewViewModel(
         ILocalPlanSnapshotProvider? planProvider = null,
@@ -77,6 +78,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     public ObservableCollection<string> DryRunBlockers { get; } = [];
     public ObservableCollection<string> SlackBlockers { get; } = [];
     public string DryRunSummary { get => dryRunSummary; private set => SetField(ref dryRunSummary, value); }
+    public DateOnly? PlanDate { get => planDate; private set => SetField(ref planDate, value); }
     public PlannedWorkItem? SelectedTask { get => selectedTask; private set => SetField(ref selectedTask, value); }
     public DeliveryAttempt? LastTaskAttempt { get => lastTaskAttempt; private set => SetField(ref lastTaskAttempt, value); }
     public SlackDailyUpdate? SlackPreview
@@ -145,6 +147,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         if (LiveValidation.IsInFlight) return Task.CompletedTask;
         Items.Clear();
         var plan = planProvider?.GetSnapshot();
+        PlanDate = plan?.Date;
         if (plan is not null)
             foreach (var item in plan.Items)
                 Items.Add(item);

@@ -16,6 +16,8 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     private Task? pendingSave;
     private bool saveRequested;
     private bool isInitialized;
+    private bool isLoadingItems;
+    private DateOnly currentDate;
     private string? persistenceError;
     private PlannedWorkItemViewModel? selectedItem;
     private DescriptionSuggestionRequest? pendingAiRequest;
@@ -35,7 +37,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
         this.assistedTextGenerator = assistedTextGenerator;
         this.integrationClients = integrationClients;
         this.settingsStore = settingsStore;
-        Date = date ?? DateOnly.FromDateTime(DateTime.Today);
+        currentDate = date ?? DateOnly.FromDateTime(DateTime.Today);
         Items.CollectionChanged += OnItemsChanged;
         AddItemCommand = new RelayCommand(_ => AddItem());
         RemoveItemCommand = new RelayCommand(RemoveItem);
@@ -45,13 +47,35 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
         CancelAiConsentCommand = new RelayCommand(_ => CancelAiConsent());
         ApplyAiSuggestionCommand = new RelayCommand(_ => ApplyAiSuggestion());
         RefreshProjectsCommand = new RelayCommand(_ => _ = LoadProjectsAsync());
+        GoToTodayCommand = new RelayCommand(_ => _ = SelectDateAsync(DateOnly.FromDateTime(DateTime.Today)));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public ObservableCollection<PlannedWorkItemViewModel> Items { get; } = [];
     public ObservableCollection<TogglProject> TogglProjects { get; } = [];
-    public DateOnly Date { get; }
+    public DateOnly Date
+    {
+        get => currentDate;
+        private set
+        {
+            if (currentDate == value) return;
+            currentDate = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Date)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedDateTime)));
+        }
+    }
+
+    public DateTime? SelectedDateTime
+    {
+        get => Date.ToDateTime(TimeOnly.MinValue);
+        set
+        {
+            if (value is { } selected)
+                _ = SelectDateAsync(DateOnly.FromDateTime(selected));
+        }
+    }
+
     public RelayCommand AddItemCommand { get; }
     public RelayCommand RemoveItemCommand { get; }
     public RelayCommand AddTemplateCommand { get; }
@@ -60,6 +84,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     public RelayCommand CancelAiConsentCommand { get; }
     public RelayCommand ApplyAiSuggestionCommand { get; }
     public RelayCommand RefreshProjectsCommand { get; }
+    public RelayCommand GoToTodayCommand { get; }
     public double PlannedSeconds => Items.Sum(item => item.Duration.TotalSeconds);
     public IReadOnlyList<WorkStatusOption> WorkStatuses => WorkStatusOption.All;
     public string? PersistenceError { get => persistenceError; private set => SetField(ref persistenceError, value); }
@@ -76,8 +101,33 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
         if (repository is null || isInitialized)
             return;
 
+        await LoadItemsForCurrentDateAsync(cancellationToken);
+        isInitialized = true;
+        if (PersistenceError is null)
+            await LoadProjectsAsync(cancellationToken);
+    }
+
+    public async Task SelectDateAsync(DateOnly newDate, CancellationToken cancellationToken = default)
+    {
+        if (newDate == Date) return;
+
+        await FlushAsync();
+        Date = newDate;
+        await LoadItemsForCurrentDateAsync(cancellationToken);
+    }
+
+    private async Task LoadItemsForCurrentDateAsync(CancellationToken cancellationToken)
+    {
+        isLoadingItems = true;
         try
         {
+            if (repository is null)
+            {
+                if (Items.Count == 0)
+                    Items.Add(new PlannedWorkItemViewModel());
+                return;
+            }
+
             var plan = await repository.GetAsync(Date, cancellationToken);
             Items.Clear();
             if (plan is null || plan.Items.Count == 0)
@@ -85,16 +135,17 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             else
                 foreach (var item in plan.Items)
                     Items.Add(new PlannedWorkItemViewModel(item.Name, item.JiraIssueKey, item.Comment, item.Duration, item.TogglProject, item.TempoCategory, item.Id, item.Start, item.End, item.IsBillable, item.Status, item.TogglProjectId, item.PostToToggl, item.TogglEntryId, item.Source));
-            isInitialized = true;
             PersistenceError = null;
-            await LoadProjectsAsync(cancellationToken);
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
             if (Items.Count == 0)
                 Items.Add(new PlannedWorkItemViewModel());
-            isInitialized = true;
             PersistenceError = "Could not load today's plan.";
+        }
+        finally
+        {
+            isLoadingItems = false;
         }
     }
 
@@ -319,7 +370,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
 
     private void SaveAfterUserAction()
     {
-        if (repository is not null && isInitialized)
+        if (repository is not null && isInitialized && !isLoadingItems)
             QueueSave();
     }
 

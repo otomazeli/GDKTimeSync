@@ -208,6 +208,9 @@ public partial class App : System.Windows.Application
         await ReviewReminderPresenter.PresentAsync(mode, trayIcon.ShowReviewReminder, async () =>
         {
             ShowMainWindow();
+            // The reminder means "review the day that just ended" -- snap back to real-today in case
+            // Today was left showing a past date, so the reminder never silently shows a stale review.
+            await serviceProvider.GetRequiredService<TodayViewModel>().SelectDateAsync(DateOnly.FromDateTime(DateTime.Today));
             await serviceProvider.GetRequiredService<ShellViewModel>().NavigateAsync(NavigationPage.Review);
         });
     }

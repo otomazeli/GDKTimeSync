@@ -165,6 +165,15 @@ public sealed class LiveValidationViewModelTests
     }
 
     [Fact]
+    public void Review_view_shows_which_date_is_currently_being_reviewed()
+    {
+        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GDK.TimeSync.Desktop", "Views", "ReviewView.xaml"));
+        var bindings = XDocument.Load(path).Descendants().Attributes().Select(attribute => attribute.Value).ToArray();
+
+        Assert.Contains(bindings, value => value.Contains("PlanDate", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Review_view_confirmation_panels_show_required_safe_metadata_and_visible_operation_cancellation()
     {
         var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GDK.TimeSync.Desktop", "Views", "ReviewView.xaml"));

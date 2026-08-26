@@ -131,6 +131,18 @@ public sealed class ReviewViewModelTests
     }
 
     [Fact]
+    public async Task RefreshAsync_reflects_the_plan_snapshots_date()
+    {
+        var date = new DateOnly(2026, 8, 20);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var review = CreateReview(DailyPlan.Create(date, [item]), new RecordingConfirmedDeliveryService());
+
+        await review.RefreshAsync();
+
+        Assert.Equal(date, review.PlanDate);
+    }
+
+    [Fact]
     public async Task Send_slack_requires_a_separate_final_confirmation_and_never_delivers_tasks()
     {
         var date = new DateOnly(2026, 8, 13);

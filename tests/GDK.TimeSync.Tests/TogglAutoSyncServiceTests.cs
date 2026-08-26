@@ -11,8 +11,8 @@ public sealed class TogglAutoSyncServiceTests
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.Zero));
         var sync = new FakeTogglSyncService();
-        var main = CreateMainViewModel(sync);
-        var service = new TogglAutoSyncService(main, new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
+        var (main, today) = CreateMainViewModel(sync, new DateOnly(2026, 8, 24));
+        var service = new TogglAutoSyncService(main, today, sync, new FakePlanRepository(), new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
 
         await service.StartAsync();
         await sync.WaitForCallAsync(TimeSpan.FromSeconds(5));
@@ -25,8 +25,8 @@ public sealed class TogglAutoSyncServiceTests
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.Zero));
         var sync = new FakeTogglSyncService();
-        var main = CreateMainViewModel(sync);
-        var service = new TogglAutoSyncService(main, new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
+        var (main, today) = CreateMainViewModel(sync, new DateOnly(2026, 8, 24));
+        var service = new TogglAutoSyncService(main, today, sync, new FakePlanRepository(), new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
 
         await service.StartAsync();
         await sync.WaitForCallAsync(TimeSpan.FromSeconds(5));
@@ -43,8 +43,8 @@ public sealed class TogglAutoSyncServiceTests
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.Zero));
         var sync = new FakeTogglSyncService();
-        var main = CreateMainViewModel(sync);
-        var service = new TogglAutoSyncService(main, new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
+        var (main, today) = CreateMainViewModel(sync, new DateOnly(2026, 8, 24));
+        var service = new TogglAutoSyncService(main, today, sync, new FakePlanRepository(), new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
 
         await service.StartAsync();
         await sync.WaitForCallAsync(TimeSpan.FromSeconds(5));
@@ -61,8 +61,8 @@ public sealed class TogglAutoSyncServiceTests
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.Zero));
         var sync = new FakeTogglSyncService();
-        var main = CreateMainViewModel(sync);
-        var service = new TogglAutoSyncService(main, new FixedSettingsStore(new UserSettings { AutoSyncEnabled = false }), clock);
+        var (main, today) = CreateMainViewModel(sync, new DateOnly(2026, 8, 24));
+        var service = new TogglAutoSyncService(main, today, sync, new FakePlanRepository(), new FixedSettingsStore(new UserSettings { AutoSyncEnabled = false }), clock);
 
         var fired = await service.CheckNowAsync();
 
@@ -75,8 +75,8 @@ public sealed class TogglAutoSyncServiceTests
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.Zero));
         var sync = new FakeTogglSyncService();
-        var main = CreateMainViewModel(sync);
-        var service = new TogglAutoSyncService(main, new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
+        var (main, today) = CreateMainViewModel(sync, new DateOnly(2026, 8, 24));
+        var service = new TogglAutoSyncService(main, today, sync, new FakePlanRepository(), new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
 
         await service.StartAsync();
         await sync.WaitForCallAsync(TimeSpan.FromSeconds(5));
@@ -94,8 +94,8 @@ public sealed class TogglAutoSyncServiceTests
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.Zero));
         var sync = new FakeTogglSyncService(failFirstCall: true);
-        var main = CreateMainViewModel(sync);
-        var service = new TogglAutoSyncService(main, new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
+        var (main, today) = CreateMainViewModel(sync, new DateOnly(2026, 8, 24));
+        var service = new TogglAutoSyncService(main, today, sync, new FakePlanRepository(), new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
 
         await service.StartAsync();
         await sync.WaitForCallAsync(TimeSpan.FromSeconds(5));
@@ -107,8 +107,78 @@ public sealed class TogglAutoSyncServiceTests
         Assert.Equal(2, sync.CallCount);
     }
 
-    private static MainViewModel CreateMainViewModel(ITogglSyncService sync) =>
-        new(new FixedConfigurationStateService(isConfigured: true), sync, new TodayViewModel(date: new DateOnly(2026, 8, 24)));
+    [Fact]
+    public async Task CheckNowAsync_WhenTodayIsShowingRealTodayGoesThroughMainViewModel()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.Zero));
+        var sync = new FakeTogglSyncService();
+        var (main, today) = CreateMainViewModel(sync, new DateOnly(2026, 8, 24));
+        var planRepository = new FakePlanRepository();
+        var service = new TogglAutoSyncService(main, today, sync, planRepository, new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
+
+        var fired = await service.CheckNowAsync();
+
+        Assert.True(fired);
+        Assert.Equal(1, sync.CallCount);
+        Assert.Equal(0, planRepository.GetCalls);
+        Assert.Empty(planRepository.SavedPlans);
+    }
+
+    [Fact]
+    public async Task CheckNowAsync_WhenTodayIsShowingADifferentDateSyncsRealTodayDirectlyWithoutTouchingTodayItems()
+    {
+        var realToday = new DateOnly(2026, 8, 24);
+        var pastDate = new DateOnly(2026, 8, 20);
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.Zero));
+        var existing = PlannedWorkItem.Create(realToday, "Existing", comment: "Existing");
+        var updated = existing with { Comment = "Updated via sync" };
+        var added = PlannedWorkItem.Create(realToday, "Imported from Toggl", comment: "Imported from Toggl");
+        var mainSync = new FakeTogglSyncService();
+        var (main, today) = CreateMainViewModel(mainSync, pastDate);
+        var directSync = new FakeTogglSyncService(result: new TogglSyncPullResult([added], [updated], 0, null));
+        var planRepository = new FakePlanRepository(DailyPlan.Create(realToday, [existing]));
+        var service = new TogglAutoSyncService(main, today, directSync, planRepository, new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
+
+        var fired = await service.CheckNowAsync();
+
+        Assert.True(fired);
+        Assert.Equal(0, mainSync.CallCount);
+        Assert.Equal(1, directSync.CallCount);
+        var savedPlan = Assert.Single(planRepository.SavedPlans);
+        Assert.Equal(realToday, savedPlan.Date);
+        Assert.Equal(2, savedPlan.Items.Count);
+        Assert.Contains(savedPlan.Items, item => item.Id == existing.Id && item.Comment == "Updated via sync");
+        Assert.Contains(savedPlan.Items, item => item.Id == added.Id);
+        Assert.Equal(pastDate, today.Date);
+        Assert.DoesNotContain(today.Items, item => item.Description is "Existing" or "Imported from Toggl");
+    }
+
+    [Fact]
+    public async Task CheckNowAsync_ForADifferentDateWithNoExistingPlanTreatsItAsEmpty()
+    {
+        var realToday = new DateOnly(2026, 8, 24);
+        var pastDate = new DateOnly(2026, 8, 20);
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.Zero));
+        var added = PlannedWorkItem.Create(realToday, "Imported from Toggl", comment: "Imported from Toggl");
+        var (main, today) = CreateMainViewModel(new FakeTogglSyncService(), pastDate);
+        var directSync = new FakeTogglSyncService(result: new TogglSyncPullResult([added], [], 0, null));
+        var planRepository = new FakePlanRepository(plan: null);
+        var service = new TogglAutoSyncService(main, today, directSync, planRepository, new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
+
+        var fired = await service.CheckNowAsync();
+
+        Assert.True(fired);
+        var savedPlan = Assert.Single(planRepository.SavedPlans);
+        Assert.Equal(realToday, savedPlan.Date);
+        Assert.Equal(added.Id, Assert.Single(savedPlan.Items).Id);
+    }
+
+    private static (MainViewModel Main, TodayViewModel Today) CreateMainViewModel(ITogglSyncService sync, DateOnly date)
+    {
+        var today = new TodayViewModel(date: date);
+        var main = new MainViewModel(new FixedConfigurationStateService(isConfigured: true), sync, today);
+        return (main, today);
+    }
 
     private sealed class FixedConfigurationStateService(bool isConfigured) : IConfigurationStateService
     {
@@ -125,7 +195,25 @@ public sealed class TogglAutoSyncServiceTests
         public void Save(UserSettings value) { }
     }
 
-    private sealed class FakeTogglSyncService(bool failFirstCall = false) : ITogglSyncService
+    private sealed class FakePlanRepository(DailyPlan? plan = null) : IDailyPlanRepository
+    {
+        public int GetCalls { get; private set; }
+        public List<DailyPlan> SavedPlans { get; } = [];
+
+        public Task<DailyPlan?> GetAsync(DateOnly date, CancellationToken cancellationToken = default)
+        {
+            GetCalls++;
+            return Task.FromResult(plan);
+        }
+
+        public Task SaveAsync(DailyPlan plan, CancellationToken cancellationToken = default)
+        {
+            SavedPlans.Add(plan);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeTogglSyncService(bool failFirstCall = false, TogglSyncPullResult? result = null) : ITogglSyncService
     {
         private readonly SemaphoreSlim signal = new(0);
         private bool hasFailedOnce;
@@ -144,7 +232,7 @@ public sealed class TogglAutoSyncServiceTests
                 throw new InvalidOperationException("Test-only transient failure.");
             }
 
-            return Task.FromResult(TogglSyncPullResult.Empty());
+            return Task.FromResult(result ?? TogglSyncPullResult.Empty());
         }
     }
 
