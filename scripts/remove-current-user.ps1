@@ -21,6 +21,10 @@ function Get-GdkPaths {
     [pscustomobject]@{
         Application = Join-Path $userProfile 'GDK-TimeSync'
         Data = $dataRoot
+        # The app stores its SQLite database (planned items, delivery history, daily Slack
+        # delivery state) under "GDK TimeSync" (with a space), a sibling of "GDK\TimeSync"
+        # above where settings.json lives -- see GDK.TimeSync.Desktop/App.xaml.cs.
+        DatabaseDirectory = Join-Path $localAppData 'GDK TimeSync'
         DesktopShortcut = Join-Path $desktop 'GDK TimeSync.lnk'
         StartMenuShortcut = Join-Path $programs 'GDK TimeSync.lnk'
         StartupShortcut = Join-Path $startup 'GDK TimeSync.lnk'
@@ -68,14 +72,17 @@ try {
 
     if ($RemoveUserData) {
         Remove-PathIfPresent $paths.Data 'application data directory'
+        Remove-PathIfPresent $paths.DatabaseDirectory 'application database directory'
     }
     else {
         Write-Host "Preserved application data: $($paths.Data)"
+        Write-Host "Preserved application database: $($paths.DatabaseDirectory)"
     }
 
     if ($RemoveCredentials) {
         Remove-GdkCredential 'GDK.TimeSync.Toggl.ApiToken'
         Remove-GdkCredential 'GDK.TimeSync.CGM.JiraPAT'
+        Remove-GdkCredential 'GDK.TimeSync.GDK.SlackWebhook'
     }
     else {
         Write-Host 'Preserved Windows Credential Manager credentials.'

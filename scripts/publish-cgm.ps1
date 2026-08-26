@@ -37,13 +37,17 @@ GDK TimeSync - CGM Windows x64
 2. Open PowerShell in the extracted folder.
 3. Run:
    .\setup-current-user.ps1 -CreateDesktopShortcut -Launch
-4. Configure Toggl and Jira credentials in GDK TimeSync.
-5. Test Toggl.
-6. Test Jira.
-7. Test Tempo.
-8. Run Dry Run before the first real synchronization.
+4. In Settings, enter the Jira base URL and workspace details, then add the Toggl API
+   token, CGM Jira personal access token, and (optional) GDK Slack Incoming Webhook.
+5. On the Review screen, run "Run diagnostics" and the guided Toggl/Jira/Tempo checks.
+6. Run Dry Run before posting anything for real.
+7. Confirm each task with "Post task", then use "Compose daily Slack update" and "Send
+   daily Slack update" once at the end of the day. Nothing is posted automatically.
 
-The setup does not request, store, or pass credentials. It runs only for the current user and does not require administrator rights.
+See docs/user-guide.md in the repository for the full guide and
+docs/operations/recovery-and-reconciliation.md for partial-failure recovery.
+
+The setup does not request, store, or pass credentials. It runs only for the current user and does not require administrator rights. To remove GDK TimeSync, run .\remove-current-user.ps1 (add -RemoveUserData -RemoveCredentials to also delete local data and stored credentials).
 '@
 [IO.File]::WriteAllText((Join-Path $packageDirectory 'README.txt'), $readme, [Text.UTF8Encoding]::new($false))
 
