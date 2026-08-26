@@ -125,6 +125,30 @@ public sealed class TogglAutoSyncServiceTests
     }
 
     [Fact]
+    public async Task CheckNowAsync_WhenTodayIsShowingRealTodayRoutesTheSyncThroughTheInjectedUiThreadInvoker()
+    {
+        // TodayViewModel.Items is an ObservableCollection bound to the UI; mutating it off the UI
+        // thread (which is what every timer tick after the first does -- see RunTimerAsync) throws
+        // NotSupportedException in a real WPF app. This proves CheckNowAsync never calls
+        // MainViewModel.SyncNowAsync directly on the calling thread/context -- it always goes
+        // through the injected marshaling delegate, which is what App.xaml.cs wires to the real
+        // WPF Dispatcher in production. A real Dispatcher pump isn't practical in this xunit
+        // project (no message loop), so this substitutes a recording delegate and asserts it is
+        // the thing that actually invokes SyncNowAsync.
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.Zero));
+        var sync = new FakeTogglSyncService();
+        var (main, today) = CreateMainViewModel(sync, new DateOnly(2026, 8, 24));
+        var invoker = new RecordingUiThreadInvoker();
+        var service = new TogglAutoSyncService(main, today, sync, new FakePlanRepository(), new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock, invoker.InvokeAsync);
+
+        var fired = await service.CheckNowAsync();
+
+        Assert.True(fired);
+        Assert.Equal(1, invoker.CallCount);
+        Assert.Equal(1, sync.CallCount);
+    }
+
+    [Fact]
     public async Task CheckNowAsync_WhenTodayIsShowingADifferentDateSyncsRealTodayDirectlyWithoutTouchingTodayItems()
     {
         var realToday = new DateOnly(2026, 8, 24);
@@ -137,13 +161,17 @@ public sealed class TogglAutoSyncServiceTests
         var (main, today) = CreateMainViewModel(mainSync, pastDate);
         var directSync = new FakeTogglSyncService(result: new TogglSyncPullResult([added], [updated], 0, null));
         var planRepository = new FakePlanRepository(DailyPlan.Create(realToday, [existing]));
-        var service = new TogglAutoSyncService(main, today, directSync, planRepository, new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
+        var invoker = new RecordingUiThreadInvoker();
+        var service = new TogglAutoSyncService(main, today, directSync, planRepository, new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock, invoker.InvokeAsync);
 
         var fired = await service.CheckNowAsync();
 
         Assert.True(fired);
         Assert.Equal(0, mainSync.CallCount);
         Assert.Equal(1, directSync.CallCount);
+        // This branch never touches TodayViewModel.Items, so it must not go through the UI-thread
+        // invoker either -- confirms the fix is scoped to only the branch that needs it.
+        Assert.Equal(0, invoker.CallCount);
         var savedPlan = Assert.Single(planRepository.SavedPlans);
         Assert.Equal(realToday, savedPlan.Date);
         Assert.Equal(2, savedPlan.Items.Count);
@@ -193,6 +221,17 @@ public sealed class TogglAutoSyncServiceTests
     {
         public UserSettings Load() => settings;
         public void Save(UserSettings value) { }
+    }
+
+    private sealed class RecordingUiThreadInvoker
+    {
+        public int CallCount { get; private set; }
+
+        public Task InvokeAsync(Func<Task> action)
+        {
+            CallCount++;
+            return action();
+        }
     }
 
     private sealed class FakePlanRepository(DailyPlan? plan = null) : IDailyPlanRepository

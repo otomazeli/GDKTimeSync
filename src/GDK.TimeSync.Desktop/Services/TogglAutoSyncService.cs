@@ -9,8 +9,14 @@ public sealed class TogglAutoSyncService(
     ITogglSyncService syncService,
     IDailyPlanRepository planRepository,
     IUserSettingsStore settingsStore,
-    TimeProvider timeProvider) : ITogglAutoSyncService
+    TimeProvider timeProvider,
+    Func<Func<Task>, Task>? uiThreadInvoker = null) : ITogglAutoSyncService
 {
+    // Every tick after the first resumes on a thread-pool thread (no SynchronizationContext),
+    // but MainViewModel.SyncNowAsync mutates TodayViewModel.Items, an ObservableCollection bound
+    // to the UI. That mutation must run on the UI thread. Production wires a real dispatcher in
+    // App.xaml.cs; tests that don't need UI marshaling get a same-thread pass-through.
+    private readonly Func<Func<Task>, Task> runOnUiThread = uiThreadInvoker ?? (action => action());
     private readonly object syncRoot = new();
     private DateTimeOffset? lastSyncedAt;
     private CancellationTokenSource? timerCancellation;
@@ -74,7 +80,7 @@ public sealed class TogglAutoSyncService(
         try
         {
             if (today.Date == realToday)
-                await mainViewModel.SyncNowAsync().ConfigureAwait(false);
+                await runOnUiThread(() => mainViewModel.SyncNowAsync()).ConfigureAwait(false);
             else
                 await SyncDateDirectlyAsync(realToday).ConfigureAwait(false);
         }

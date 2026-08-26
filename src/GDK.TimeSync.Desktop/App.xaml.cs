@@ -70,7 +70,16 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ISlackClientFactory, SlackClientFactory>();
         services.AddSingleton<ITogglSyncService, TogglSyncService>();
         services.AddSingleton<IClipboardService, ClipboardService>();
-        services.AddSingleton<ITogglAutoSyncService, TogglAutoSyncService>();
+        services.AddSingleton<ITogglAutoSyncService>(provider => new TogglAutoSyncService(
+            provider.GetRequiredService<MainViewModel>(),
+            provider.GetRequiredService<TodayViewModel>(),
+            provider.GetRequiredService<ITogglSyncService>(),
+            provider.GetRequiredService<IDailyPlanRepository>(),
+            provider.GetRequiredService<IUserSettingsStore>(),
+            provider.GetRequiredService<TimeProvider>(),
+            // Auto-sync ticks after the first resume off the UI thread; SyncNowAsync mutates a
+            // UI-bound ObservableCollection, so it must be marshaled back onto the dispatcher.
+            action => System.Windows.Application.Current.Dispatcher.InvokeAsync(action).Task.Unwrap()));
         services.AddSingleton<ConnectionStatusViewModel>();
         services.AddSingleton<IConfigurationStateService, ConfigurationStateService>();
         services.AddSingleton<MainViewModel>();

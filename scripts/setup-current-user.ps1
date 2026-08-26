@@ -137,7 +137,7 @@ function Get-DefaultSettingsJson {
         JiraBaseUrl = 'https://jira.cgm.ag'
         TogglWorkspaceId = $null
         AutoSyncEnabled = $true
-        SyncIntervalMinutes = 15
+        SyncIntervalMinutes = 5
     }
     return ($settings | ConvertTo-Json -Depth 3)
 }

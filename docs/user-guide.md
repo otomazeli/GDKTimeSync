@@ -2,8 +2,11 @@
 
 GDK TimeSync is a Windows desktop app that helps you plan a day's work and, only when you
 explicitly confirm, record it in Toggl, Jira/Tempo, and post a daily update to the GDK Slack
-channel. It never posts or syncs anything automatically -- every delivery to an external system
-requires an explicit confirmation click in the app.
+channel. It never *posts or writes* anything automatically -- every delivery to Toggl, Tempo,
+Jira, or Slack requires an explicit confirmation click in the app. It does, by default, *pull*
+your Toggl entries automatically in the background every few minutes (a read-only, authenticated
+API call, purely to keep Today up to date) -- see [background sync](#connection-setup-and-secure-credential-entry)
+below if you'd rather turn that off.
 
 ## Installing
 
@@ -55,6 +58,12 @@ Once a credential is saved, the field shows "Configured" and a "Replace Token"/"
 button; the value itself is never displayed again, before or after saving. The Settings page
 shows Toggl/Jira/Slack as "Configured" or "Not configured" for a quick glance without opening the
 settings window.
+
+**Background Toggl sync**: by default the app pulls your Toggl entries automatically every 5
+minutes while it's running (`AutoSyncEnabled: true`, `SyncIntervalMinutes: 5`) so Today stays
+current without a manual "Sync now" click -- this is a read-only pull, never a write. There is no
+Settings-window toggle for this yet; to disable it or change the interval, close the app and edit
+`AutoSyncEnabled`/`SyncIntervalMinutes` in your `settings.json` by hand.
 
 ## The daily workflow
 
