@@ -15,6 +15,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     private readonly IDailySlackDeliveryRepository? dailyDeliveries;
     private readonly ISlackClientFactory? slackClientFactory;
     private readonly IUserSettingsStore? settings;
+    private readonly IClipboardService? clipboard;
     private string dryRunSummary = "Run Dry Run to validate the current local plan.";
     private PlannedWorkItem? selectedTask;
     private DeliveryAttempt? lastTaskAttempt;
@@ -34,7 +35,8 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         ISlackClientFactory? slackClientFactory = null,
         IUserSettingsStore? settings = null,
         IIntegrationDiagnosticsService? diagnosticsService = null,
-        ILiveIntegrationValidationService? validationService = null)
+        ILiveIntegrationValidationService? validationService = null,
+        IClipboardService? clipboard = null)
     {
         this.planProvider = planProvider;
         this.deliveryService = deliveryService;
@@ -42,6 +44,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         this.dailyDeliveries = dailyDeliveries;
         this.slackClientFactory = slackClientFactory;
         this.settings = settings;
+        this.clipboard = clipboard;
         LiveValidation = new LiveValidationViewModel(planProvider, diagnosticsService, validationService);
         DryRunCommand = new RelayCommand(_ => RunDryRun());
         RefreshCommand = new RelayCommand(_ => _ = RefreshAsync());
@@ -55,6 +58,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         ComposeSlackPreviewCommand = new RelayCommand(_ => _ = ComposeSlackPreviewAsync());
         ConfirmSlackCommand = new RelayCommand(_ => _ = ConfirmSlackAsync(), () => CanConfirmSlack);
         CancelSlackConfirmationCommand = new RelayCommand(_ => CancelSlackConfirmation(), () => IsSlackConfirmationVisible);
+        CopySlackPreviewCommand = new RelayCommand(_ => CopySlackPreview(), () => SlackPreview is not null);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -67,6 +71,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     public RelayCommand ComposeSlackPreviewCommand { get; }
     public RelayCommand ConfirmSlackCommand { get; }
     public RelayCommand CancelSlackConfirmationCommand { get; }
+    public RelayCommand CopySlackPreviewCommand { get; }
     public LiveValidationViewModel LiveValidation { get; }
     public ObservableCollection<PlannedWorkItem> Items { get; } = [];
     public ObservableCollection<string> DryRunBlockers { get; } = [];
@@ -74,7 +79,20 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     public string DryRunSummary { get => dryRunSummary; private set => SetField(ref dryRunSummary, value); }
     public PlannedWorkItem? SelectedTask { get => selectedTask; private set => SetField(ref selectedTask, value); }
     public DeliveryAttempt? LastTaskAttempt { get => lastTaskAttempt; private set => SetField(ref lastTaskAttempt, value); }
-    public SlackDailyUpdate? SlackPreview { get => slackPreview; private set => SetField(ref slackPreview, value); }
+    public SlackDailyUpdate? SlackPreview
+    {
+        get => slackPreview;
+        private set
+        {
+            if (ReferenceEquals(slackPreview, value)) return;
+            SetField(ref slackPreview, value);
+            OnPropertyChanged(nameof(SlackPreviewText));
+            CopySlackPreviewCommand.NotifyCanExecuteChanged();
+        }
+    }
+    public string SlackPreviewText => SlackPreview is null
+        ? ""
+        : string.Join("\n", new[] { SlackPreview.SlackTitle, SlackPreview.SlackTaskHeading, SlackPreview.SlackExtraLines }.Where(part => !string.IsNullOrWhiteSpace(part)));
     public string? TaskDeliveryError { get => taskDeliveryError; private set => SetField(ref taskDeliveryError, value); }
     public string? SlackDeliveryError { get => slackDeliveryError; private set => SetField(ref slackDeliveryError, value); }
     public bool IsTaskDeliveryInFlight
@@ -251,6 +269,12 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     {
         IsSlackConfirmationVisible = false;
         CanConfirmSlack = false;
+    }
+
+    private void CopySlackPreview()
+    {
+        if (SlackPreview is null) return;
+        clipboard?.SetText(SlackPreviewText);
     }
 
     public async Task ConfirmSlackAsync(CancellationToken cancellationToken = default)

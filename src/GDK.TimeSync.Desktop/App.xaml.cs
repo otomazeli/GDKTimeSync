@@ -69,6 +69,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IConfirmedTaskDeliveryService, ConfirmedTaskDeliveryService>();
         services.AddSingleton<ISlackClientFactory, SlackClientFactory>();
         services.AddSingleton<ITogglSyncService, TogglSyncService>();
+        services.AddSingleton<IClipboardService, ClipboardService>();
         services.AddSingleton<ITogglAutoSyncService, TogglAutoSyncService>();
         services.AddSingleton<ConnectionStatusViewModel>();
         services.AddSingleton<IConfigurationStateService, ConfigurationStateService>();
@@ -92,7 +93,8 @@ public partial class App : System.Windows.Application
             provider.GetRequiredService<ISlackClientFactory>(),
             provider.GetRequiredService<IUserSettingsStore>(),
             provider.GetRequiredService<IIntegrationDiagnosticsService>(),
-            provider.GetRequiredService<ILiveIntegrationValidationService>()));
+            provider.GetRequiredService<ILiveIntegrationValidationService>(),
+            provider.GetRequiredService<IClipboardService>()));
 
     protected override void OnExit(ExitEventArgs e)
     {

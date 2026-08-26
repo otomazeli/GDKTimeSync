@@ -282,6 +282,29 @@ public sealed class ReviewViewModelTests
         Assert.True(review.CanConfirmSlack);
     }
 
+    [Fact]
+    public async Task CopySlackPreviewCommand_CopiesTheComposedMessageAndIsUnavailableBeforeComposing()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var clipboard = new FakeClipboardService();
+        var review = CreateReview(
+            DailyPlan.Create(date, [item]),
+            attempts: new AttemptRepository(Succeeded(item)),
+            settings: new FixedSettingsStore(new UserSettings { SlackTitle = "Daily update", SlackTaskHeading = "Completed work" }),
+            clipboard: clipboard);
+
+        Assert.False(review.CopySlackPreviewCommand.CanExecute(null));
+
+        await review.ComposeSlackPreviewAsync();
+
+        Assert.True(review.CopySlackPreviewCommand.CanExecute(null));
+        review.CopySlackPreviewCommand.Execute(null);
+
+        Assert.Equal(1, clipboard.SetTextCalls);
+        Assert.Equal("Daily update\nCompleted work\nGDK | CGM-1 Completed | *In Progress*", clipboard.LastText);
+    }
+
     [Theory]
     [InlineData(DailySlackDeliveryState.Sent)]
     [InlineData(DailySlackDeliveryState.ReconciliationRequired)]
@@ -310,14 +333,16 @@ public sealed class ReviewViewModelTests
         IDeliveryAttemptRepository? attempts = null,
         ISlackClientFactory? slackFactory = null,
         IDailySlackDeliveryRepository? dailyDeliveries = null,
-        IUserSettingsStore? settings = null) =>
+        IUserSettingsStore? settings = null,
+        IClipboardService? clipboard = null) =>
         new(
             new FixedPlanSnapshotProvider(plan),
             delivery ?? new RecordingConfirmedDeliveryService(),
             attempts ?? new AttemptRepository(),
             dailyDeliveries ?? new DailyDeliveryRepository(),
             slackFactory ?? new RecordingSlackClientFactory(),
-            settings ?? new FixedSettingsStore(new UserSettings()));
+            settings ?? new FixedSettingsStore(new UserSettings()),
+            clipboard: clipboard);
 
     private static DeliveryAttempt Succeeded(PlannedWorkItem item) => new(item.Id, 101, 201, DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported);
 
@@ -352,6 +377,18 @@ public sealed class ReviewViewModelTests
     {
         public UserSettings Load() => settings;
         public void Save(UserSettings value) { }
+    }
+
+    private sealed class FakeClipboardService : IClipboardService
+    {
+        public string? LastText { get; private set; }
+        public int SetTextCalls { get; private set; }
+
+        public void SetText(string text)
+        {
+            SetTextCalls++;
+            LastText = text;
+        }
     }
 
     private sealed class AttemptRepository(params DeliveryAttempt[] values) : IDeliveryAttemptRepository
