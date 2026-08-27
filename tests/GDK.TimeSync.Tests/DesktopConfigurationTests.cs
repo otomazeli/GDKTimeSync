@@ -212,6 +212,39 @@ public sealed class DesktopConfigurationTests
     }
 
     [Fact]
+    public async Task Saving_auto_sync_preferences_persists_validated_values()
+    {
+        var credentials = new FakeCredentialStore();
+        var settings = new FakeSettingsStore(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" });
+        var state = new ConfigurationStateService(credentials, settings);
+        var viewModel = new SettingsViewModel(credentials, settings, state)
+        {
+            AutoSyncEnabled = false,
+            SyncIntervalMinutes = 10
+        };
+
+        await viewModel.SaveAsync("https://jira.cgm.ag", null, null);
+
+        Assert.False(settings.Current.AutoSyncEnabled);
+        Assert.Equal(10, settings.Current.SyncIntervalMinutes);
+    }
+
+    [Fact]
+    public async Task Invalid_sync_interval_prevents_saving_credentials_or_settings()
+    {
+        var credentials = new FakeCredentialStore();
+        var initial = new UserSettings { JiraBaseUrl = "https://jira.cgm.ag", SyncIntervalMinutes = 5 };
+        var settings = new FakeSettingsStore(initial);
+        var state = new ConfigurationStateService(credentials, settings);
+        var viewModel = new SettingsViewModel(credentials, settings, state) { SyncIntervalMinutes = 0 };
+
+        await Assert.ThrowsAsync<ArgumentException>(() => viewModel.SaveAsync("https://jira.cgm.ag", "toggl-token", null));
+
+        Assert.Empty(credentials.SavedKeys);
+        Assert.Equal(initial, settings.Current);
+    }
+
+    [Fact]
     public async Task Invalid_review_time_prevents_saving_credentials_or_settings()
     {
         var credentials = new FakeCredentialStore();

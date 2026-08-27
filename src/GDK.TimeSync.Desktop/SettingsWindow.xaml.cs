@@ -33,6 +33,8 @@ public partial class SettingsWindow : Window
         EndOfDayReminderModeComboBox.SelectedValue = viewModel.EndOfDayReminderMode;
         DefaultTempoWorkCategoryTextBox.Text = viewModel.DefaultTempoWorkCategory;
         AiEnabledCheckBox.IsChecked = viewModel.AiEnabled;
+        AutoSyncEnabledCheckBox.IsChecked = viewModel.AutoSyncEnabled;
+        SyncIntervalMinutesTextBox.Text = viewModel.SyncIntervalMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture);
         SlackTitleTextBox.Text = viewModel.SlackTitle;
         SlackTaskHeadingTextBox.Text = viewModel.SlackTaskHeading;
         SlackExtraLinesTextBox.Text = viewModel.SlackExtraLines;
@@ -45,6 +47,8 @@ public partial class SettingsWindow : Window
         {
             if (!long.TryParse(TogglWorkspaceIdTextBox.Text.Trim(), out var workspaceId) && !string.IsNullOrWhiteSpace(TogglWorkspaceIdTextBox.Text))
                 throw new ArgumentException("Enter a numeric Toggl workspace ID.");
+            if (!int.TryParse(SyncIntervalMinutesTextBox.Text.Trim(), out var syncIntervalMinutes))
+                throw new ArgumentException("Enter a numeric auto-sync interval in minutes.");
 
             var draftSettings = settings.Load() with
             {
@@ -55,6 +59,8 @@ public partial class SettingsWindow : Window
                 EndOfDayReminderMode = EndOfDayReminderModeComboBox.SelectedValue is EndOfDayReminderMode mode ? mode : EndOfDayReminderMode.Both,
                 DefaultTempoWorkCategory = DefaultTempoWorkCategoryTextBox.Text.Trim(),
                 AiEnabled = AiEnabledCheckBox.IsChecked == true,
+                AutoSyncEnabled = AutoSyncEnabledCheckBox.IsChecked == true,
+                SyncIntervalMinutes = syncIntervalMinutes,
                 SlackTitle = SlackTitleTextBox.Text.Trim(),
                 SlackTaskHeading = SlackTaskHeadingTextBox.Text.Trim(),
                 SlackExtraLines = SlackExtraLinesTextBox.Text.Split(["\r\n", "\n"], StringSplitOptions.None)

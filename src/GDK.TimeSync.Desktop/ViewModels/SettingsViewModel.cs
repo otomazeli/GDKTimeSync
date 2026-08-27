@@ -23,6 +23,8 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
     private string slackTaskHeading = "Completed tasks";
     private string slackExtraLines = string.Empty;
     private bool aiEnabled;
+    private bool autoSyncEnabled = true;
+    private int syncIntervalMinutes = 5;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -93,6 +95,18 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         set => SetField(ref aiEnabled, value);
     }
 
+    public bool AutoSyncEnabled
+    {
+        get => autoSyncEnabled;
+        set => SetField(ref autoSyncEnabled, value);
+    }
+
+    public int SyncIntervalMinutes
+    {
+        get => syncIntervalMinutes;
+        set => SetField(ref syncIntervalMinutes, value);
+    }
+
     public string SlackTitle { get => slackTitle; set => SetField(ref slackTitle, value); }
     public string SlackTaskHeading { get => slackTaskHeading; set => SetField(ref slackTaskHeading, value); }
     public string SlackExtraLines { get => slackExtraLines; set => SetField(ref slackExtraLines, value); }
@@ -120,6 +134,8 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             EndOfDayReminderMode = EndOfDayReminderMode,
             DefaultTempoWorkCategory = DefaultTempoWorkCategory,
             AiEnabled = AiEnabled,
+            AutoSyncEnabled = AutoSyncEnabled,
+            SyncIntervalMinutes = SyncIntervalMinutes,
             SlackTitle = SlackTitle,
             SlackTaskHeading = SlackTaskHeading,
             SlackExtraLines = SplitSlackLines(SlackExtraLines)
@@ -135,6 +151,8 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             EndOfDayReminderMode = EndOfDayReminderMode,
             DefaultTempoWorkCategory = DefaultTempoWorkCategory,
             AiEnabled = AiEnabled,
+            AutoSyncEnabled = AutoSyncEnabled,
+            SyncIntervalMinutes = SyncIntervalMinutes,
             SlackTitle = SlackTitle,
             SlackTaskHeading = SlackTaskHeading,
             SlackExtraLines = SplitSlackLines(SlackExtraLines)
@@ -150,6 +168,8 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             throw new ArgumentException("Enter a valid Jira user email address.", nameof(proposedSettings));
         if (!TimeOnly.TryParseExact(proposedSettings.ReviewReminderTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var reviewTime))
             throw new ArgumentException("Enter review reminder time as HH:mm.", nameof(proposedSettings));
+        if (proposedSettings.SyncIntervalMinutes < 1)
+            throw new ArgumentException("Enter a sync interval of at least 1 minute.", nameof(proposedSettings));
 
         var normalizedJiraBaseUrl = proposedSettings.JiraBaseUrl.Trim();
         var normalizedReviewReminderTime = reviewTime.ToString("HH:mm", CultureInfo.InvariantCulture);
@@ -211,6 +231,8 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         EndOfDayReminderMode = EndOfDayReminderModes.Normalize(currentSettings.EndOfDayReminderMode);
         DefaultTempoWorkCategory = currentSettings.DefaultTempoWorkCategory;
         AiEnabled = currentSettings.AiEnabled;
+        AutoSyncEnabled = currentSettings.AutoSyncEnabled;
+        SyncIntervalMinutes = currentSettings.SyncIntervalMinutes;
         SlackTitle = currentSettings.SlackTitle;
         SlackTaskHeading = currentSettings.SlackTaskHeading;
         SlackExtraLines = string.Join(Environment.NewLine, currentSettings.SlackExtraLines);

@@ -13,6 +13,7 @@
                 <RowDefinition Height="Auto" /><RowDefinition Height="8" />
                 <RowDefinition Height="Auto" /><RowDefinition Height="8" />
                 <RowDefinition Height="Auto" /><RowDefinition Height="8" />
+                <RowDefinition Height="Auto" /><RowDefinition Height="8" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <TextBlock Text="Jira base URL" />
@@ -27,6 +28,8 @@
             <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding DefaultTempoWorkCategory}" />
             <TextBlock Grid.Row="10" Text="AI assistance" />
             <TextBlock Grid.Row="10" Grid.Column="1" Text="{Binding AiEnabled}" />
+            <TextBlock Grid.Row="12" Text="Auto-sync" />
+            <TextBlock Grid.Row="12" Grid.Column="1" Text="{Binding AutoSyncEnabled}" />
         </Grid>
         <TextBlock Margin="0,20,0,8" Text="Credentials are presence-only and are never displayed." Foreground="DimGray" TextWrapping="Wrap" />
         <StackPanel Orientation="Horizontal">
