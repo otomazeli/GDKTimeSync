@@ -6,7 +6,7 @@ namespace GDK.TimeSync.Persistence;
 public sealed class SqliteDatabase
 {
     private const string Schema = """
-        CREATE TABLE IF NOT EXISTS daily_plans (plan_date TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS daily_plans (plan_date TEXT PRIMARY KEY, version INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS planned_work_items (
             id TEXT PRIMARY KEY,
             plan_date TEXT NOT NULL REFERENCES daily_plans(plan_date) ON DELETE CASCADE,
@@ -104,6 +104,7 @@ public sealed class SqliteDatabase
                     await EnsureColumnAsync(connection, "planned_work_items", "post_to_toggl", "INTEGER NOT NULL DEFAULT 1", cancellationToken);
                     await EnsureColumnAsync(connection, "planned_work_items", "toggl_entry_id", "INTEGER NULL", cancellationToken);
                     await EnsureColumnAsync(connection, "planned_work_items", "source", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+                    await EnsureColumnAsync(connection, "daily_plans", "version", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
                     await EnsureDeliveryAttemptTimestampColumnsAsync(connection, cancellationToken);
                     await CommitAsync(connection, cancellationToken);
                 }

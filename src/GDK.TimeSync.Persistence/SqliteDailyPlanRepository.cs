@@ -11,10 +11,11 @@ public sealed class SqliteDailyPlanRepository(SqliteDatabase database) : IDailyP
         var dateValue = date.ToString("yyyy-MM-dd");
 
         await using var planCommand = connection.CreateCommand();
-        planCommand.CommandText = "SELECT 1 FROM daily_plans WHERE plan_date = $date";
+        planCommand.CommandText = "SELECT version FROM daily_plans WHERE plan_date = $date";
         planCommand.Parameters.AddWithValue("$date", dateValue);
-        if (await planCommand.ExecuteScalarAsync(cancellationToken) is null)
+        if (await planCommand.ExecuteScalarAsync(cancellationToken) is not { } versionValue)
             return null;
+        var version = Convert.ToInt32(versionValue);
 
         await using var itemCommand = connection.CreateCommand();
         itemCommand.CommandText = """
@@ -49,7 +50,7 @@ public sealed class SqliteDailyPlanRepository(SqliteDatabase database) : IDailyP
                 });
         }
 
-        return DailyPlan.Create(date, items);
+        return DailyPlan.Create(date, items) with { Version = version };
     }
 
     public async Task SaveAsync(DailyPlan plan, CancellationToken cancellationToken = default)
@@ -64,12 +65,27 @@ public sealed class SqliteDailyPlanRepository(SqliteDatabase database) : IDailyP
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         var dateValue = plan.Date.ToString("yyyy-MM-dd");
 
+        int insertedRows;
         await using (var planCommand = connection.CreateCommand())
         {
             planCommand.Transaction = transaction;
-            planCommand.CommandText = "INSERT INTO daily_plans(plan_date) VALUES ($date) ON CONFLICT(plan_date) DO NOTHING";
+            planCommand.CommandText = "INSERT INTO daily_plans(plan_date, version) VALUES ($date, 1) ON CONFLICT(plan_date) DO NOTHING";
             planCommand.Parameters.AddWithValue("$date", dateValue);
-            await planCommand.ExecuteNonQueryAsync(cancellationToken);
+            insertedRows = await planCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        if (insertedRows == 0)
+        {
+            await using var versionCommand = connection.CreateCommand();
+            versionCommand.Transaction = transaction;
+            versionCommand.CommandText = "UPDATE daily_plans SET version = version + 1 WHERE plan_date = $date AND version = $expectedVersion";
+            versionCommand.Parameters.AddWithValue("$date", dateValue);
+            versionCommand.Parameters.AddWithValue("$expectedVersion", plan.Version);
+            if (await versionCommand.ExecuteNonQueryAsync(cancellationToken) == 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw new PlanConcurrencyException(plan.Date);
+            }
         }
 
         await using (var deleteCommand = connection.CreateCommand())

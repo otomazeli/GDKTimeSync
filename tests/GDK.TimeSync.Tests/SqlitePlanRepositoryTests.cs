@@ -17,7 +17,8 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
         var plan = DailyPlan.Create(new DateOnly(2026, 8, 10), [item]);
 
         await repository.SaveAsync(plan);
-        await repository.SaveAsync(plan with { Items = [item with { Comment = "Updated" }] });
+        var saved = await repository.GetAsync(new DateOnly(2026, 8, 10));
+        await repository.SaveAsync(saved! with { Items = [item with { Comment = "Updated" }] });
 
         var loaded = await repository.GetAsync(new DateOnly(2026, 8, 10));
 
@@ -130,6 +131,40 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
         await repository.SaveAsync(template);
 
         Assert.Equal(WorkStatus.Waiting, Assert.Single(await repository.ListAsync()).Status);
+    }
+
+    [Fact]
+    public async Task SaveAsync_IncrementsTheVersionOnEachSuccessfulSave()
+    {
+        var repository = CreatePlanRepository();
+        var date = new DateOnly(2026, 8, 10);
+        var item = PlannedWorkItem.Create(date, comment: "Initial", duration: TimeSpan.FromMinutes(30));
+
+        await repository.SaveAsync(DailyPlan.Create(date, [item]));
+        var afterFirstSave = await repository.GetAsync(date);
+        Assert.Equal(1, afterFirstSave!.Version);
+
+        await repository.SaveAsync(afterFirstSave with { Items = [item with { Comment = "Updated" }] });
+        var afterSecondSave = await repository.GetAsync(date);
+        Assert.Equal(2, afterSecondSave!.Version);
+    }
+
+    [Fact]
+    public async Task SaveAsync_RejectsAStaleVersionInsteadOfSilentlyOverwritingANewerWrite()
+    {
+        var repository = CreatePlanRepository();
+        var date = new DateOnly(2026, 8, 10);
+        var item = PlannedWorkItem.Create(date, comment: "Initial", duration: TimeSpan.FromMinutes(30));
+        await repository.SaveAsync(DailyPlan.Create(date, [item]));
+        var staleRead = await repository.GetAsync(date);
+        await repository.SaveAsync(staleRead! with { Items = [item with { Comment = "Written by someone else" }] });
+
+        await Assert.ThrowsAsync<PlanConcurrencyException>(
+            () => repository.SaveAsync(staleRead! with { Items = [item with { Comment = "Written from a stale read" }] }));
+
+        var current = await repository.GetAsync(date);
+        Assert.Equal("Written by someone else", Assert.Single(current!.Items).Comment);
+        Assert.Equal(2, current.Version);
     }
 
     [Fact]
