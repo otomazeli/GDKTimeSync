@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using GDK.TimeSync.Core;
 using GDK.TimeSync.Jira;
 using GDK.TimeSync.Tempo;
@@ -10,6 +11,11 @@ public sealed class ConfirmedTaskDeliveryService(
     IUserSettingsStore settings,
     IDeliveryAttemptRepository attempts) : IConfirmedTaskDeliveryService
 {
+    // Shared across calls (this service is a DI singleton) so a reconciliation record raised by one
+    // delivery -- built with its own short-lived PostAllCoordinator and API clients -- survives to
+    // be recovered by the next, instead of vanishing with the coordinator that created it.
+    private readonly ConcurrentDictionary<Guid, DeliveryAttempt> pendingReconciliation = new();
+
     public async Task<DeliveryAttempt> DeliverConfirmedAsync(PlannedWorkItem item, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -34,7 +40,8 @@ public sealed class ConfirmedTaskDeliveryService(
                 new TogglDeliveryClient(toggl, configuration.TogglWorkspaceId.Value),
                 new JiraDeliveryClient(jira),
                 new TempoDeliveryClient(tempo, configuration.JiraUser),
-                attempts);
+                attempts,
+                pendingReconciliation);
             return (await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]), cancellationToken)).Attempts.Single();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

@@ -232,12 +232,12 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
                 return;
             }
 
+            var attemptsByItemId = (await attempts.ListAsync(cancellationToken)).ToDictionary(attempt => attempt.PlannedWorkItemId);
             var completed = new List<SlackDailyCompletedItem>();
             var notPostedCount = 0;
             foreach (var item in plan.Items)
             {
-                var attempt = await attempts.GetAsync(item.Id, cancellationToken);
-                var postedToJira = attempt is { Status: DeliveryAttemptStatus.Succeeded, TempoWorklogId: not null };
+                var postedToJira = attemptsByItemId.GetValueOrDefault(item.Id) is { Status: DeliveryAttemptStatus.Succeeded, TempoWorklogId: not null };
                 if (!postedToJira)
                     notPostedCount++;
                 completed.Add(new SlackDailyCompletedItem(item.TogglProject, item.JiraIssueKey, item.Comment, item.Status, postedToJira));

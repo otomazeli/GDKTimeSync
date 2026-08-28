@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using GDK.TimeSync.Core;
 using GDK.TimeSync.Persistence;
 
@@ -318,6 +319,68 @@ public sealed class PostAllCoordinatorTests
         Assert.Null(attempt.TempoWorklogId);
         Assert.Equal(0, tempo.CreateCount);
         Assert.Equal(SlackDeliveryState.NotSupported, attempt.SlackState);
+    }
+
+    [Fact]
+    public async Task PostAsync_PersistsTheReconciliationRequiredDiagnosisForAStuckInProgressClaim()
+    {
+        var item = CreateItem();
+        var attempts = new InMemoryDeliveryAttemptRepository();
+        await attempts.SaveAsync(new(item.Id, null, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported));
+        var coordinator = new PostAllCoordinator(new RecordingTogglClient([]), new RecordingJiraClient([]), new RecordingTempoClient([]), attempts);
+
+        var result = await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]));
+
+        var attempt = Assert.Single(result.Attempts);
+        Assert.Equal(attempt, await attempts.GetAsync(item.Id));
+    }
+
+    [Fact]
+    public async Task PostAsync_RecoversPendingReconciliationAcrossCoordinatorInstancesSharingTheSameStore()
+    {
+        // ConfirmedTaskDeliveryService builds a fresh PostAllCoordinator per delivery call (each
+        // call needs its own live Toggl/Jira/Tempo HTTP clients); the pending-reconciliation store
+        // must be handed in from outside so recovery still works across those instances.
+        var item = CreateItem();
+        var attempts = new InMemoryDeliveryAttemptRepository
+        {
+            FailuresRemaining = 2,
+            FailWhen = attempt => attempt.TogglEntryId is not null && attempt.TempoWorklogId is null
+        };
+        var toggl = new RecordingTogglClient([]);
+        var sharedPendingReconciliation = new ConcurrentDictionary<Guid, DeliveryAttempt>();
+        var firstCoordinator = new PostAllCoordinator(toggl, new RecordingJiraClient([]), new RecordingTempoClient([]), attempts, sharedPendingReconciliation);
+
+        var unavailable = await firstCoordinator.PostAsync(DailyPlan.Create(item.Day, [item]));
+        var pending = Assert.Single(unavailable.Attempts);
+        Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, pending.Status);
+
+        var secondCoordinator = new PostAllCoordinator(toggl, new RecordingJiraClient([]), new RecordingTempoClient([]), attempts, sharedPendingReconciliation);
+        var recovered = await secondCoordinator.PostAsync(DailyPlan.Create(item.Day, [item]));
+
+        Assert.Equal(pending, Assert.Single(recovered.Attempts));
+        Assert.Equal(pending, await attempts.GetAsync(item.Id));
+        Assert.Equal(1, toggl.CreateCount);
+    }
+
+    [Fact]
+    public async Task PostAsync_FailsAnItemExcludedFromTogglWithNoKnownEntryWithoutCallingAnyClient()
+    {
+        var item = CreateItem() with { PostToToggl = false, TogglEntryId = null };
+        var attempts = new InMemoryDeliveryAttemptRepository();
+        var toggl = new RecordingTogglClient([]);
+        var jira = new RecordingJiraClient([]);
+        var tempo = new RecordingTempoClient([]);
+        var coordinator = new PostAllCoordinator(toggl, jira, tempo, attempts);
+
+        var result = await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]));
+
+        var attempt = Assert.Single(result.Attempts);
+        Assert.Equal(DeliveryAttemptStatus.Failed, attempt.Status);
+        Assert.Equal(DeliveryFailureCode.TogglFailed, attempt.FailureCode);
+        Assert.Equal(0, toggl.CreateCount);
+        Assert.Equal(0, jira.LookupCount);
+        Assert.Equal(0, tempo.CreateCount);
     }
 
     private static PlannedWorkItem CreateItem() => PlannedWorkItem.Create(

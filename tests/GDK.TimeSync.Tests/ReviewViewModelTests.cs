@@ -339,6 +339,22 @@ public sealed class ReviewViewModelTests
         Assert.Equal(0, slack.CreateCalls);
     }
 
+    [Fact]
+    public async Task ComposeSlackPreviewAsync_looks_up_delivery_attempts_in_a_single_batch_call()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var items = Enumerable.Range(1, 3)
+            .Select(number => PlannedWorkItem.Create(date, $"Work {number}", $"CGM-{number}", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT"))
+            .ToArray();
+        var attempts = new AttemptRepository(items.Select(Succeeded).ToArray());
+        var review = CreateReview(DailyPlan.Create(date, items), attempts: attempts);
+
+        await review.ComposeSlackPreviewAsync();
+
+        Assert.Equal(0, attempts.GetCalls);
+        Assert.Equal(1, attempts.ListCalls);
+    }
+
     private static ReviewViewModel CreateReview(
         DailyPlan plan,
         IConfirmedTaskDeliveryService? delivery = null,
@@ -406,8 +422,10 @@ public sealed class ReviewViewModelTests
     private sealed class AttemptRepository(params DeliveryAttempt[] values) : IDeliveryAttemptRepository
     {
         private readonly Dictionary<Guid, DeliveryAttempt> attempts = values.ToDictionary(value => value.PlannedWorkItemId);
-        public Task<DeliveryAttempt?> GetAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(attempts.GetValueOrDefault(id));
-        public Task<IReadOnlyList<DeliveryAttempt>> ListAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<DeliveryAttempt>>(attempts.Values.ToArray());
+        public int GetCalls { get; private set; }
+        public int ListCalls { get; private set; }
+        public Task<DeliveryAttempt?> GetAsync(Guid id, CancellationToken cancellationToken = default) { GetCalls++; return Task.FromResult(attempts.GetValueOrDefault(id)); }
+        public Task<IReadOnlyList<DeliveryAttempt>> ListAsync(CancellationToken cancellationToken = default) { ListCalls++; return Task.FromResult<IReadOnlyList<DeliveryAttempt>>(attempts.Values.ToArray()); }
         public Task<DeliveryAttemptClaim> ClaimAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task SaveAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default) { attempts[attempt.PlannedWorkItemId] = attempt; return Task.CompletedTask; }
     }

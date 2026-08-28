@@ -28,9 +28,12 @@ public sealed class PostAllCoordinator(
     IPlannedItemTogglClient toggl,
     IPlannedItemJiraClient jira,
     IPlannedItemTempoClient tempo,
-    IDeliveryAttemptRepository attempts) : IPostAllCoordinator
+    IDeliveryAttemptRepository attempts,
+    // A new coordinator is built per delivery call (each needs its own live API clients); pass in
+    // a store that outlives individual calls so a reconciliation record survives to the next one.
+    ConcurrentDictionary<Guid, DeliveryAttempt>? sharedPendingReconciliation = null) : IPostAllCoordinator
 {
-    private readonly ConcurrentDictionary<Guid, DeliveryAttempt> pendingReconciliation = [];
+    private readonly ConcurrentDictionary<Guid, DeliveryAttempt> pendingReconciliation = sharedPendingReconciliation ?? [];
 
     public async Task<PostAllResult> PostAsync(DailyPlan plan, CancellationToken cancellationToken = default)
     {
@@ -71,9 +74,21 @@ public sealed class PostAllCoordinator(
         }
 
         if (current is not null)
-            return current.Status == DeliveryAttemptStatus.InProgress
-                ? RequiresManualReconciliation(current)
-                : current;
+        {
+            if (current.Status != DeliveryAttemptStatus.InProgress)
+                return current;
+
+            var reconciliation = RequiresManualReconciliation(current);
+            try
+            {
+                await attempts.SaveAsync(reconciliation, CancellationToken.None);
+            }
+            catch (Exception)
+            {
+            }
+
+            return reconciliation;
+        }
 
         DeliveryAttemptClaim claim;
         try
@@ -95,6 +110,10 @@ public sealed class PostAllCoordinator(
         if (item.TogglEntryId is { } knownTogglEntryId)
         {
             togglEntryId = knownTogglEntryId;
+        }
+        else if (!item.PostToToggl)
+        {
+            return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed);
         }
         else
         {
