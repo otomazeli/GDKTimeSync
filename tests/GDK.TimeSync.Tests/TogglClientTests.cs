@@ -80,6 +80,23 @@ public sealed class TogglClientTests
     }
 
     [Fact]
+    public async Task CreateTimeEntryAsync_includes_the_created_with_field_toggl_v9_requires()
+    {
+        string? body = null;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return JsonResponse("""{"id":7,"description":"Knowledge Transfer","start":"2026-08-07T08:15:00-04:00","stop":"2026-08-07T08:45:00-04:00","duration":1800}""");
+        });
+        using var httpClient = CreateHttpClient(handler);
+        using var client = CreateClient(httpClient);
+
+        await client.CreateTimeEntryAsync(ValidRequest());
+
+        Assert.Contains("\"created_with\":\"GDK.TimeSync\"", body);
+    }
+
+    [Fact]
     public async Task GetProjectsAsync_reads_projects_from_the_selected_workspace()
     {
         var handler = new StubHttpMessageHandler(_ => JsonResponse("""[{"id":314,"name":"GDK"}]"""));

@@ -54,6 +54,7 @@ public sealed class SqliteDatabase
     private readonly string connectionString;
     private readonly string readOnlyConnectionString;
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> InitializationLocks = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, bool> MigratedDatabases = new(StringComparer.OrdinalIgnoreCase);
 
     public SqliteDatabase(string databasePath)
     {
@@ -67,6 +68,12 @@ public sealed class SqliteDatabase
 
     public async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken = default)
     {
+        // The migration probe (BEGIN IMMEDIATE, schema DDL, COMMIT) only needs to run once per
+        // database file per process; re-running it on every call held every read behind a reserved
+        // lock for no reason. Skip it once this process has proven the schema is current.
+        if (MigratedDatabases.ContainsKey(DatabasePath))
+            return await OpenPlainConnectionAsync(cancellationToken);
+
         await Task.Yield();
         var directory = Path.GetDirectoryName(DatabasePath);
         if (!string.IsNullOrEmpty(directory))
@@ -76,6 +83,9 @@ public sealed class SqliteDatabase
         await initializationLock.WaitAsync(cancellationToken);
         try
         {
+            if (MigratedDatabases.ContainsKey(DatabasePath))
+                return await OpenPlainConnectionAsync(cancellationToken);
+
             var connection = new SqliteConnection(connectionString);
             try
             {
@@ -103,6 +113,7 @@ public sealed class SqliteDatabase
                     throw;
                 }
 
+                MigratedDatabases[DatabasePath] = true;
                 return connection;
             }
             catch
@@ -114,6 +125,21 @@ public sealed class SqliteDatabase
         finally
         {
             initializationLock.Release();
+        }
+    }
+
+    private async Task<SqliteConnection> OpenPlainConnectionAsync(CancellationToken cancellationToken)
+    {
+        var connection = new SqliteConnection(connectionString);
+        try
+        {
+            await connection.OpenAsync(cancellationToken);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync();
+            throw;
         }
     }
 

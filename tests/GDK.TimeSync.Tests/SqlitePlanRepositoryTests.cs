@@ -283,6 +283,41 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task OpenConnectionAsync_SkipsTheMigrationProbeOnceADatabaseIsAlreadyMigrated()
+    {
+        var databasePath = CreateDatabasePath();
+        await CreateLegacyPlanDatabaseAsync(databasePath);
+        var database = new SqliteDatabase(databasePath);
+        await using (var warmup = await database.OpenConnectionAsync())
+        {
+        }
+
+        var readyPath = CreateTemporaryPath();
+        var releasePath = CreateTemporaryPath();
+        using var probe = StartMigrationProbe(databasePath, readyPath, releasePath);
+        Task<SqliteConnection>? secondOpen = null;
+
+        try
+        {
+            await WaitForFileAsync(readyPath);
+
+            secondOpen = database.OpenConnectionAsync();
+            var completed = await Task.WhenAny(secondOpen, Task.Delay(TimeSpan.FromSeconds(5)));
+
+            Assert.Same(secondOpen, completed);
+        }
+        finally
+        {
+            await ReleaseProbeAsync(releasePath);
+            await StopProbeAsync(probe);
+            if (secondOpen is not null)
+            {
+                await using var connection = await secondOpen;
+            }
+        }
+    }
+
+    [Fact]
     public async Task DistinctDatabaseInitializers_MigrateTheSameLegacyDatabase()
     {
         var databasePath = CreateDatabasePath();

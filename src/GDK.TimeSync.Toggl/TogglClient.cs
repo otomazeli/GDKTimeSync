@@ -68,7 +68,8 @@ public sealed class TogglClient : ITogglClient
             ["start"] = request.Start,
             ["stop"] = request.Stop,
             ["duration"] = (long)(request.Stop - request.Start).TotalSeconds,
-            ["workspace_id"] = request.WorkspaceId
+            ["workspace_id"] = request.WorkspaceId,
+            ["created_with"] = "GDK.TimeSync"
         };
         if (request.ProjectId is { } projectId)
             payload["project_id"] = projectId;
