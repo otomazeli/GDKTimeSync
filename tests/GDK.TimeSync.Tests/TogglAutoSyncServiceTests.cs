@@ -201,6 +201,34 @@ public sealed class TogglAutoSyncServiceTests
         Assert.Equal(added.Id, Assert.Single(savedPlan.Items).Id);
     }
 
+    [Fact]
+    public async Task CheckNowAsync_ForADifferentDateRetriesTheMergeWhenAnotherWriterWonTheRace()
+    {
+        var realToday = new DateOnly(2026, 8, 24);
+        var pastDate = new DateOnly(2026, 8, 20);
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.Zero));
+        var existing = PlannedWorkItem.Create(realToday, "Existing", comment: "Existing");
+        var added = PlannedWorkItem.Create(realToday, "Imported from Toggl", comment: "Imported from Toggl");
+        var concurrentEdit = PlannedWorkItem.Create(realToday, "Concurrent edit", comment: "Written by Today view while we were syncing");
+        var (main, today) = CreateMainViewModel(new FakeTogglSyncService(), pastDate);
+        var directSync = new FakeTogglSyncService(result: new TogglSyncPullResult([added], [], 0, null));
+        var planRepository = new FakePlanRepository(DailyPlan.Create(realToday, [existing]))
+        {
+            FailSaveTimes = 1,
+            OnConflict = _ => DailyPlan.Create(realToday, [existing, concurrentEdit]) with { Version = 1 }
+        };
+        var service = new TogglAutoSyncService(main, today, directSync, planRepository, new FixedSettingsStore(new UserSettings { AutoSyncEnabled = true, SyncIntervalMinutes = 5 }), clock);
+
+        var fired = await service.CheckNowAsync();
+
+        Assert.True(fired);
+        var savedPlan = Assert.Single(planRepository.SavedPlans);
+        Assert.Equal(3, savedPlan.Items.Count);
+        Assert.Contains(savedPlan.Items, item => item.Id == existing.Id);
+        Assert.Contains(savedPlan.Items, item => item.Id == added.Id);
+        Assert.Contains(savedPlan.Items, item => item.Id == concurrentEdit.Id);
+    }
+
     private static (MainViewModel Main, TodayViewModel Today) CreateMainViewModel(ITogglSyncService sync, DateOnly date)
     {
         var today = new TodayViewModel(date: date);
@@ -238,6 +266,8 @@ public sealed class TogglAutoSyncServiceTests
     {
         public int GetCalls { get; private set; }
         public List<DailyPlan> SavedPlans { get; } = [];
+        public int FailSaveTimes { get; set; }
+        public Func<DailyPlan, DailyPlan>? OnConflict { get; set; }
 
         public Task<DailyPlan?> GetAsync(DateOnly date, CancellationToken cancellationToken = default)
         {
@@ -245,9 +275,17 @@ public sealed class TogglAutoSyncServiceTests
             return Task.FromResult(plan);
         }
 
-        public Task SaveAsync(DailyPlan plan, CancellationToken cancellationToken = default)
+        public Task SaveAsync(DailyPlan value, CancellationToken cancellationToken = default)
         {
-            SavedPlans.Add(plan);
+            if (FailSaveTimes > 0)
+            {
+                FailSaveTimes--;
+                if (OnConflict is not null) plan = OnConflict(value);
+                throw new PlanConcurrencyException(value.Date);
+            }
+
+            plan = value with { Version = value.Version + 1 };
+            SavedPlans.Add(value);
             return Task.CompletedTask;
         }
     }

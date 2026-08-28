@@ -95,24 +95,36 @@ public sealed class TogglAutoSyncService(
 
     // The user may leave Today showing a past date to finish/post it. Auto-sync must still keep
     // real-today's Toggl entries up to date without going through TodayViewModel (which represents
-    // a different date at that moment) -- that would either corrupt the displayed date or get
-    // clobbered by TodayViewModel's own next debounced save for that other date.
+    // a different date at that moment) -- that would corrupt the displayed date. TodayViewModel can
+    // still be independently saving real-today's row at the same moment (e.g. right after the user
+    // navigates back to it); SaveAsync's optimistic-concurrency check catches that, and we recompute
+    // the merge against the latest state and retry rather than clobbering whichever side loses.
     private async Task SyncDateDirectlyAsync(DateOnly date)
     {
-        var plan = await planRepository.GetAsync(date).ConfigureAwait(false) ?? DailyPlan.Create(date, []);
-        var result = await syncService.PullAsync(date, plan.Items).ConfigureAwait(false);
-        if (result.Error is not null || (result.ItemsToAdd.Count == 0 && result.ItemsToUpdate.Count == 0))
-            return;
-
-        var merged = plan.Items.ToList();
-        foreach (var updated in result.ItemsToUpdate)
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            var index = merged.FindIndex(item => item.Id == updated.Id);
-            if (index >= 0) merged[index] = updated;
-        }
-        merged.AddRange(result.ItemsToAdd);
+            var plan = await planRepository.GetAsync(date).ConfigureAwait(false) ?? DailyPlan.Create(date, []);
+            var result = await syncService.PullAsync(date, plan.Items).ConfigureAwait(false);
+            if (result.Error is not null || (result.ItemsToAdd.Count == 0 && result.ItemsToUpdate.Count == 0))
+                return;
 
-        await planRepository.SaveAsync(DailyPlan.Create(date, merged)).ConfigureAwait(false);
+            var merged = plan.Items.ToList();
+            foreach (var updated in result.ItemsToUpdate)
+            {
+                var index = merged.FindIndex(item => item.Id == updated.Id);
+                if (index >= 0) merged[index] = updated;
+            }
+            merged.AddRange(result.ItemsToAdd);
+
+            try
+            {
+                await planRepository.SaveAsync(plan with { Items = merged }).ConfigureAwait(false);
+                return;
+            }
+            catch (PlanConcurrencyException)
+            {
+            }
+        }
     }
 
     private async Task RunTimerAsync(CancellationToken cancellationToken)

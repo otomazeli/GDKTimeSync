@@ -18,6 +18,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     private bool isInitialized;
     private bool isLoadingItems;
     private DateOnly currentDate;
+    private int knownVersion;
     private string? persistenceError;
     private PlannedWorkItemViewModel? selectedItem;
     private DescriptionSuggestionRequest? pendingAiRequest;
@@ -129,6 +130,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             }
 
             var plan = await repository.GetAsync(Date, cancellationToken);
+            knownVersion = plan?.Version ?? 0;
             Items.Clear();
             if (plan is null || plan.Items.Count == 0)
                 Items.Add(new PlannedWorkItemViewModel());
@@ -404,9 +406,22 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
                 var plan = DailyPlan.Create(Date, Items.Select(item => new PlannedWorkItem(
                     item.Id, Date, item.Start, item.End, item.Name, item.JiraIssueKey, item.Description,
                     item.Duration, item.TogglProject, item.TempoCategory, item.IsBillable, item.Status)
-                    { TogglProjectId = item.TogglProjectId, PostToToggl = item.PostToToggl, TogglEntryId = item.TogglEntryId, Source = item.Source }).ToArray());
+                    { TogglProjectId = item.TogglProjectId, PostToToggl = item.PostToToggl, TogglEntryId = item.TogglEntryId, Source = item.Source }).ToArray())
+                    with { Version = knownVersion };
                 await repository!.SaveAsync(plan);
+                knownVersion++;
                 PersistenceError = null;
+            }
+            catch (PlanConcurrencyException)
+            {
+                // Another writer (e.g. background Toggl auto-sync) saved this date since we last
+                // read it. Pull in anything it added that we don't already have locally, then loop
+                // around to retry the save with the now-current version -- local edits still win.
+                await ReconcileWithLatestPlanAsync();
+                lock (persistenceLock)
+                {
+                    saveRequested = true;
+                }
             }
             catch
             {
@@ -420,6 +435,23 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
                     }
                 }
             }
+        }
+    }
+
+    private async Task ReconcileWithLatestPlanAsync()
+    {
+        var latest = await repository!.GetAsync(Date);
+        knownVersion = latest?.Version ?? 0;
+        if (latest is null) return;
+
+        var localIds = Items.Select(item => item.Id).ToHashSet();
+        foreach (var remoteItem in latest.Items)
+        {
+            if (localIds.Contains(remoteItem.Id)) continue;
+            Items.Add(new PlannedWorkItemViewModel(
+                remoteItem.Name, remoteItem.JiraIssueKey, remoteItem.Comment, remoteItem.Duration, remoteItem.TogglProject, remoteItem.TempoCategory,
+                remoteItem.Id, remoteItem.Start, remoteItem.End, remoteItem.IsBillable, remoteItem.Status,
+                remoteItem.TogglProjectId, remoteItem.PostToToggl, remoteItem.TogglEntryId, remoteItem.Source));
         }
     }
 

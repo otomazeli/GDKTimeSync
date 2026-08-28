@@ -315,6 +315,32 @@ public sealed class TodayViewModelTests
     }
 
     [Fact]
+    public async Task SaveConflict_ReconcilesARemotelyAddedItemInsteadOfDroppingItOrFailing()
+    {
+        var date = new DateOnly(2026, 8, 24);
+        var itemA = PlannedWorkItem.Create(date, "A", "CGM-1", "Original");
+        var itemC = PlannedWorkItem.Create(date, "C", "CGM-3", "Added by auto-sync while Today saved");
+        var repository = new ConflictingPlanRepository(DailyPlan.Create(date, [itemA]) with { Version = 1 })
+        {
+            FailSaveTimes = 1,
+            OnConflict = current => current with { Items = [.. current.Items, itemC], Version = current.Version + 1 }
+        };
+        var today = new TodayViewModel(repository, date);
+        await today.InitializeAsync();
+
+        var localItem = Assert.Single(today.Items);
+        localItem.Name = "A updated";
+        await today.FlushAsync();
+
+        Assert.Null(today.PersistenceError);
+        var saved = Assert.Single(repository.SavedPlans);
+        Assert.Equal(2, saved.Items.Count);
+        Assert.Contains(saved.Items, item => item.Id == itemA.Id && item.Name == "A updated");
+        Assert.Contains(saved.Items, item => item.Id == itemC.Id);
+        Assert.Contains(today.Items, item => item.Id == itemC.Id);
+    }
+
+    [Fact]
     public async Task OpeningAndCancellingAiConsent_DoesNotCallServicesOrPersistTheSelectedDescription()
     {
         var date = new DateOnly(2026, 8, 15);
@@ -646,6 +672,30 @@ public sealed class TodayViewModelTests
         {
             GetCalls = 0;
             SaveCalls = 0;
+        }
+    }
+
+    private sealed class ConflictingPlanRepository(DailyPlan plan) : IDailyPlanRepository
+    {
+        public List<DailyPlan> SavedPlans { get; } = [];
+        public int FailSaveTimes { get; set; }
+        public Func<DailyPlan, DailyPlan>? OnConflict { get; set; }
+
+        public Task<DailyPlan?> GetAsync(DateOnly date, CancellationToken cancellationToken = default) =>
+            Task.FromResult<DailyPlan?>(plan);
+
+        public Task SaveAsync(DailyPlan value, CancellationToken cancellationToken = default)
+        {
+            if (FailSaveTimes > 0)
+            {
+                FailSaveTimes--;
+                if (OnConflict is not null) plan = OnConflict(plan);
+                throw new PlanConcurrencyException(value.Date);
+            }
+
+            plan = value with { Version = value.Version + 1 };
+            SavedPlans.Add(value);
+            return Task.CompletedTask;
         }
     }
 
