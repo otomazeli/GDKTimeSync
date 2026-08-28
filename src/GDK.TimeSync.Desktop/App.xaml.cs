@@ -26,13 +26,15 @@ public partial class App : System.Windows.Application
         ConfigureServices(services);
 
         serviceProvider = services.BuildServiceProvider();
+        // Must run before StartAsync: CheckNow() inside it can raise ReviewDue synchronously,
+        // and HandleReviewReminderAsync silently drops the reminder if trayIcon isn't set yet.
+        InitializeTrayIcon();
         endOfDayReminderService = serviceProvider.GetRequiredService<IEndOfDayReminderService>();
         endOfDayReminderService.ReviewDue += OnReviewDue;
         endOfDayReminderService.StartAsync().GetAwaiter().GetResult();
         togglAutoSyncService = serviceProvider.GetRequiredService<ITogglAutoSyncService>();
         togglAutoSyncService.StartAsync().GetAwaiter().GetResult();
         ShowMainWindow();
-        Dispatcher.BeginInvoke(InitializeTrayIcon);
     }
 
     internal static void ConfigureServices(IServiceCollection services)

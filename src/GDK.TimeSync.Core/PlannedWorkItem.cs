@@ -33,4 +33,14 @@ public sealed record PlannedWorkItem(
         TimeOnly? start = null,
         TimeOnly? end = null) =>
         new(Guid.NewGuid(), day, start, end, name, jiraIssueKey, comment, duration ?? TimeSpan.Zero, togglProject, tempoCategory, isBillable, WorkStatus.InProgress);
+
+    // An end time at or before start means the task runs past midnight into the next day
+    // (e.g. 23:30 -> 00:15), not a zero/negative-length task.
+    public static bool EndWrapsToNextDay(TimeOnly start, TimeOnly end) => end < start;
+
+    public static TimeSpan ComputeSpan(TimeOnly start, TimeOnly end)
+    {
+        var span = end.ToTimeSpan() - start.ToTimeSpan();
+        return EndWrapsToNextDay(start, end) ? span + TimeSpan.FromHours(24) : span;
+    }
 }

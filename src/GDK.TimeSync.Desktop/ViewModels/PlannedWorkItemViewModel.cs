@@ -70,8 +70,8 @@ public sealed class PlannedWorkItemViewModel : INotifyPropertyChanged
 
     private void RecalculateDuration()
     {
-        if (start is not { } from || end is not { } to || to <= from) return;
-        var value = to - from;
+        if (start is not { } from || end is not { } to || to == from) return;
+        var value = PlannedWorkItem.ComputeSpan(from, to);
         if (duration == value) return;
         duration = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Duration)));

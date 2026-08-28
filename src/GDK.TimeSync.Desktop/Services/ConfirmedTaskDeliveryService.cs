@@ -75,13 +75,15 @@ public sealed class ConfirmedTaskDeliveryService(
     {
         public async Task<long> CreateAsync(PlannedWorkItem item, CancellationToken cancellationToken = default)
         {
-            var start = item.Day.ToDateTime(item.Start ?? TimeOnly.MinValue);
+            var startTime = item.Start ?? TimeOnly.MinValue;
+            var start = item.Day.ToDateTime(startTime);
             var offset = TimeZoneInfo.Local.GetUtcOffset(start);
+            var stopDay = item.End is { } end && PlannedWorkItem.EndWrapsToNextDay(startTime, end) ? item.Day.AddDays(1) : item.Day;
             var entry = await client.CreateTimeEntryAsync(new TogglCreateTimeEntryRequest(
                 workspaceId,
                 item.Comment,
                 new DateTimeOffset(start, offset),
-                new DateTimeOffset(item.End is { } end ? item.Day.ToDateTime(end) : start.Add(item.Duration), offset),
+                new DateTimeOffset(item.End is { } stop ? stopDay.ToDateTime(stop) : start.Add(item.Duration), offset),
                 item.TogglProjectId), cancellationToken);
             return entry.Id;
         }

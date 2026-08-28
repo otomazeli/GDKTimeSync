@@ -100,6 +100,20 @@ public sealed class TodayViewModelTests
     }
 
     [Fact]
+    public void SettingAnOvernightStartAndEnd_RecalculatesDurationAcrossMidnight()
+    {
+        var today = new TodayViewModel();
+        var item = new PlannedWorkItemViewModel();
+        today.Items.Add(item);
+
+        item.Start = new TimeOnly(23, 30);
+        item.End = new TimeOnly(0, 15);
+
+        Assert.Equal(TimeSpan.FromMinutes(45), item.Duration);
+        Assert.Equal(2700, today.PlannedSeconds);
+    }
+
+    [Fact]
     public void Snapshot_PreservesProjectIdentityTimingBillableAndTogglIntent()
     {
         var today = new TodayViewModel(null, new DateOnly(2026, 8, 20));

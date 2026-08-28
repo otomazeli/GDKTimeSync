@@ -66,6 +66,27 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         Assert.Equal(new TimeOnly(9, 30), TimeOnly.FromDateTime(clients.LastTogglRequest!.Stop.LocalDateTime));
     }
 
+    [Fact]
+    public async Task DeliverConfirmedAsync_rolls_an_overnight_end_time_to_the_next_day()
+    {
+        var item = PlannedWorkItem.Create(
+            new DateOnly(2026, 8, 13), "On-call", "CGM-1", "Overnight incident", TimeSpan.FromMinutes(45), "GDK", "DEVELOPMENT",
+            start: new TimeOnly(23, 30), end: new TimeOnly(0, 15));
+        var clients = new RecordingIntegrationClientFactory();
+        var service = new ConfirmedTaskDeliveryService(
+            clients,
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "planner" }),
+            new InMemoryAttemptRepository());
+
+        var attempt = await service.DeliverConfirmedAsync(item);
+
+        Assert.Equal(DeliveryAttemptStatus.Succeeded, attempt.Status);
+        var request = clients.LastTogglRequest!;
+        Assert.True(request.Stop > request.Start);
+        Assert.Equal(new DateOnly(2026, 8, 14), DateOnly.FromDateTime(request.Stop.LocalDateTime));
+        Assert.Equal(TimeSpan.FromMinutes(45), request.Stop - request.Start);
+    }
+
     private sealed class FixedSettingsStore(UserSettings settings) : IUserSettingsStore
     {
         public UserSettings Load() => settings;
