@@ -52,7 +52,10 @@ never in `settings.json`, logs, or anywhere visible in the UI:
 - **Toggl API token**
 - **CGM Jira personal access token** -- also used for Tempo, since Tempo runs against the same
   Jira Cloud/Server instance.
-- **GDK Slack Incoming Webhook** (optional -- only needed for the daily Slack update)
+- **GDK Slack Workflow Builder webhook URL** (optional -- only needed for the daily Slack update).
+  This must be a Workflow Builder **Webhook** trigger URL (`hooks.slack.com/triggers/...`). A
+  shortcut/link-trigger URL (`slack.com/shortcuts/...`) is meant to be opened in a browser, is not
+  callable from an app, and will fail to connect.
 
 Once a credential is saved, the field shows "Configured" and a "Replace Token"/"Replace Webhook"
 button; the value itself is never displayed again, before or after saving. The Settings page
@@ -61,9 +64,9 @@ settings window.
 
 **Background Toggl sync**: by default the app pulls your Toggl entries automatically every 5
 minutes while it's running (`AutoSyncEnabled: true`, `SyncIntervalMinutes: 5`) so Today stays
-current without a manual "Sync now" click -- this is a read-only pull, never a write. There is no
-Settings-window toggle for this yet; to disable it or change the interval, close the app and edit
-`AutoSyncEnabled`/`SyncIntervalMinutes` in your `settings.json` by hand.
+current without a manual "Sync now" click -- this is a read-only pull, never a write. Turn it off
+or change the interval with **Automatically pull new Toggl entries** and **Auto-sync interval
+(minutes)** in the settings window.
 
 ## The daily workflow
 
@@ -102,10 +105,14 @@ open.
 
 ## AI assistance
 
-AI-assisted description suggestions are **off by default** and fully opt-in. Enabling "Enable
-optional AI assistance" in Settings only makes the feature available; using it still requires an
-explicit per-suggestion consent step in the Today page before any suggestion is requested or
-applied.
+AI-assisted description suggestions are **off by default** and fully opt-in. Until you tick
+"Enable optional AI assistance" in Settings, the "Draft AI description" button does not appear on
+Today at all. Enabling it only makes the feature available; using it still requires an explicit
+per-suggestion consent step in the Today page before any suggestion is requested or applied.
+
+No AI provider is configured in this build, so a consented request currently answers "AI provider
+is not configured." and nothing leaves the application. The consent step exists so that adding a
+provider later cannot silently start sending your task text.
 
 ## Removal
 

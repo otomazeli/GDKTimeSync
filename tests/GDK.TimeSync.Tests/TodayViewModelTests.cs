@@ -451,6 +451,20 @@ public sealed class TodayViewModelTests
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void IsAiEnabled_FollowsTheConsentServiceSoTheDraftButtonIsHiddenWhenAiIsOff(bool enabled)
+    {
+        var today = new TodayViewModel(null, null, new FakeConsentService(enabled, canSubmit: true), new FakeGenerator(new DescriptionSuggestionResult(true, "AI draft", "Ready")));
+
+        Assert.Equal(enabled, today.IsAiEnabled);
+    }
+
+    [Fact]
+    public void IsAiEnabled_IsFalseWhenNoConsentServiceIsWiredUp() =>
+        Assert.False(new TodayViewModel().IsAiEnabled);
+
+    [Theory]
     [InlineData(false, true, "Work", "CGMFRAVII-1", "Current description")]
     [InlineData(true, true, "", "CGMFRAVII-1", "Current description")]
     public void DisabledOrIncompleteAiRequest_BlocksBeforeCallingTheGenerator(bool enabled, bool canSubmit, string name, string jiraKey, string description)

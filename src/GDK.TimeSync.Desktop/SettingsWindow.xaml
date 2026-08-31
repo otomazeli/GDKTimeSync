@@ -41,7 +41,9 @@
             <Button x:Name="JiraReplaceButton" Width="120" Margin="0,5,0,0" HorizontalAlignment="Left" Click="OnReplaceJiraClick" Visibility="Collapsed">Replace Token</Button>
             <PasswordBox x:Name="JiraTokenPasswordBox" Margin="0,5,0,14" />
 
-            <TextBlock Text="GDK Slack Incoming Webhook" />
+            <TextBlock Text="GDK Slack Workflow Builder webhook URL" />
+            <TextBlock Margin="0,3,0,0" Foreground="DimGray" FontSize="11" TextWrapping="Wrap"
+                       Text="A Workflow Builder &quot;Webhook&quot; trigger URL (hooks.slack.com/triggers/…). A shortcut/link-trigger URL (slack.com/shortcuts/…) is not callable and will fail." />
             <TextBlock x:Name="SlackConfiguredText" Margin="0,5,0,0" Text="Configured ✓" Visibility="Collapsed" />
             <Button x:Name="SlackReplaceButton" Width="140" Margin="0,5,0,0" HorizontalAlignment="Left" Click="OnReplaceSlackClick" Visibility="Collapsed">Replace Webhook</Button>
             <PasswordBox x:Name="SlackWebhookPasswordBox" Margin="0,5,0,20" />

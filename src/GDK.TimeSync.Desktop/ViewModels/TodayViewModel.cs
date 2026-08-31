@@ -97,6 +97,14 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     public string? AiStatus { get => aiStatus; private set => SetField(ref aiStatus, value); }
     public bool IsAiConsentVisible { get => isAiConsentVisible; private set => SetField(ref isAiConsentVisible, value); }
 
+    // AI assistance is off by default and has no provider behind it, so the draft button stays
+    // hidden until the user opts in from Settings rather than sitting there always failing.
+    public bool IsAiEnabled => aiConsentService?.IsEnabled == true;
+
+    // Settings is a separate dialog that does not push changes here; the shell re-asks on every
+    // navigation to Today, which is the only way back to this page after saving settings.
+    public void RefreshAiAvailability() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsAiEnabled)));
+
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         if (repository is null || isInitialized)

@@ -74,6 +74,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         if (page is NavigationPage navigationPage)
         {
             SelectedPage = navigationPage;
+            if (navigationPage == NavigationPage.Today)
+                today.RefreshAiAvailability();
             if (navigationPage == NavigationPage.Review)
                 await review.RefreshAsync(cancellationToken);
             if (navigationPage == NavigationPage.History)
