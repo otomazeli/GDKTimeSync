@@ -240,7 +240,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
                 var postedToJira = attemptsByItemId.GetValueOrDefault(item.Id) is { Status: DeliveryAttemptStatus.Succeeded, TempoWorklogId: not null };
                 if (!postedToJira)
                     notPostedCount++;
-                completed.Add(new SlackDailyCompletedItem(item.TogglProject, item.JiraIssueKey, item.Comment, item.Status, postedToJira));
+                completed.Add(new SlackDailyCompletedItem(item.JiraIssueKey, item.Comment, item.Status, postedToJira));
             }
 
             if (notPostedCount > 0)

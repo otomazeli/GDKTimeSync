@@ -182,7 +182,7 @@ public sealed class ReviewViewModelTests
 
         Assert.Equal("Daily delivery", review.SlackPreview!.SlackTitle);
         Assert.Equal("Completed work", review.SlackPreview.SlackTaskHeading);
-        Assert.Equal("Thank you, team.\nGDK | CGM-1 Completed | *In Progress*", review.SlackPreview.SlackExtraLines);
+        Assert.Equal("Thank you, team.\nCGM-1 Completed | *In Progress*", review.SlackPreview.SlackExtraLines);
     }
 
     [Fact]
@@ -275,8 +275,8 @@ public sealed class ReviewViewModelTests
 
         await review.ComposeSlackPreviewAsync();
 
-        Assert.Contains("GDK | CGM-1 Completed | *In Progress*", review.SlackPreview!.SlackExtraLines);
-        Assert.Contains("GDK | CGM-2 Not completed | *In Progress* (not posted in Jira)", review.SlackPreview.SlackExtraLines);
+        Assert.Contains("CGM-1 Completed | *In Progress*", review.SlackPreview!.SlackExtraLines);
+        Assert.Contains("CGM-2 Not completed | *In Progress* (not posted in Jira)", review.SlackPreview.SlackExtraLines);
         Assert.Single(review.SlackBlockers);
     }
 
@@ -314,7 +314,7 @@ public sealed class ReviewViewModelTests
         review.CopySlackPreviewCommand.Execute(null);
 
         Assert.Equal(1, clipboard.SetTextCalls);
-        Assert.Equal("Daily update\nCompleted work\nGDK | CGM-1 Completed | *In Progress*", clipboard.LastText);
+        Assert.Equal("Daily update\nCompleted work\nCGM-1 Completed | *In Progress*", clipboard.LastText);
     }
 
     [Theory]

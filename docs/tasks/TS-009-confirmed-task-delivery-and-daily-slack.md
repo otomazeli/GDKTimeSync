@@ -18,10 +18,10 @@ Enable explicitly confirmed delivery of one planned task at a time through Toggl
 ## Slack task-line format
 
 ```text
-{TogglProject} | {JiraIssueKey} {Description} | *{Status}*
+{JiraIssueKey} {Description} | *{Status}*
 ```
 
-`TogglProject` supplies Organization. Status is one of `Code review`, `Analyzing`, `Done`, `In Progress`, or `Waiting`.
+Status is one of `Code review`, `Analyzing`, `Done`, `In Progress`, or `Waiting`.
 
 ## Safety
 
