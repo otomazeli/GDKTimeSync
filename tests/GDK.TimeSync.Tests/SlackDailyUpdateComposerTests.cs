@@ -34,7 +34,7 @@ public sealed class SlackDailyUpdateComposerTests
             CGM | CGM-3 Complete | *Done*
             CGM | CGM-4 Build | *In Progress*
             CGM | CGM-5 Blocked | *Waiting*
-            """, update!.SlackExtraLines);
+            """.ReplaceLineEndings("\n"), update!.SlackExtraLines);
     }
 
     [Fact]
@@ -51,7 +51,7 @@ public sealed class SlackDailyUpdateComposerTests
         Assert.Equal("""
             Follow up tomorrow
             CGM | CGM-1 Build | *In Progress*
-            """, update.SlackExtraLines);
+            """.ReplaceLineEndings("\n"), update.SlackExtraLines);
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public sealed class SlackDailyUpdateComposerTests
         Assert.Equal("""
             CGM | CGM-1 Delivered | *Done*
             CGM | CGM-2 Not yet delivered | *In Progress* (not posted in Jira)
-            """, update!.SlackExtraLines);
+            """.ReplaceLineEndings("\n"), update!.SlackExtraLines);
     }
 
     [Fact]
