@@ -9,4 +9,10 @@ public sealed class TogglTimeEntry
 
     [JsonPropertyName("duration")]
     public long DurationSeconds { get; init; }
+
+    [JsonPropertyName("workspace_id")]
+    public long WorkspaceId { get; init; }
+
+    [JsonPropertyName("project_id")]
+    public long? ProjectId { get; init; }
 }

@@ -4,7 +4,7 @@ using GDK.TimeSync.Core;
 
 namespace GDK.TimeSync.Jira;
 
-public sealed class JiraClient
+public sealed class JiraClient : IDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly HttpClient httpClient;
@@ -47,6 +47,8 @@ public sealed class JiraClient
         return GetAsync<JiraIssue>($"rest/api/2/issue/{Uri.EscapeDataString(issueKey)}", cancellationToken);
     }
 
+    public void Dispose() => httpClient.Dispose();
+
     private async Task<T> GetAsync<T>(string requestUri, CancellationToken cancellationToken)
     {
         HttpResponseMessage response;
@@ -54,9 +56,9 @@ public sealed class JiraClient
         {
             response = await httpClient.GetAsync(requestUri, cancellationToken);
         }
-        catch (HttpRequestException exception)
+        catch (HttpRequestException)
         {
-            throw new JiraApiException("Unable to reach Jira.", innerException: exception);
+            throw new JiraApiException("Unable to reach Jira.");
         }
 
         using (response)
@@ -71,9 +73,9 @@ public sealed class JiraClient
                 return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken)
                     ?? throw new JiraApiException("Jira returned an empty response.", response.StatusCode);
             }
-            catch (JsonException exception)
+            catch (JsonException)
             {
-                throw new JiraApiException("Jira returned an invalid response.", response.StatusCode, exception);
+                throw new JiraApiException("Jira returned an invalid response.", response.StatusCode);
             }
         }
     }

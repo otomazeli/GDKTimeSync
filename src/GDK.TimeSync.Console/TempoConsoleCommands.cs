@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Text.Json;
+using GDK.TimeSync.Core;
 using GDK.TimeSync.Jira;
 using GDK.TimeSync.Tempo;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,17 +9,29 @@ internal static class TempoConsoleCommands
 {
     public static async Task RunAsync(string[] args, IServiceProvider services)
     {
-        var tempo = services.GetRequiredService<TempoClient>();
-
         if (args is ["tempo-discover"])
         {
-            Console.WriteLine((await tempo.GetWorkAttributesAsync()).GetRawText());
+            var tempo = services.GetRequiredService<TempoClient>();
+            Console.WriteLine(JsonSerializer.Serialize(await tempo.GetWorkAttributesAsync()));
             return;
         }
 
         if (args is ["tempo-create", var issueKey, var date, var time, var duration, var comment])
         {
-            var user = await services.GetRequiredService<JiraClient>().GetMyselfAsync();
+            var issueKeyValidator = services.GetRequiredService<IssueKeyValidator>();
+            if (!issueKeyValidator.IsValid(issueKey))
+            {
+                throw new FormatException("The Jira issue key is invalid.");
+            }
+
+            var jira = services.GetRequiredService<JiraClient>();
+            var issue = await jira.GetIssueAsync(issueKey);
+            if (string.IsNullOrWhiteSpace(issue.Id))
+            {
+                throw new InvalidOperationException("Jira did not return an issue ID for the Tempo worklog.");
+            }
+
+            var user = await jira.GetMyselfAsync();
             if (string.IsNullOrWhiteSpace(user.Name))
             {
                 throw new InvalidOperationException("Jira did not return a user name for the Tempo worklog worker.");
@@ -27,12 +41,13 @@ internal static class TempoConsoleCommands
                 .ToDateTime(TimeOnly.ParseExact(time, "HH:mm", CultureInfo.InvariantCulture));
             var request = new TempoWorklogCreateRequest(
                 user.Name,
-                issueKey,
+                issue.Id,
                 started,
                 int.Parse(duration, CultureInfo.InvariantCulture),
                 comment);
 
-            Console.WriteLine((await tempo.CreateWorklogAsync(request)).GetRawText());
+            var tempo = services.GetRequiredService<TempoClient>();
+            Console.WriteLine(JsonSerializer.Serialize(await tempo.CreateWorklogAsync(request)));
             return;
         }
 

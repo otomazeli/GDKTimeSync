@@ -1,0 +1,126 @@
+<UserControl x:Class="GDK.TimeSync.Desktop.Views.TodayView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+    </UserControl.Resources>
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Top">
+            <TextBlock Text="Today" FontSize="24" FontWeight="SemiBold" />
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0" VerticalAlignment="Center">
+                <TextBlock Text="Date:" VerticalAlignment="Center" />
+                <DatePicker Margin="8,0,0,0" Width="130" SelectedDate="{Binding SelectedDateTime}" />
+                <Button Margin="8,0,0,0" Command="{Binding GoToTodayCommand}" Content="Today" />
+            </StackPanel>
+            <TextBlock Margin="0,8,0,0" Text="{Binding PlannedSeconds, StringFormat=Planned: {0} seconds}" Foreground="DimGray" />
+            <TextBlock Margin="0,4,0,12" Text="Rows are saved locally. Nothing is posted externally." Foreground="DimGray" />
+            <TextBlock Margin="0,0,0,8" Text="{Binding PersistenceError}" Foreground="DarkRed" TextWrapping="Wrap" />
+            <TextBlock Margin="0,0,0,8" Text="{Binding ProjectLoadError}" Foreground="DarkRed" TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal">
+                <Button Width="110" Command="{Binding AddItemCommand}">Add item</Button>
+                <Button Margin="8,0,0,0" Command="{Binding RefreshProjectsCommand}">Refresh Toggl projects</Button>
+                <Button Margin="8,0,0,0" Command="{Binding OpenAiConsentCommand}" Content="Draft AI description" />
+            </StackPanel>
+            <StackPanel Margin="0,8,0,0" Visibility="{Binding IsAiConsentVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <TextBlock Text="AI description consent" FontWeight="SemiBold" />
+                <TextBlock Text="If you continue, AI will receive only these fields from the selected task:" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding PendingAiRequest.TaskName, StringFormat=Task name: {0}}" />
+                <TextBlock Text="{Binding PendingAiRequest.JiraIssueKey, StringFormat=Jira issue key: {0}}" />
+                <ScrollViewer MaxHeight="120" VerticalScrollBarVisibility="Auto">
+                    <TextBlock Text="{Binding PendingAiRequest.CurrentDescription, StringFormat=Current description: {0}}" TextWrapping="Wrap" />
+                </ScrollViewer>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <Button Command="{Binding ConfirmAiConsentCommand}" Content="Continue with AI" />
+                    <Button Margin="8,0,0,0" Command="{Binding CancelAiConsentCommand}">Cancel</Button>
+                </StackPanel>
+            </StackPanel>
+            <TextBlock Margin="0,8,0,0" Text="{Binding AiStatus}" Foreground="DimGray" TextWrapping="Wrap" />
+            <StackPanel Visibility="{Binding HasSuggestedDescription, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <TextBlock Text="Suggested description" FontWeight="SemiBold" />
+                <ScrollViewer MaxHeight="120" VerticalScrollBarVisibility="Auto">
+                    <TextBlock Text="{Binding SuggestedDescription}" TextWrapping="Wrap" />
+                </ScrollViewer>
+                <Button HorizontalAlignment="Left" Margin="0,4,0,0" Command="{Binding ApplyAiSuggestionCommand}" Content="Apply to description" />
+            </StackPanel>
+        </StackPanel>
+        <Border DockPanel.Dock="Top" Margin="0,14,0,0" Padding="12" BorderBrush="#FFE5E7EB" BorderThickness="1" CornerRadius="5" Background="White">
+            <StackPanel>
+                <TextBlock Text="What are you working on?" FontWeight="SemiBold" />
+                <Grid Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="2*" /><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="20" /><RowDefinition Height="Auto" /><RowDefinition Height="20" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <TextBox Grid.Column="0" Text="{Binding SelectedItem.Description, UpdateSourceTrigger=PropertyChanged}" ToolTip="Worklog description" />
+                    <TextBox Grid.Column="1" Margin="8,0,0,0" Text="{Binding SelectedItem.JiraIssueKey, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jira issue key" />
+                    <ComboBox Grid.Column="2" Margin="8,0,0,0" ItemsSource="{Binding TogglProjects}" DisplayMemberPath="Name" SelectedValuePath="Id" SelectedValue="{Binding SelectedItem.TogglProjectId, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="Jira key · Toggl project" Foreground="DimGray" FontSize="11" />
+                    <TextBox Grid.Row="2" Grid.Column="0" Text="{Binding SelectedItem.Name, UpdateSourceTrigger=PropertyChanged}" ToolTip="Task name" />
+                    <TextBox Grid.Row="2" Grid.Column="1" Margin="8,0,0,0" Text="{Binding SelectedItem.Start, UpdateSourceTrigger=PropertyChanged}" ToolTip="Start time, e.g. 08:15" />
+                    <TextBox Grid.Row="2" Grid.Column="2" Margin="8,0,0,0" Text="{Binding SelectedItem.End, UpdateSourceTrigger=PropertyChanged}" ToolTip="End time, e.g. 08:45" />
+                    <TextBlock Grid.Row="3" Grid.ColumnSpan="3" Text="Task name · From · To (duration is calculated automatically)" Foreground="DimGray" FontSize="11" />
+                    <StackPanel Grid.Row="4" Grid.ColumnSpan="3" Orientation="Horizontal">
+                        <CheckBox Content="Billable" IsChecked="{Binding SelectedItem.IsBillable, UpdateSourceTrigger=PropertyChanged}" />
+                        <CheckBox Margin="16,0,0,0" Content="Push to Toggl" IsChecked="{Binding SelectedItem.PostToToggl, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Margin="16,0,0,0" Text="{Binding SelectedItem.Duration, StringFormat=Hours worked: {0:g}}" Foreground="DimGray" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </Border>
+        <DataGrid Margin="0,16,0,0" ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedItem, Mode=TwoWay}" AutoGenerateColumns="False" CanUserAddRows="False" CanUserResizeColumns="True" HorizontalScrollBarVisibility="Auto">
+            <DataGrid.Columns>
+                <DataGridTemplateColumn Header="Source" Width="70">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Border Padding="6,1" CornerRadius="3" HorizontalAlignment="Left" Background="Transparent">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Source}" Value="Toggl"><Setter Property="Background" Value="#FFDCEEFF" /></DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock FontSize="11" Foreground="#FF1D4ED8">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Source}" Value="Toggl"><Setter Property="Text" Value="Toggl" /></DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Border>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Name" Width="170" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Jira key" Width="140" Binding="{Binding JiraIssueKey, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Description" Width="300" Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Start" Width="70" Binding="{Binding Start, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="End" Width="70" Binding="{Binding End, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="Duration" Width="90" Binding="{Binding Duration, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="True" />
+                <DataGridTemplateColumn Header="Toggl project" Width="160">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ComboBox ItemsSource="{Binding DataContext.TogglProjects, RelativeSource={RelativeSource AncestorType=UserControl}}" DisplayMemberPath="Name" SelectedValuePath="Id" SelectedValue="{Binding TogglProjectId, UpdateSourceTrigger=PropertyChanged}" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Tempo category" Width="130" Binding="{Binding TempoCategory, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridCheckBoxColumn Header="Billable" Width="75" Binding="{Binding IsBillable, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridCheckBoxColumn Header="Post to Toggl" Width="95" Binding="{Binding PostToToggl, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTemplateColumn Header="Status" Width="115">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ComboBox ItemsSource="{Binding DataContext.WorkStatuses, RelativeSource={RelativeSource AncestorType=UserControl}}" DisplayMemberPath="DisplayName" SelectedValuePath="Value" SelectedValue="{Binding Status, UpdateSourceTrigger=PropertyChanged}" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="" Width="85">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate><Button Command="{Binding DataContext.RemoveItemCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">Remove</Button></DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</UserControl>

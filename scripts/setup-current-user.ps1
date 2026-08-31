@@ -40,6 +40,12 @@ function Get-GdkPaths {
         DataDirectory = Join-Path $dataRoot 'data'
         Logs = Join-Path $dataRoot 'logs'
         Backup = Join-Path $dataRoot 'backup'
+        # The app stores its SQLite database (planned items, delivery history, daily Slack
+        # delivery state) under "GDK TimeSync" (with a space), a sibling of "GDK\TimeSync"
+        # above where settings.json lives -- see GDK.TimeSync.Desktop/App.xaml.cs. Both
+        # locations must be covered for backup/removal to be complete.
+        DatabaseDirectory = Join-Path $localAppData 'GDK TimeSync'
+        Database = Join-Path $localAppData 'GDK TimeSync\timesync.db'
         Desktop = $desktop
         Programs = $programs
         Startup = $startup
@@ -89,7 +95,7 @@ function Resolve-SourceExecutable {
 function Initialize-Directories {
     param($Paths)
 
-    $directories = @($Paths.Application, $Paths.Data, $Paths.DataDirectory, $Paths.Logs, $Paths.Backup)
+    $directories = @($Paths.Application, $Paths.Data, $Paths.DataDirectory, $Paths.Logs, $Paths.Backup, $Paths.DatabaseDirectory)
     if ($DryRun) {
         $directories | ForEach-Object { Write-Host "[DRY RUN] Would ensure directory: $_" }
         return
@@ -131,7 +137,7 @@ function Get-DefaultSettingsJson {
         JiraBaseUrl = 'https://jira.cgm.ag'
         TogglWorkspaceId = $null
         AutoSyncEnabled = $true
-        SyncIntervalMinutes = 15
+        SyncIntervalMinutes = 5
     }
     return ($settings | ConvertTo-Json -Depth 3)
 }
@@ -269,6 +275,7 @@ function Invoke-CurrentUserSetup {
     Initialize-Directories $script:Paths
     Test-DirectoryWriteAccess $script:Paths.Application 4
     Test-DirectoryWriteAccess $script:Paths.Data 5
+    Test-DirectoryWriteAccess $script:Paths.DatabaseDirectory 6
     if (-not $DryRun) { Write-SetupLog '[OK] Write permissions verified' }
     $hash = Install-PortableExecutable $source $script:Paths
     Initialize-Settings $script:Paths
@@ -283,11 +290,13 @@ function Invoke-CurrentUserSetup {
     if ($DryRun) {
         Write-Host "[DRY RUN] Target executable: $($script:Paths.Executable)"
         Write-Host "[DRY RUN] Settings: $($script:Paths.Settings)"
+        Write-Host "[DRY RUN] Database: $($script:Paths.Database)"
         return
     }
 
     $file = Get-Item -LiteralPath $script:Paths.Executable
     Write-SetupLog "Application: $($script:Paths.Executable)"
+    Write-SetupLog "Database: $($script:Paths.Database)"
     Write-SetupLog "SHA256: $hash"
     Write-SetupLog ('Size: {0:N2} MB' -f ($file.Length / 1MB))
     Write-SetupLog "Version: $($file.VersionInfo.FileVersion)"

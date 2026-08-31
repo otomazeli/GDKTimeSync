@@ -24,7 +24,7 @@ public sealed class TrayIconService : IDisposable
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => exit());
 
-        notifyIcon = new NotifyIcon { Icon = SystemIcons.Application, Text = "GDK TimeSync", ContextMenuStrip = menu, Visible = true };
+        notifyIcon = new NotifyIcon { Icon = LoadApplicationIcon(), Text = "GDK TimeSync", ContextMenuStrip = menu, Visible = true };
         notifyIcon.DoubleClick += (_, _) => open();
         syncCommand.CanExecuteChanged += OnSyncCanExecuteChanged;
         UpdateSyncEnabled();
@@ -36,7 +36,28 @@ public sealed class TrayIconService : IDisposable
         notifyIcon.Dispose();
     }
 
+    public void ShowReviewReminder() =>
+        notifyIcon.ShowBalloonTip(5000, "GDK TimeSync", "Your end-of-day review is ready.", ToolTipIcon.Info);
+
     private void OnSyncCanExecuteChanged(object? sender, EventArgs e) => UpdateSyncEnabled();
 
     private void UpdateSyncEnabled() => syncItem.Enabled = syncCommand.CanExecute(null);
+
+    // <ApplicationIcon> embeds GDK.TimeSync.ico into the exe itself (the taskbar/Explorer icon
+    // already used it correctly), but a NotifyIcon needs an explicit Icon instance -- it never
+    // picks up the embedded one on its own. Extracting it from the running exe works for both
+    // the self-contained single-file publish and a plain framework-dependent build, without
+    // depending on a loose Assets file being present at runtime.
+    private static Icon LoadApplicationIcon()
+    {
+        try
+        {
+            var path = System.Windows.Forms.Application.ExecutablePath;
+            return !string.IsNullOrEmpty(path) ? Icon.ExtractAssociatedIcon(path) ?? SystemIcons.Application : SystemIcons.Application;
+        }
+        catch
+        {
+            return SystemIcons.Application;
+        }
+    }
 }

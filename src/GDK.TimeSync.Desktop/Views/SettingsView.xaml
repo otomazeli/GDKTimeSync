@@ -1,0 +1,57 @@
+<UserControl x:Class="GDK.TimeSync.Desktop.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Loaded="OnLoaded">
+    <StackPanel>
+        <TextBlock Text="Settings" FontSize="24" FontWeight="SemiBold" />
+        <TextBlock Margin="0,8,0,16" Text="Connection status and workflow preferences" Foreground="DimGray" />
+        <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" /><RowDefinition Height="8" />
+                <RowDefinition Height="Auto" /><RowDefinition Height="8" />
+                <RowDefinition Height="Auto" /><RowDefinition Height="8" />
+                <RowDefinition Height="Auto" /><RowDefinition Height="8" />
+                <RowDefinition Height="Auto" /><RowDefinition Height="8" />
+                <RowDefinition Height="Auto" /><RowDefinition Height="8" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBlock Text="Jira base URL" />
+            <TextBlock Grid.Column="1" Text="{Binding JiraBaseUrl}" TextWrapping="Wrap" />
+            <TextBlock Grid.Row="2" Text="Jira user" />
+            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding JiraUser}" />
+            <TextBlock Grid.Row="4" Text="Toggl workspace" />
+            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding TogglWorkspaceId}" />
+            <TextBlock Grid.Row="6" Text="Review reminder" />
+            <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding ReviewReminderTime}" />
+            <TextBlock Grid.Row="8" Text="Tempo category" />
+            <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding DefaultTempoWorkCategory}" />
+            <TextBlock Grid.Row="10" Text="AI assistance" />
+            <TextBlock Grid.Row="10" Grid.Column="1" Text="{Binding AiEnabled}" />
+            <TextBlock Grid.Row="12" Text="Auto-sync" />
+            <TextBlock Grid.Row="12" Grid.Column="1" Text="{Binding AutoSyncEnabled}" />
+        </Grid>
+        <TextBlock Margin="0,20,0,8" Text="Credentials are presence-only and are never displayed." Foreground="DimGray" TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal">
+            <TextBlock Text="Toggl: " />
+            <TextBlock>
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock"><Setter Property="Text" Value="Not configured" /><Style.Triggers><DataTrigger Binding="{Binding IsTogglTokenConfigured}" Value="True"><Setter Property="Text" Value="Configured" /></DataTrigger></Style.Triggers></Style>
+                </TextBlock.Style>
+            </TextBlock>
+            <TextBlock Margin="18,0,0,0" Text="Jira: " />
+            <TextBlock>
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock"><Setter Property="Text" Value="Not configured" /><Style.Triggers><DataTrigger Binding="{Binding IsJiraPatConfigured}" Value="True"><Setter Property="Text" Value="Configured" /></DataTrigger></Style.Triggers></Style>
+                </TextBlock.Style>
+            </TextBlock>
+            <TextBlock Margin="18,0,0,0" Text="Slack: " />
+            <TextBlock>
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock"><Setter Property="Text" Value="Not configured" /><Style.Triggers><DataTrigger Binding="{Binding IsSlackWebhookConfigured}" Value="True"><Setter Property="Text" Value="Configured" /></DataTrigger></Style.Triggers></Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </StackPanel>
+        <Button Margin="0,20,0,0" HorizontalAlignment="Left" Padding="14,6" Click="OnOpenSettingsClick">Edit settings and credentials</Button>
+    </StackPanel>
+</UserControl>
