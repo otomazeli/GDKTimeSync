@@ -5,7 +5,7 @@ using GDK.TimeSync.Core;
 
 namespace GDK.TimeSync.Desktop.ViewModels;
 
-public sealed class HistoryViewModel(IDeliveryAttemptRepository repository) : INotifyPropertyChanged
+public sealed class HistoryViewModel(IDeliveryHistoryRepository repository) : INotifyPropertyChanged
 {
     private string? loadError;
 
@@ -19,10 +19,10 @@ public sealed class HistoryViewModel(IDeliveryAttemptRepository repository) : IN
     {
         try
         {
-            var attempts = await repository.ListAsync(cancellationToken);
+            var entries = await repository.ListHistoryAsync(cancellationToken);
             Items.Clear();
-            foreach (var attempt in attempts)
-                Items.Add(new DeliveryHistoryItemViewModel(attempt));
+            foreach (var entry in entries)
+                Items.Add(new DeliveryHistoryItemViewModel(entry));
             LoadError = null;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsEmpty)));
         }

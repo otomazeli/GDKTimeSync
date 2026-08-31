@@ -9,7 +9,9 @@ public sealed class HistoryViewModelTests
     public async Task LoadAsync_MapsReconciliationStatusWithoutExposingRawFailure()
     {
         var history = new HistoryViewModel(new FakeRepository([
-            new DeliveryAttempt(Guid.NewGuid(), 101, 201, DeliveryAttemptStatus.ReconciliationRequired, DeliveryFailureCode.TempoFailed, SlackDeliveryState.NotSupported)
+            new DeliveryHistoryEntry(
+                new DeliveryAttempt(Guid.NewGuid(), 101, 201, DeliveryAttemptStatus.ReconciliationRequired, DeliveryFailureCode.TempoFailed, SlackDeliveryState.NotSupported),
+                new DateOnly(2026, 8, 13), "CGM-1", "Knowledge transfer")
         ]));
 
         await history.LoadAsync();
@@ -29,12 +31,31 @@ public sealed class HistoryViewModelTests
         Assert.Equal("Could not load delivery history.", history.LoadError);
     }
 
-    private sealed class FakeRepository(IReadOnlyList<DeliveryAttempt>? attempts) : IDeliveryAttemptRepository
+    [Fact]
+    public async Task LoadAsync_ShowsTheDateAndTaskInsteadOfTheRawItemIdentifier()
     {
-        public Task<DeliveryAttempt?> GetAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default) => Task.FromResult<DeliveryAttempt?>(null);
-        public Task<DeliveryAttemptClaim> ClaimAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task SaveAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<IReadOnlyList<DeliveryAttempt>> ListAsync(CancellationToken cancellationToken = default) =>
-            attempts is null ? throw new InvalidOperationException("sensitive-token") : Task.FromResult(attempts);
+        var history = new HistoryViewModel(new FakeRepository([
+            new DeliveryHistoryEntry(
+                new DeliveryAttempt(Guid.NewGuid(), 101, 201, DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported),
+                new DateOnly(2026, 8, 13), "CGM-1", "Knowledge transfer"),
+            new DeliveryHistoryEntry(
+                new DeliveryAttempt(Guid.NewGuid(), null, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed, SlackDeliveryState.NotSupported),
+                null, "", "")
+        ]));
+
+        await history.LoadAsync();
+
+        Assert.Equal("2026-08-13", history.Items[0].DateText);
+        Assert.Equal("CGM-1 Knowledge transfer", history.Items[0].TaskText);
+        Assert.Equal("Toggl #101 · Tempo #201", history.Items[0].DestinationText);
+        Assert.Equal("Unknown date", history.Items[1].DateText);
+        Assert.Equal("(task no longer in any plan)", history.Items[1].TaskText);
+        Assert.Equal("No external entry recorded", history.Items[1].DestinationText);
+    }
+
+    private sealed class FakeRepository(IReadOnlyList<DeliveryHistoryEntry>? entries) : IDeliveryHistoryRepository
+    {
+        public Task<IReadOnlyList<DeliveryHistoryEntry>> ListHistoryAsync(CancellationToken cancellationToken = default) =>
+            entries is null ? throw new InvalidOperationException("sensitive-token") : Task.FromResult(entries);
     }
 }

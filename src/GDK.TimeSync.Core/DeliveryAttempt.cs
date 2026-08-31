@@ -45,3 +45,13 @@ public interface IDeliveryAttemptRepository
     Task<DeliveryAttemptClaim> ClaimAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default);
     Task SaveAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default);
 }
+
+// History needs the human-readable task an attempt belongs to; a raw attempt only carries its
+// item's GUID. PlanDate/JiraIssueKey/Description are null/empty when the planned item behind an
+// old attempt no longer exists.
+public sealed record DeliveryHistoryEntry(DeliveryAttempt Attempt, DateOnly? PlanDate, string JiraIssueKey, string Description);
+
+public interface IDeliveryHistoryRepository
+{
+    Task<IReadOnlyList<DeliveryHistoryEntry>> ListHistoryAsync(CancellationToken cancellationToken = default);
+}

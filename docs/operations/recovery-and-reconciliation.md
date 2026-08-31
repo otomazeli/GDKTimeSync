@@ -20,8 +20,9 @@ tool can open `timesync.db` directly.
 
 ## Task delivery: reading a History row
 
-Each row is one planned item's delivery attempt: a Toggl entry ID, a Tempo worklog ID (once
-posted), a status, and a failure reason. Posting a task always happens in the same order --
+Each row is one planned item's delivery attempt: the plan date and Jira key/description of the
+task it belongs to, a Toggl entry ID, a Tempo worklog ID (once posted), a status, and a failure
+reason. Rows are listed newest day first. Posting a task always happens in the same order --
 **Toggl, then Jira validation, then Tempo** -- and each step's result is saved before the next
 step runs, so a row always tells you exactly how far a task got.
 
@@ -72,9 +73,9 @@ Then look at the History row's **Toggl entry ID**:
   3. Optionally clear the row with the `DELETE` statement above once you've confirmed everything
      is correct, so History no longer shows it as failed.
 
-A `PlannedWorkItemId` in History doesn't show the task's Jira key or comment directly; look it up
-by matching the Toggl entry ID/date in Toggl, or query `planned_work_items` in the database by
-`id`.
+A History row shows its task's date, Jira key, and description. A row reading "(task no longer in
+any plan)" is an attempt whose planned item was since removed -- match it in Toggl by the Toggl
+entry ID instead.
 
 ### Reconciliation required
 
@@ -91,8 +92,8 @@ There is no in-app way to clear this status. To resolve it:
 3. Treat the task as settled once you've confirmed its real state; the History row will keep
    showing "Reconciliation required" until you manually correct or delete it in the database.
 
-The system tray's "Reconcile Today" menu item is a placeholder for a future guided reconciliation
-flow -- it is currently disabled and does nothing.
+There is no guided in-app reconciliation flow; the SQL and manual checks above are the whole
+recovery path.
 
 ## Daily Slack update: recovering a stuck day
 

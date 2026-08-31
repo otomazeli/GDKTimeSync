@@ -18,7 +18,6 @@ public sealed class TrayIconService : IDisposable
         menu.Items.Add(new ToolStripSeparator());
         syncItem = new ToolStripMenuItem("Sync Now", null, (_, _) => syncCommand.Execute(null));
         menu.Items.Add(syncItem);
-        menu.Items.Add("Reconcile Today").Enabled = false;
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Settings", null, (_, _) => settings());
         menu.Items.Add(new ToolStripSeparator());
