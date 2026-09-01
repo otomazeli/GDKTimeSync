@@ -57,6 +57,31 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_DiscardsAResultWhoseDateIsNoLongerSelected()
+    {
+        var dateA = new DateOnly(2026, 8, 24);
+        var dateB = new DateOnly(2026, 8, 25);
+        var today = new TodayViewModel(date: dateA);
+        var pulledForA = PlannedWorkItem.Create(dateA, "entry pulled for the 24th");
+        var gate = new TaskCompletionSource();
+        var syncService = new FakeTogglSyncService(new TogglSyncPullResult([pulledForA], [], 0, null), gate.Task);
+        var main = new MainViewModel(new FixedConfigurationStateService(isConfigured: true), syncService, today);
+
+        var inFlight = main.SyncNowAsync();
+        Assert.Equal(dateA, syncService.LastDate);
+
+        // The user moves on while A's pull is still out. B's own sync is dropped by the
+        // IsSynchronizing guard, so A's result is the only one that can land.
+        await today.SelectDateAsync(dateB);
+        gate.SetResult();
+        await inFlight;
+
+        Assert.Equal(dateB, today.Date);
+        Assert.DoesNotContain(today.Items, item => item.Name == "entry pulled for the 24th");
+        Assert.Contains("discarded", main.SyncStatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task SyncNowAsync_DoesNothingWithoutASyncServiceOrTodayViewModel()
     {
         var main = new MainViewModel(new FixedConfigurationStateService(isConfigured: true));

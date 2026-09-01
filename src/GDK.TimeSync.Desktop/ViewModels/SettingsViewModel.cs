@@ -187,7 +187,13 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         };
         UserSettingsService.ValidateSlackPresentation(normalizedSettings);
 
-        var previousSettings = settings.Load();
+        // Read purely to name the changed fields in the audit entry. A diagnostic must never be
+        // able to abort the save -- Load() only catches JsonException, so an IO or access failure
+        // reading settings.json would otherwise take the credential writes down with it.
+        UserSettings previousSettings;
+        try { previousSettings = settings.Load(); }
+        catch { previousSettings = new UserSettings(); }
+
         IsSaving = true;
         try
         {

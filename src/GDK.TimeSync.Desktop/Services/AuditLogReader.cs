@@ -7,7 +7,9 @@ namespace GDK.TimeSync.Desktop.Services;
 public sealed class AuditLogReader(string logDirectory)
 {
     public string CurrentFilePath =>
-        Path.Combine(logDirectory, $"timesync-{DateTime.Now:yyyyMMdd}.log");
+        // Invariant, matching FileAuditLog.FilePathFor: a non-Gregorian default calendar would
+        // otherwise send the reader looking for a file the writer never created.
+        Path.Combine(logDirectory, $"timesync-{DateTime.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}.log");
 
     public IReadOnlyList<string> ReadRecentEntries(int maxEntries)
     {

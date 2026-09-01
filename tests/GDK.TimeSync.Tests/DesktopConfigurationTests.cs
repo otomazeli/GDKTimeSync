@@ -360,6 +360,20 @@ public sealed class DesktopConfigurationTests
         Assert.True(viewModel.SyncNowCommand.CanExecute(null));
     }
 
+    [Fact]
+    public async Task Saving_still_writes_credentials_when_reading_the_previous_settings_fails()
+    {
+        var credentials = new FakeCredentialStore();
+        var settings = new FirstLoadFailsSettingsStore(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" });
+        var viewModel = new SettingsViewModel(credentials, settings, new ConfigurationStateService(credentials, settings));
+
+        await viewModel.SaveAsync(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" }, "toggl-token", "jira-pat", null);
+
+        Assert.Contains(CredentialKeys.TogglApiToken, credentials.SavedKeys);
+        Assert.Contains(CredentialKeys.JiraPat, credentials.SavedKeys);
+        Assert.Equal("https://jira.cgm.ag", settings.Current.JiraBaseUrl);
+    }
+
     private sealed class FakeCredentialStore(params string[] existingKeys) : ICredentialStore
     {
         private readonly HashSet<string> keys = [.. existingKeys];
@@ -397,6 +411,25 @@ public sealed class DesktopConfigurationTests
 
         public void Save(UserSettings settings) => Current = settings;
     }
+    // settings.json is momentarily unreadable -- a lock, or a denied ACL -- when the save reads it
+    // to name the changed fields for the audit entry. UserSettingsService.Load only catches
+    // JsonException, so that read really can throw IOException at the view model.
+    private sealed class FirstLoadFailsSettingsStore(UserSettings initial) : IUserSettingsStore
+    {
+        private bool failed;
+
+        public UserSettings Current { get; private set; } = initial;
+
+        public UserSettings Load()
+        {
+            if (failed) return Current;
+            failed = true;
+            throw new IOException("Test-only read failure.");
+        }
+
+        public void Save(UserSettings settings) => Current = settings;
+    }
+
     private sealed class ThrowingSettingsStore(UserSettings? initial = null) : IUserSettingsStore
     {
         private readonly UserSettings current = initial ?? new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" };

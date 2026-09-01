@@ -24,7 +24,7 @@ public sealed class AuditLoggingHandler(IAuditLog auditLog, string clientName, b
             if (response.IsSuccessStatusCode)
                 auditLog.Write(AuditLevel.Info, clientName, line);
             else
-                auditLog.Write(AuditLevel.Error, clientName, $"{line}{Environment.NewLine}response: {await ReadBodyAsync(response, cancellationToken)}");
+                auditLog.Write(AuditLevel.Error, clientName, $"{line}{Environment.NewLine}response: {(redactUri ? "(redacted)" : await ReadBodyAsync(response, cancellationToken))}");
             return response;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -37,6 +37,8 @@ public sealed class AuditLoggingHandler(IAuditLog auditLog, string clientName, b
 
     // The Slack webhook URL is itself the credential -- SlackClient posts to "" against a
     // BaseAddress that is the secret trigger URL -- so for Slack no part of the URI is written.
+    // The failure body is suppressed wholesale for the same client: a corporate proxy block page
+    // echoes the requested URL back inside the body, which would put the credential in the log.
     private string DescribeUri(Uri? uri) =>
         redactUri ? "<slack webhook>" : uri?.AbsolutePath ?? "(no uri)";
 

@@ -66,8 +66,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
         IsSynchronizing = true;
         try
         {
-            var result = await syncService.PullAsync(today.Date, today.GetSnapshot().Items, cancellationToken);
-            if (result.Error is not null)
+            var requestedDate = today.Date;
+            var result = await syncService.PullAsync(requestedDate, today.GetSnapshot().Items, cancellationToken);
+            // Selecting a date starts a sync, so the user can move on while one is in flight.
+            // Applying a stale result would merge that day's entries into -- and persist them
+            // under -- whichever day is now selected.
+            if (today.Date != requestedDate)
+            {
+                SyncStatusText = $"Sync result for {requestedDate} discarded: a different date is now selected.";
+                auditLog?.Write(AuditLevel.Info, "Sync", $"{requestedDate}: result discarded, {today.Date} is now selected");
+            }
+            else if (result.Error is not null)
             {
                 SyncStatusText = "Sync failed: Toggl is not reachable or not configured.";
                 auditLog?.Write(AuditLevel.Error, "Sync", $"{today.Date}: sync failed");

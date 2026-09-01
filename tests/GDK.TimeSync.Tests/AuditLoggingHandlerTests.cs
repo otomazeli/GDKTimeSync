@@ -76,6 +76,34 @@ public sealed class AuditLoggingHandlerTests
     }
 
     [Fact]
+    public async Task Never_writes_the_slack_failure_body_which_can_echo_the_webhook_url()
+    {
+        var log = new RecordingAuditLog();
+        const string secretPath = "T0A1B2C3/9z8y7x6w5v";
+        var webhook = $"https://hooks.slack.com/triggers/{secretPath}";
+        // A corporate proxy block page echoes the requested URL back inside the body.
+        var blockPage = $"<html><body>Access to {webhook} was blocked by policy.</body></html>";
+        var handler = new AuditLoggingHandler(log, "GDK.TimeSync.Slack", redactUri: true)
+        {
+            InnerHandler = new StubHandler(HttpStatusCode.Forbidden, blockPage)
+        };
+        using var client = new HttpClient(handler) { BaseAddress = new Uri(webhook) };
+
+        await client.PostAsync("", new StringContent("{}"));
+
+        var entry = Assert.Single(log.Entries);
+        Assert.Equal(AuditLevel.Error, entry.Level);
+        Assert.Contains("POST <slack webhook> -> 403 Forbidden", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("(redacted)", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(secretPath, entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("T0A1B2C3", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("9z8y7x6w5v", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("hooks.slack.com", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("triggers", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("blocked by policy", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Logs_the_status_even_when_the_response_body_cannot_be_read()
     {
         var log = new RecordingAuditLog();

@@ -58,10 +58,14 @@ allow-list of "safe" headers to get wrong later. The Slack webhook URL needed se
 because it isn't a header: `SlackClient` posts to the relative path `""` against an
 `HttpClient.BaseAddress` that *is* the secret trigger URL, so logging "the request URI" for Slack
 would write the credential verbatim. Slack calls are logged with the fixed literal `<slack
-webhook>` and no URI at all. Settings changes log which field names changed, never their values,
-and never whether a credential looks valid.
+webhook>` and no URI at all. The Slack failure response body is suppressed for the same reason:
+a corporate proxy or gateway block page echoes the full requested URL back inside the body, so a
+non-2xx from a blocked Slack call logs the fixed literal `(redacted)` in place of the body rather
+than any part of it. Suppressing the whole body avoids an allow-list of "safe" body content to get
+wrong later. Settings changes log which field names changed, never their values, and never whether
+a credential looks valid.
 
-Response bodies from Jira and Tempo may still contain the user's own issue keys and worklog
+Response bodies from Toggl, Jira, and Tempo may still contain the user's own issue keys and worklog
 comments -- accepted deliberately, because Tempo's 400s carry the real reason in the body (for
 example `"Worker … could not be found"`) and the status code alone rarely identifies the problem.
 The file never leaves the machine, so this trades a small amount of exposure to the user's own
@@ -99,8 +103,9 @@ starts at the Diagnostics page.
   doesn't throw when the log directory doesn't exist yet.
 - `AuditLoggingHandlerTests`: logs `Info` without a body for a 2xx call; logs `Error` with the
   response body for a failing call; never writes the `Authorization` header at 200 or 401; never
-  writes any part of the Slack webhook URL; logs the status even when the response body can't be
-  read; logs a transport failure as an error and rethrows.
+  writes any part of the Slack webhook URL; never writes the Slack failure body, which can echo
+  the webhook URL back from a proxy block page; logs the status even when the response body can't
+  be read; logs a transport failure as an error and rethrows.
 - `AuditLogWiringTests`: `ConfigureServices` registers a single `IAuditLog`; the log directory sits
   beside `settings.json` under `GDK\TimeSync`; `SyncNowAsync` records the outcome counts.
 - `DiagnosticsViewModelTests`: refresh shows complete entries newest-first; caps the number of
@@ -110,5 +115,5 @@ starts at the Diagnostics page.
   (`[Theory]` over toggl/jira/tempo): each failing client construction yields its own
   `DeliveryFailureCode`.
 
-380/380 pass; existing tests were unaffected because `IAuditLog` is optional-nullable at every
+383/383 pass; existing tests were unaffected because `IAuditLog` is optional-nullable at every
 construction site, so no pre-existing test fixture needed a logger.

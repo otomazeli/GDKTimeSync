@@ -111,8 +111,9 @@ GDK TimeSync writes a plain-text log of every action it takes and every Toggl/Ji
 call it makes, to `%LOCALAPPDATA%\GDK\TimeSync\logs\timesync-yyyyMMdd.log` -- one file per day.
 This exists so that a failed delivery can be diagnosed on a machine that only has the installed
 app, with no IDE or debugger available. Logging is always on; there is no setting to turn it off.
-Files older than 14 days are deleted automatically each time the app starts, so the folder never
-grows without bound.
+Files older than 14 days are deleted automatically each time the app starts, so the folder holds at
+most the last 14 days of logs. Retention is by age only -- there is no size cap on an individual
+day's file.
 
 Your credentials are never written to the log, under any configuration: not the Toggl API token,
 not the Jira/Tempo personal access token, not the Slack webhook URL. Settings changes record which
