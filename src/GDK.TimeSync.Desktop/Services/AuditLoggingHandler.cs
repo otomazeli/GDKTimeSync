@@ -24,7 +24,7 @@ public sealed class AuditLoggingHandler(IAuditLog auditLog, string clientName, b
             if (response.IsSuccessStatusCode)
                 auditLog.Write(AuditLevel.Info, clientName, line);
             else
-                auditLog.Write(AuditLevel.Error, clientName, $"{line}{Environment.NewLine}response: {await ReadAndReplaceBodyAsync(response, cancellationToken)}");
+                auditLog.Write(AuditLevel.Error, clientName, $"{line}{Environment.NewLine}response: {await ReadBodyAsync(response, cancellationToken)}");
             return response;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -40,32 +40,25 @@ public sealed class AuditLoggingHandler(IAuditLog auditLog, string clientName, b
     private string DescribeUri(Uri? uri) =>
         redactUri ? "<slack webhook>" : uri?.AbsolutePath ?? "(no uri)";
 
-    // Reads the body for the log line, then swaps in a fresh, replayable copy of the content.
-    // HttpClient itself re-buffers the response content after this handler returns (the default
-    // ResponseContentRead completion option), and the real API client still needs to read the
-    // body too -- so the original (possibly single-read, possibly faulted) content must not be
-    // left behind exhausted.
-    private static async Task<string> ReadAndReplaceBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async Task<string> ReadBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        var original = response.Content;
-        string body;
         try
         {
-            body = await original.ReadAsStringAsync(cancellationToken);
+            // ReadAsStringAsync buffers the content internally, so the caller's own later reads --
+            // and HttpClient's post-handler re-buffer -- replay from that buffer. Reading here does
+            // not starve any downstream consumer, and the response is returned untouched.
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return body.Length > MaxBodyCharacters ? body[..MaxBodyCharacters] + " …(truncated)" : body;
         }
-        catch
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            response.Content = new StringContent(string.Empty);
-            original.Dispose();
+            // Content that cannot be buffered at all would throw again in HttpClient's own re-buffer,
+            // *after* this handler returns and outside any catch of ours. Swapping in empty content
+            // keeps that failure from surfacing to the caller as a torn response.
+            var unreadable = response.Content;
+            response.Content = new StringContent("");
+            unreadable.Dispose();
             return "(response body could not be read)";
         }
-
-        var replacement = new StringContent(body);
-        if (original.Headers.ContentType is { } contentType)
-            replacement.Headers.ContentType = contentType;
-        response.Content = replacement;
-        original.Dispose();
-
-        return body.Length > MaxBodyCharacters ? body[..MaxBodyCharacters] + " …(truncated)" : body;
     }
 }
