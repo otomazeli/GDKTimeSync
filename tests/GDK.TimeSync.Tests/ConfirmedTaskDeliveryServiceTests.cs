@@ -87,6 +87,65 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         Assert.Equal(TimeSpan.FromMinutes(45), request.Stop - request.Start);
     }
 
+    [Theory]
+    [InlineData("toggl", DeliveryFailureCode.TogglFailed)]
+    [InlineData("jira", DeliveryFailureCode.JiraFailed)]
+    [InlineData("tempo", DeliveryFailureCode.TempoFailed)]
+    public async Task DeliverConfirmedAsync_AttributesAClientSetupFailureToTheClientThatFailed(string failing, DeliveryFailureCode expected)
+    {
+        var item = PlannedWorkItem.Create(new DateOnly(2026, 9, 1), "Work", "CGM-1", "Comment",
+            TimeSpan.FromMinutes(30), "CGM", "DEVELOPMENT", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var service = new ConfirmedTaskDeliveryService(
+            new FailingIntegrationClientFactory(failing),
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "planner" }),
+            new InMemoryAttemptRepository());
+
+        var attempt = await service.DeliverConfirmedAsync(item);
+
+        Assert.Equal(DeliveryAttemptStatus.Failed, attempt.Status);
+        Assert.Equal(expected, attempt.FailureCode);
+    }
+
+    // Fails exactly one client construction so the resulting failure code identifies which one.
+    // CreateJiraAsync only fails for the "jira" case: for "tempo" it must succeed with a real
+    // JiraClient (a fake can't stand in for the sealed type), so CreateTempoAsync is the one that fails.
+    private sealed class FailingIntegrationClientFactory(string failing) : IIntegrationClientFactory
+    {
+        public Task<ITogglClient> CreateTogglAsync(CancellationToken cancellationToken = default) =>
+            failing == "toggl"
+                ? throw new InvalidOperationException("Toggl configuration is not configured.")
+                : Task.FromResult<ITogglClient>(new UnusedTogglClient());
+
+        public Task<JiraClient> CreateJiraAsync(CancellationToken cancellationToken = default) =>
+            failing == "jira"
+                ? throw new InvalidOperationException("Jira configuration is not configured.")
+                : Task.FromResult(new JiraClient(
+                    new HttpClient(new NeverCalledHttpMessageHandler()) { BaseAddress = new Uri("https://jira.example.test") },
+                    new JiraOptions { BaseUrl = "https://jira.example.test", PersonalAccessToken = "unit-token" },
+                    new IssueKeyValidator(new IssueKeyValidationOptions())));
+
+        public Task<TempoClient> CreateTempoAsync(CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Tempo configuration is not configured.");
+    }
+
+    // Delivery never reaches this client's members because a later construction fails first.
+    private sealed class UnusedTogglClient : ITogglClient
+    {
+        public Task<IReadOnlyList<TogglTimeEntry>> GetTimeEntriesAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<IReadOnlyList<TogglProject>> GetProjectsAsync(long workspaceId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<TogglTimeEntry> CreateTimeEntryAsync(TogglCreateTimeEntryRequest request, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public void Dispose() { }
+    }
+
+    private sealed class NeverCalledHttpMessageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("HTTP should not be called.");
+    }
+
     private sealed class FixedSettingsStore(UserSettings settings) : IUserSettingsStore
     {
         public UserSettings Load() => settings;
