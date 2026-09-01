@@ -102,6 +102,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<TemplatesViewModel>();
         RegisterReviewServices(services);
         services.AddSingleton<HistoryViewModel>();
+        services.AddSingleton(_ => new AuditLogReader(LogDirectory));
+        services.AddSingleton<DiagnosticsViewModel>();
         services.AddSingleton<ShellViewModel>();
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<MainWindow>();

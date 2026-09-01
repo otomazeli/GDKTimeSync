@@ -12,6 +12,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     private readonly ReviewViewModel review;
     private readonly SettingsViewModel? settings;
     private readonly HistoryViewModel? history;
+    private readonly DiagnosticsViewModel? diagnostics;
     public ConnectionStatusViewModel? ConnectionStatus { get; }
 
     // Every sync already produces a result line; until this was surfaced it was computed and
@@ -26,7 +27,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         SettingsViewModel? settings = null,
         HistoryViewModel? history = null,
         ConnectionStatusViewModel? connectionStatus = null,
-        MainViewModel? main = null)
+        MainViewModel? main = null,
+        DiagnosticsViewModel? diagnostics = null)
     {
         Main = main;
         _ = configurationState;
@@ -35,6 +37,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         this.review = review ?? new ReviewViewModel();
         this.settings = settings;
         this.history = history;
+        this.diagnostics = diagnostics;
         ConnectionStatus = connectionStatus;
         NavigateCommand = new RelayCommand(value => _ = NavigateAsync(value));
     }
@@ -62,6 +65,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         NavigationPage.History when history is not null => history,
         NavigationPage.Review => review,
         NavigationPage.Settings when settings is not null => settings,
+        NavigationPage.Diagnostics when diagnostics is not null => diagnostics,
         _ => SelectedPage
     };
 
@@ -86,6 +90,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged
                 await review.RefreshAsync(cancellationToken);
             if (navigationPage == NavigationPage.History)
                 _ = history?.LoadAsync();
+            if (navigationPage == NavigationPage.Diagnostics)
+                _ = diagnostics?.RefreshAsync();
         }
     }
 }

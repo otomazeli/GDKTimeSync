@@ -11,6 +11,7 @@
         <DataTemplate x:Key="HistoryTemplate"><views:HistoryView /></DataTemplate>
         <DataTemplate x:Key="SettingsTemplate"><views:SettingsView /></DataTemplate>
         <DataTemplate x:Key="ReviewTemplate"><views:ReviewView /></DataTemplate>
+        <DataTemplate x:Key="DiagnosticsTemplate"><views:DiagnosticsView /></DataTemplate>
     </Window.Resources>
     <Grid>
         <Grid.ColumnDefinitions>
@@ -26,6 +27,7 @@
                 <Button Margin="0,8,0,0" Command="{Binding NavigateCommand}" CommandParameter="{x:Static viewModels:NavigationPage.History}">History</Button>
                 <Button Margin="0,8,0,0" Command="{Binding NavigateCommand}" CommandParameter="{x:Static viewModels:NavigationPage.Settings}">Settings</Button>
                 <Button Margin="0,8,0,0" Command="{Binding NavigateCommand}" CommandParameter="{x:Static viewModels:NavigationPage.Review}">End-of-day review</Button>
+                <Button Margin="0,8,0,0" Command="{Binding NavigateCommand}" CommandParameter="{x:Static viewModels:NavigationPage.Diagnostics}">Diagnostics</Button>
                 <TextBlock Margin="0,28,0,8" Text="Connections" Foreground="#FFD1D5DB" FontWeight="SemiBold" />
                 <ItemsControl ItemsSource="{Binding ConnectionStatus.Items}">
                     <ItemsControl.ItemTemplate>
@@ -65,6 +67,7 @@
                                 <DataTrigger Binding="{Binding SelectedPage}" Value="{x:Static viewModels:NavigationPage.History}"><Setter Property="ContentTemplate" Value="{StaticResource HistoryTemplate}" /></DataTrigger>
                                 <DataTrigger Binding="{Binding SelectedPage}" Value="{x:Static viewModels:NavigationPage.Settings}"><Setter Property="ContentTemplate" Value="{StaticResource SettingsTemplate}" /></DataTrigger>
                                 <DataTrigger Binding="{Binding SelectedPage}" Value="{x:Static viewModels:NavigationPage.Review}"><Setter Property="ContentTemplate" Value="{StaticResource ReviewTemplate}" /></DataTrigger>
+                                <DataTrigger Binding="{Binding SelectedPage}" Value="{x:Static viewModels:NavigationPage.Diagnostics}"><Setter Property="ContentTemplate" Value="{StaticResource DiagnosticsTemplate}" /></DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </ContentControl.Style>
