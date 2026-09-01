@@ -109,6 +109,21 @@ public sealed class TogglClientTests
         Assert.Equal("/api/v9/workspaces/42/projects", handler.LastRequest!.RequestUri!.AbsolutePath);
     }
 
+    // A large shared workspace returns projects the user cannot see the name of; they arrived with
+    // a blank name and filled the project picker with unlabelled, unpickable rows.
+    [Fact]
+    public async Task GetProjectsAsync_drops_projects_that_came_back_without_a_usable_name()
+    {
+        var handler = new StubHttpMessageHandler(_ => JsonResponse(
+            """[{"id":1,"name":""},{"id":314,"name":"GDK"},{"id":2,"name":null},{"id":3,"name":"   "},{"id":4,"name":"CGM"}]"""));
+        using var httpClient = CreateHttpClient(handler);
+        using var client = CreateClient(httpClient);
+
+        var projects = await client.GetProjectsAsync(42);
+
+        Assert.Equal([new TogglProject(314, "GDK"), new TogglProject(4, "CGM")], projects);
+    }
+
     [Fact]
     public async Task CreateTimeEntryAsync_rejects_invalid_entries_without_an_http_request()
     {

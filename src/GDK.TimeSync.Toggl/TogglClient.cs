@@ -82,7 +82,11 @@ public sealed class TogglClient : ITogglClient
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workspaceId);
         using var response = await SendAsync(() => HttpClient.GetAsync($"workspaces/{workspaceId}/projects", cancellationToken));
-        return await ReadJsonAsync<List<TogglProject>>(response, cancellationToken) ?? [];
+        var projects = await ReadJsonAsync<List<TogglProject>>(response, cancellationToken) ?? [];
+        // A shared workspace returns projects whose name the caller has no visibility of, as an
+        // empty or absent "name". They cannot be displayed in a picker or matched against an item's
+        // project name, so drop them here rather than in each caller.
+        return projects.Where(project => !string.IsNullOrWhiteSpace(project.Name)).ToList();
     }
 
     private static async Task<T?> ReadJsonAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
