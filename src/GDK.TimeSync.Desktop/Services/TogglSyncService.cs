@@ -7,7 +7,8 @@ public sealed class TogglSyncService(
     IIntegrationClientFactory clients,
     IUserSettingsStore settings,
     IDeliveryAttemptRepository attempts,
-    IssueKeyValidator issueKeyValidator) : ITogglSyncService
+    IssueKeyValidator issueKeyValidator,
+    IAuditLog? auditLog = null) : ITogglSyncService
 {
     public async Task<TogglSyncPullResult> PullAsync(DateOnly date, IReadOnlyList<PlannedWorkItem> localItems, CancellationToken cancellationToken = default)
     {
@@ -90,6 +91,7 @@ public sealed class TogglSyncService(
                             attempt with { Status = DeliveryAttemptStatus.ReconciliationRequired, FailureCode = DeliveryFailureCode.RemoteChangedAfterDelivery },
                             CancellationToken.None);
                         reconciliationCount++;
+                        auditLog?.Write(AuditLevel.Warning, "Reconciliation", $"{localItem.Id} flagged: remote changed after delivery");
                     }
                     catch
                     {

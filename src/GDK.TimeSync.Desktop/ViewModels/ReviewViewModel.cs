@@ -16,6 +16,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     private readonly ISlackClientFactory? slackClientFactory;
     private readonly IUserSettingsStore? settings;
     private readonly IClipboardService? clipboard;
+    private readonly IAuditLog? auditLog;
     private string dryRunSummary = "Run Dry Run to validate the current local plan.";
     private PlannedWorkItem? selectedTask;
     private DeliveryAttempt? lastTaskAttempt;
@@ -37,7 +38,8 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         IUserSettingsStore? settings = null,
         IIntegrationDiagnosticsService? diagnosticsService = null,
         ILiveIntegrationValidationService? validationService = null,
-        IClipboardService? clipboard = null)
+        IClipboardService? clipboard = null,
+        IAuditLog? auditLog = null)
     {
         this.planProvider = planProvider;
         this.deliveryService = deliveryService;
@@ -46,6 +48,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         this.slackClientFactory = slackClientFactory;
         this.settings = settings;
         this.clipboard = clipboard;
+        this.auditLog = auditLog;
         LiveValidation = new LiveValidationViewModel(planProvider, diagnosticsService, validationService);
         DryRunCommand = new RelayCommand(_ => RunDryRun());
         RefreshCommand = new RelayCommand(_ => _ = RefreshAsync());
@@ -257,6 +260,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
             CanConfirmSlack = true;
             IsSlackConfirmationVisible = true;
+            auditLog?.Write(AuditLevel.Info, "Slack", $"Composed {SlackPreviewText.Split('\n').Length} line(s) for {plan.Date}");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -284,6 +288,13 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     {
         if (!CanConfirmSlack || SlackPreview is null || dailyDeliveries is null || slackClientFactory is null) return;
 
+        await ConfirmSlackCoreAsync(SlackPreview, dailyDeliveries, slackClientFactory, cancellationToken);
+        auditLog?.Write(SlackDeliveryError is null ? AuditLevel.Info : AuditLevel.Error, "Slack",
+            SlackDeliveryError is null ? "Sent" : $"Send failed: {SlackDeliveryError}");
+    }
+
+    private async Task ConfirmSlackCoreAsync(SlackDailyUpdate preview, IDailySlackDeliveryRepository dailyDeliveries, ISlackClientFactory slackClientFactory, CancellationToken cancellationToken)
+    {
         CanConfirmSlack = false;
         IsSlackConfirmationVisible = false;
         try
@@ -307,14 +318,14 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
             using (client)
             {
-            if (!await dailyDeliveries.TryClaimAsync(SlackPreview.Date, SlackPreview.ContentFingerprint, cancellationToken))
+            if (!await dailyDeliveries.TryClaimAsync(preview.Date, preview.ContentFingerprint, cancellationToken))
             {
                 SlackDeliveryError = "A daily Slack delivery already exists and cannot be sent again.";
                 return;
             }
 
-            await client.PostAsync(SlackPreview, cancellationToken);
-            await dailyDeliveries.SaveAsync(new DailySlackDelivery(SlackPreview.Date, SlackPreview.ContentFingerprint, DailySlackDeliveryState.Sent, null), CancellationToken.None);
+            await client.PostAsync(preview, cancellationToken);
+            await dailyDeliveries.SaveAsync(new DailySlackDelivery(preview.Date, preview.ContentFingerprint, DailySlackDeliveryState.Sent, null), CancellationToken.None);
             SlackDeliveryError = null;
             }
         }

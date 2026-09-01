@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
 
 namespace GDK.TimeSync.Desktop.ViewModels;
@@ -9,15 +10,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly IConfigurationStateService configurationState;
     private readonly ITogglSyncService? syncService;
     private readonly TodayViewModel? today;
+    private readonly IAuditLog? auditLog;
     private bool isSynchronizing;
     private string statusText = "Not configured. Open Settings to add a Toggl API token, Jira URL, and Jira personal access token.";
     private string? syncStatusText;
 
-    public MainViewModel(IConfigurationStateService configurationState, ITogglSyncService? syncService = null, TodayViewModel? today = null)
+    public MainViewModel(IConfigurationStateService configurationState, ITogglSyncService? syncService = null, TodayViewModel? today = null, IAuditLog? auditLog = null)
     {
         this.configurationState = configurationState;
         this.syncService = syncService;
         this.today = today;
+        this.auditLog = auditLog;
         configurationState.ConfigurationChanged += (_, _) => UpdateConfigurationStatus();
         SyncNowCommand = new RelayCommand(() => _ = SyncNowAsync(), () => configurationState.IsConfigured && !IsSynchronizing);
         // Picking a date is a user-initiated request to see that day, so it pulls straight away
@@ -64,13 +67,21 @@ public sealed class MainViewModel : INotifyPropertyChanged
         try
         {
             var result = await syncService.PullAsync(today.Date, today.GetSnapshot().Items, cancellationToken);
-            SyncStatusText = result.Error is not null
-                ? "Sync failed: Toggl is not reachable or not configured."
-                : FormatSyncSummary(today.ApplyPullResult(result));
+            if (result.Error is not null)
+            {
+                SyncStatusText = "Sync failed: Toggl is not reachable or not configured.";
+                auditLog?.Write(AuditLevel.Error, "Sync", $"{today.Date}: sync failed");
+            }
+            else
+            {
+                SyncStatusText = FormatSyncSummary(today.ApplyPullResult(result));
+                auditLog?.Write(AuditLevel.Info, "Sync", $"{today.Date}: {SyncStatusText}");
+            }
         }
         catch
         {
             SyncStatusText = "Sync failed: Toggl is not reachable or not configured.";
+            auditLog?.Write(AuditLevel.Error, "Sync", $"{today.Date}: sync failed");
         }
         finally
         {

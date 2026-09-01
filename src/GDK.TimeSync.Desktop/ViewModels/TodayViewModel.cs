@@ -29,15 +29,17 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     private Guid? suggestedItemId;
     private readonly IIntegrationClientFactory? integrationClients;
     private readonly IUserSettingsStore? settingsStore;
+    private readonly IAuditLog? auditLog;
     private string? projectLoadError;
 
-    public TodayViewModel(IDailyPlanRepository? repository = null, DateOnly? date = null, IAiConsentService? aiConsentService = null, IAssistedTextGenerator? assistedTextGenerator = null, IIntegrationClientFactory? integrationClients = null, IUserSettingsStore? settingsStore = null)
+    public TodayViewModel(IDailyPlanRepository? repository = null, DateOnly? date = null, IAiConsentService? aiConsentService = null, IAssistedTextGenerator? assistedTextGenerator = null, IIntegrationClientFactory? integrationClients = null, IUserSettingsStore? settingsStore = null, IAuditLog? auditLog = null)
     {
         this.repository = repository;
         this.aiConsentService = aiConsentService;
         this.assistedTextGenerator = assistedTextGenerator;
         this.integrationClients = integrationClients;
         this.settingsStore = settingsStore;
+        this.auditLog = auditLog;
         currentDate = date ?? DateOnly.FromDateTime(DateTime.Today);
         Items.CollectionChanged += OnItemsChanged;
         AddItemCommand = new RelayCommand(_ => AddItem());
@@ -132,6 +134,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
         }
 
         DateSelected?.Invoke(this, EventArgs.Empty);
+        auditLog?.Write(AuditLevel.Info, "Today", $"Date selected: {Date}");
     }
 
     private async Task LoadItemsForCurrentDateAsync(CancellationToken cancellationToken)

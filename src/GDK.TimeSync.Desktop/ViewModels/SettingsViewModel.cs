@@ -1,13 +1,14 @@
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
 
 namespace GDK.TimeSync.Desktop.ViewModels;
 
 public sealed record ReminderModeOption(EndOfDayReminderMode Value, string Label);
 
-public sealed class SettingsViewModel(ICredentialStore credentials, IUserSettingsStore settings, IConfigurationStateService configurationState) : INotifyPropertyChanged
+public sealed class SettingsViewModel(ICredentialStore credentials, IUserSettingsStore settings, IConfigurationStateService configurationState, IAuditLog? auditLog = null) : INotifyPropertyChanged
 {
     private bool isTogglTokenConfigured;
     private bool isJiraPatConfigured;
@@ -186,6 +187,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         };
         UserSettingsService.ValidateSlackPresentation(normalizedSettings);
 
+        var previousSettings = settings.Load();
         IsSaving = true;
         try
         {
@@ -212,6 +214,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
                 settings.Save(normalizedSettings);
             }
             catch (Exception exception) { throw new SettingsSaveException("Credentials may have been saved, but non-secret settings could not be saved.", exception); }
+            auditLog?.Write(AuditLevel.Info, "Settings", $"Saved: {DescribeChangedFields(previousSettings, normalizedSettings)}");
             await configurationState.RefreshAsync(cancellationToken);
             await UpdateCredentialStatusAsync(cancellationToken);
             LoadNonSecretSettings(normalizedSettings);
@@ -252,6 +255,26 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
     }
 
     private static IReadOnlyList<string> SplitSlackLines(string value) => value.Split(["\r\n", "\n"], StringSplitOptions.None);
+
+    // Field names only, never values -- the point is an audit trail of what changed, not a record of
+    // Jira URLs, workspace IDs, or Slack presentation text.
+    private static string DescribeChangedFields(UserSettings previous, UserSettings updated)
+    {
+        var changed = new List<string>();
+        if (previous.JiraBaseUrl != updated.JiraBaseUrl) changed.Add(nameof(UserSettings.JiraBaseUrl));
+        if (previous.JiraUser != updated.JiraUser) changed.Add(nameof(UserSettings.JiraUser));
+        if (previous.TogglWorkspaceId != updated.TogglWorkspaceId) changed.Add(nameof(UserSettings.TogglWorkspaceId));
+        if (previous.ReviewReminderTime != updated.ReviewReminderTime) changed.Add(nameof(UserSettings.ReviewReminderTime));
+        if (previous.EndOfDayReminderMode != updated.EndOfDayReminderMode) changed.Add(nameof(UserSettings.EndOfDayReminderMode));
+        if (previous.DefaultTempoWorkCategory != updated.DefaultTempoWorkCategory) changed.Add(nameof(UserSettings.DefaultTempoWorkCategory));
+        if (previous.AiEnabled != updated.AiEnabled) changed.Add(nameof(UserSettings.AiEnabled));
+        if (previous.AutoSyncEnabled != updated.AutoSyncEnabled) changed.Add(nameof(UserSettings.AutoSyncEnabled));
+        if (previous.SyncIntervalMinutes != updated.SyncIntervalMinutes) changed.Add(nameof(UserSettings.SyncIntervalMinutes));
+        if (previous.SlackTitle != updated.SlackTitle) changed.Add(nameof(UserSettings.SlackTitle));
+        if (previous.SlackTaskHeading != updated.SlackTaskHeading) changed.Add(nameof(UserSettings.SlackTaskHeading));
+        if (!previous.SlackExtraLines.SequenceEqual(updated.SlackExtraLines)) changed.Add(nameof(UserSettings.SlackExtraLines));
+        return changed.Count > 0 ? string.Join(", ", changed) : "(no fields changed)";
+    }
 
     private static string NormalizeSlackText(string? value)
     {
