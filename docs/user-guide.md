@@ -19,7 +19,7 @@ To remove GDK TimeSync later, see [Removal](#removal) below.
 
 ## The sidebar
 
-The app has five pages, reachable from the sidebar:
+The app has six pages, reachable from the sidebar:
 
 - **Today** -- build the plan for a day: add planned work items (Jira issue key, comment,
   duration, Toggl project, Tempo category, billable flag), reuse recurring templates, and pick a
@@ -32,6 +32,8 @@ The app has five pages, reachable from the sidebar:
   below); "Edit settings and credentials" opens the settings window.
 - **Review** -- the end-of-day screen: Dry Run, guided per-integration checks, per-task
   confirmation, and the daily Slack update. This is where everything gets delivered.
+- **Diagnostics** -- today's audit log, read from inside the app; see [Diagnostics](#diagnostics)
+  below.
 
 ## Connection setup and secure credential entry
 
@@ -102,6 +104,35 @@ shows a tray balloon ("Your end-of-day review is ready."), opens the Review page
 depending on the configured presentation mode. The system tray icon also offers "Open GDK
 TimeSync", "Sync Now" (pulls recent Toggl entries), and "Settings" without needing the main window
 open.
+
+## Diagnostics
+
+GDK TimeSync writes a plain-text log of every action it takes and every Toggl/Jira/Tempo/Slack
+call it makes, to `%LOCALAPPDATA%\GDK\TimeSync\logs\timesync-yyyyMMdd.log` -- one file per day.
+This exists so that a failed delivery can be diagnosed on a machine that only has the installed
+app, with no IDE or debugger available. Logging is always on; there is no setting to turn it off.
+Files older than 14 days are deleted automatically each time the app starts, so the folder never
+grows without bound.
+
+Your credentials are never written to the log, under any configuration: not the Toggl API token,
+not the Jira/Tempo personal access token, not the Slack webhook URL. Settings changes record which
+fields you changed, never their values.
+
+Failed Toggl, Jira, and Tempo calls do log the response body returned by that service, because the
+body is usually what actually explains the failure (for example, Tempo naming the exact reason a
+worklog was rejected). That means a Jira or Tempo failure entry may contain your own issue keys and
+worklog comments. The file never leaves your machine -- it is written under your own
+`%LOCALAPPDATA%` and is never uploaded or transmitted anywhere -- but be aware of this if you ever
+copy log entries into a ticket or a chat message.
+
+The **Diagnostics** page in the sidebar shows the most recent 500 entries from today's log file,
+newest first, so a recent error is visible without scrolling. Three buttons:
+
+- **Copy all** -- copies the entries currently shown to the clipboard, so you can paste them into a
+  support ticket or a message.
+- **Open log folder** -- opens the logs folder in File Explorer.
+- **Refresh** -- re-reads today's file (the page doesn't watch the file for changes, so use this
+  after an action you want to see reflected).
 
 ## AI assistance
 

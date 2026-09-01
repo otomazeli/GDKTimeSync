@@ -7,6 +7,11 @@ recorded state means, and what to do when a delivery didn't fully succeed.
 ## Where the state lives
 
 - **History page** -- the readable view of every task delivery attempt ever recorded.
+- **Diagnostics page**, and `%LOCALAPPDATA%\GDK\TimeSync\logs\timesync-yyyyMMdd.log` behind it --
+  today's audit log: every action taken and every Toggl/Jira/Tempo/Slack call made, with method,
+  path, status, duration, and the response body for a failed call. This is usually the fastest way
+  to find out *why* something failed, not just that it failed; see [Diagnostics](../user-guide.md#diagnostics)
+  in the user guide. One file per day, kept for 14 days, never containing credentials.
 - `%LOCALAPPDATA%\GDK TimeSync\timesync.db` -- the SQLite database backing History, the local
   plan, templates, and the daily Slack delivery record. Note this is a different folder from
   `%LOCALAPPDATA%\GDK\TimeSync\settings.json`, which holds your non-secret settings.
@@ -46,9 +51,16 @@ Failure reasons:
 
 ### Recovering a Failed or Cancelled task
 
-First fix the underlying problem: re-check credentials and connectivity on the Review page's
-"Run diagnostics" and guided Toggl/Jira/Tempo checks, and check the task's Jira issue key on
-Today.
+Start on the **Diagnostics** page, not with credentials or SQL. Its most recent entries include the
+Toggl/Jira/Tempo call that failed, with the HTTP status and the response body the service actually
+returned -- for example a Tempo 400 naming the exact field it rejected, or a Jira 401 that means
+the stored token expired. A History failure reason such as "Tempo delivery failed" only tells you
+*where* delivery stopped; the matching Diagnostics entry usually tells you *why*, without needing
+to reproduce anything.
+
+With that in hand, fix the underlying problem: re-check credentials and connectivity on the Review
+page's guided Toggl/Jira/Tempo checks if Diagnostics points at a connection or authentication
+failure, and check the task's Jira issue key on Today if it points at a rejected payload.
 
 Then look at the History row's **Toggl entry ID**:
 
