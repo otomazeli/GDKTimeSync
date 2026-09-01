@@ -48,6 +48,8 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
                 <Button Margin="0,10,0,0" Command="{Binding ConnectionStatus.RefreshCommand}" Content="Refresh connections" />
+                <TextBlock Margin="0,18,0,0" Text="Last sync" Foreground="#FFD1D5DB" FontWeight="SemiBold" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding Main.SyncStatusText, TargetNullValue='Not synced yet'}" Foreground="#FFD1D5DB" FontSize="11" TextWrapping="Wrap" />
             </StackPanel>
         </Border>
         <Grid Grid.Column="1" Margin="28">

@@ -20,6 +20,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
         this.today = today;
         configurationState.ConfigurationChanged += (_, _) => UpdateConfigurationStatus();
         SyncNowCommand = new RelayCommand(() => _ = SyncNowAsync(), () => configurationState.IsConfigured && !IsSynchronizing);
+        // Picking a date is a user-initiated request to see that day, so it pulls straight away
+        // rather than waiting out the background interval. This deliberately follows the selected
+        // date; only the automatic background sync is pinned to the real current date (TS-033).
+        if (today is not null)
+            today.DateSelected += (_, _) => _ = SyncNowAsync();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

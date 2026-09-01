@@ -173,6 +173,27 @@ public sealed class TogglSyncServiceTests
         Assert.Equal("SUPPORT", updated.TempoCategory);
     }
 
+    // Date selection now pulls on every pick, so the same day is synced far more often than the
+    // old 15-minute interval did. Re-importing an entry the plan already holds would duplicate it.
+    [Fact]
+    public async Task PullAsync_AddsNothingOnASecondSyncOfAnEntryItAlreadyImported()
+    {
+        var entry = CreateEntry(id: 555, projectId: 9, description: "CGM-1 Investigate bug", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var toggl = new FakeTogglClient([entry]);
+        var service = CreateService(toggl, new InMemoryAttemptRepository());
+
+        var first = await service.PullAsync(Date, []);
+        var imported = Assert.Single(first.ItemsToAdd);
+
+        var second = await service.PullAsync(Date, [imported]);
+        var third = await service.PullAsync(Date, [imported]);
+
+        Assert.Empty(second.ItemsToAdd);
+        Assert.Empty(second.ItemsToUpdate);
+        Assert.Empty(third.ItemsToAdd);
+        Assert.Empty(third.ItemsToUpdate);
+    }
+
     [Fact]
     public async Task PullAsync_RefreshesAMatchedNotYetDeliveredItemInPlace()
     {

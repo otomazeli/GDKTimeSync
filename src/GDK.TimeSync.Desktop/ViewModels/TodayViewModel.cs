@@ -116,13 +116,22 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             await LoadProjectsAsync(cancellationToken);
     }
 
+    // Raised whenever the user picks a date -- including re-picking the one already shown, which is
+    // how "Today" is used as a refresh. MainViewModel listens and pulls that date from Toggl:
+    // loading the local plan alone left a freshly-picked day showing stale rows until the auto-sync
+    // interval happened to elapse, which read as "sync stopped working".
+    public event EventHandler? DateSelected;
+
     public async Task SelectDateAsync(DateOnly newDate, CancellationToken cancellationToken = default)
     {
-        if (newDate == Date) return;
+        if (newDate != Date)
+        {
+            await FlushAsync();
+            Date = newDate;
+            await LoadItemsForCurrentDateAsync(cancellationToken);
+        }
 
-        await FlushAsync();
-        Date = newDate;
-        await LoadItemsForCurrentDateAsync(cancellationToken);
+        DateSelected?.Invoke(this, EventArgs.Empty);
     }
 
     private async Task LoadItemsForCurrentDateAsync(CancellationToken cancellationToken)

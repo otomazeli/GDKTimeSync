@@ -14,6 +14,10 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     private readonly HistoryViewModel? history;
     public ConnectionStatusViewModel? ConnectionStatus { get; }
 
+    // Every sync already produces a result line; until this was surfaced it was computed and
+    // discarded, so a sync that imported nothing looked exactly like one that never ran.
+    public MainViewModel? Main { get; }
+
     public ShellViewModel(
         IConfigurationStateService configurationState,
         TodayViewModel? today = null,
@@ -21,8 +25,10 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         ReviewViewModel? review = null,
         SettingsViewModel? settings = null,
         HistoryViewModel? history = null,
-        ConnectionStatusViewModel? connectionStatus = null)
+        ConnectionStatusViewModel? connectionStatus = null,
+        MainViewModel? main = null)
     {
+        Main = main;
         _ = configurationState;
         this.today = today ?? new TodayViewModel();
         this.templates = templates ?? new TemplatesViewModel(this.today);
