@@ -1,3 +1,4 @@
+using System.Globalization;
 using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
 
@@ -51,6 +52,39 @@ public sealed class FileAuditLogTests : IDisposable
         var exception = Record.Exception(() => log.Write(AuditLevel.Info, "App", "start"));
 
         Assert.Null(exception);
+    }
+
+    [Fact]
+    public void DeleteFilesOlderThan_DoesNotThrowWhenTheDirectoryDoesNotExist()
+    {
+        var log = new FileAuditLog(Path.Combine(directory, "never-created"));
+
+        var exception = Record.Exception(() => log.DeleteFilesOlderThan(14));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public void Write_FormatsTheTimestampInvariantlyEvenUnderAHostileCulture()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 9, 1, 14, 2, 11, 884, TimeSpan.Zero));
+        var log = new FileAuditLog(directory, clock);
+
+        var originalCulture = CultureInfo.CurrentCulture;
+        try
+        {
+            // fi-FI uses "." as its time separator, so an unescaped ':' in a non-invariant format
+            // string would not produce "HH:mm:ss" under this culture.
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fi-FI");
+            log.Write(AuditLevel.Info, "App", "start");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+        }
+
+        var text = File.ReadAllText(log.CurrentFilePath);
+        Assert.Contains("14:02:11.884", text, StringComparison.Ordinal);
     }
 
     [Fact]

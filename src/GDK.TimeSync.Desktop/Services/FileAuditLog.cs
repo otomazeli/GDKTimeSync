@@ -15,18 +15,25 @@ public sealed class FileAuditLog(string logDirectory, TimeProvider? timeProvider
     private readonly Lock appendLock = new();
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
 
-    public string CurrentFilePath =>
-        Path.Combine(logDirectory, $"{FilePrefix}{Now():yyyyMMdd}{FileSuffix}");
+    public string CurrentFilePath => FilePathFor(Now());
 
     public void Write(AuditLevel level, string category, string message)
     {
         try
         {
-            var line = $"{Now():yyyy-MM-dd HH:mm:ss.fff} {Label(level)} {category}{Environment.NewLine}{Indent(message)}";
+            // One timestamp for both the entry and the file it lands in: reading the clock twice
+            // can file an entry under the previous day at a midnight boundary.
+            var now = Now();
+            // InvariantCulture is required, not cosmetic. An unescaped ':' in a custom format string
+            // is the time-separator *specifier* and is substituted from the current culture, so on
+            // some hosts this would not produce "HH:mm:ss" at all -- and AuditLogReader (Task 5)
+            // parses these 23 characters back with TryParseExact against InvariantCulture.
+            var stamp = now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture);
+            var line = $"{stamp} {Label(level)} {category}{Environment.NewLine}{Indent(message)}";
             lock (appendLock)
             {
                 Directory.CreateDirectory(logDirectory);
-                File.AppendAllText(CurrentFilePath, line + Environment.NewLine, new UTF8Encoding(false));
+                File.AppendAllText(FilePathFor(now), line + Environment.NewLine, new UTF8Encoding(false));
             }
         }
         catch
@@ -50,6 +57,9 @@ public sealed class FileAuditLog(string logDirectory, TimeProvider? timeProvider
     }
 
     private DateTime Now() => clock.GetLocalNow().DateTime;
+
+    private string FilePathFor(DateTime moment) =>
+        Path.Combine(logDirectory, $"{FilePrefix}{moment.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}{FileSuffix}");
 
     private static string Label(AuditLevel level) => level switch
     {
