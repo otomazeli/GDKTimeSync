@@ -20,6 +20,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
     private string reviewReminderTime = "16:00";
     private EndOfDayReminderMode endOfDayReminderMode = EndOfDayReminderMode.Both;
     private string defaultTempoWorkCategory = "DEVELOPMENT";
+    private string defaultTogglProject = "";
     private string slackTitle = "Daily update";
     private string slackTaskHeading = "Completed tasks";
     private string slackExtraLines = string.Empty;
@@ -90,6 +91,12 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         set => SetField(ref defaultTempoWorkCategory, value);
     }
 
+    public string DefaultTogglProject
+    {
+        get => defaultTogglProject;
+        set => SetField(ref defaultTogglProject, value);
+    }
+
     public bool AiEnabled
     {
         get => aiEnabled;
@@ -134,6 +141,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             ReviewReminderTime = ReviewReminderTime,
             EndOfDayReminderMode = EndOfDayReminderMode,
             DefaultTempoWorkCategory = DefaultTempoWorkCategory,
+            DefaultTogglProject = DefaultTogglProject,
             AiEnabled = AiEnabled,
             AutoSyncEnabled = AutoSyncEnabled,
             SyncIntervalMinutes = SyncIntervalMinutes,
@@ -151,6 +159,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             ReviewReminderTime = ReviewReminderTime,
             EndOfDayReminderMode = EndOfDayReminderMode,
             DefaultTempoWorkCategory = DefaultTempoWorkCategory,
+            DefaultTogglProject = DefaultTogglProject,
             AiEnabled = AiEnabled,
             AutoSyncEnabled = AutoSyncEnabled,
             SyncIntervalMinutes = SyncIntervalMinutes,
@@ -181,6 +190,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             ReviewReminderTime = normalizedReviewReminderTime,
             EndOfDayReminderMode = EndOfDayReminderModes.Normalize(proposedSettings.EndOfDayReminderMode),
             DefaultTempoWorkCategory = proposedSettings.DefaultTempoWorkCategory.Trim(),
+            DefaultTogglProject = proposedSettings.DefaultTogglProject.Trim(),
             SlackTitle = NormalizeSlackText(proposedSettings.SlackTitle),
             SlackTaskHeading = NormalizeSlackText(proposedSettings.SlackTaskHeading),
             SlackExtraLines = proposedSettings.SlackExtraLines.Select(NormalizeSlackText).Where(line => line.Length > 0).ToArray()
@@ -239,6 +249,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         ReviewReminderTime = currentSettings.ReviewReminderTime;
         EndOfDayReminderMode = EndOfDayReminderModes.Normalize(currentSettings.EndOfDayReminderMode);
         DefaultTempoWorkCategory = currentSettings.DefaultTempoWorkCategory;
+        DefaultTogglProject = currentSettings.DefaultTogglProject;
         AiEnabled = currentSettings.AiEnabled;
         AutoSyncEnabled = currentSettings.AutoSyncEnabled;
         SyncIntervalMinutes = currentSettings.SyncIntervalMinutes;
@@ -273,6 +284,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         if (previous.ReviewReminderTime != updated.ReviewReminderTime) changed.Add(nameof(UserSettings.ReviewReminderTime));
         if (previous.EndOfDayReminderMode != updated.EndOfDayReminderMode) changed.Add(nameof(UserSettings.EndOfDayReminderMode));
         if (previous.DefaultTempoWorkCategory != updated.DefaultTempoWorkCategory) changed.Add(nameof(UserSettings.DefaultTempoWorkCategory));
+        if (previous.DefaultTogglProject != updated.DefaultTogglProject) changed.Add(nameof(UserSettings.DefaultTogglProject));
         if (previous.AiEnabled != updated.AiEnabled) changed.Add(nameof(UserSettings.AiEnabled));
         if (previous.AutoSyncEnabled != updated.AutoSyncEnabled) changed.Add(nameof(UserSettings.AutoSyncEnabled));
         if (previous.SyncIntervalMinutes != updated.SyncIntervalMinutes) changed.Add(nameof(UserSettings.SyncIntervalMinutes));

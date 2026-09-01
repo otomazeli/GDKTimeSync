@@ -48,17 +48,26 @@
             <StackPanel>
                 <TextBlock Text="What are you working on?" FontWeight="SemiBold" />
                 <Grid Margin="0,8,0,0">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="2*" /><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="20" /><RowDefinition Height="Auto" /><RowDefinition Height="20" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                    <TextBox Grid.Column="0" Text="{Binding SelectedItem.Description, UpdateSourceTrigger=PropertyChanged}" ToolTip="Worklog description" />
-                    <TextBox Grid.Column="1" Margin="8,0,0,0" Text="{Binding SelectedItem.JiraIssueKey, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jira issue key" />
-                    <ComboBox Grid.Column="2" Margin="8,0,0,0" ItemsSource="{Binding TogglProjects}" DisplayMemberPath="Name" SelectedValuePath="Id" SelectedValue="{Binding SelectedItem.TogglProjectId, UpdateSourceTrigger=PropertyChanged}" />
-                    <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="Jira key · Toggl project" Foreground="DimGray" FontSize="11" />
-                    <TextBox Grid.Row="2" Grid.Column="0" Text="{Binding SelectedItem.Name, UpdateSourceTrigger=PropertyChanged}" ToolTip="Task name" />
-                    <TextBox Grid.Row="2" Grid.Column="1" Margin="8,0,0,0" Text="{Binding SelectedItem.Start, UpdateSourceTrigger=PropertyChanged}" ToolTip="Start time, e.g. 08:15" />
-                    <TextBox Grid.Row="2" Grid.Column="2" Margin="8,0,0,0" Text="{Binding SelectedItem.End, UpdateSourceTrigger=PropertyChanged}" ToolTip="End time, e.g. 08:45" />
-                    <TextBlock Grid.Row="3" Grid.ColumnSpan="3" Text="Task name · From · To (duration is calculated automatically)" Foreground="DimGray" FontSize="11" />
-                    <StackPanel Grid.Row="4" Grid.ColumnSpan="3" Orientation="Horizontal">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="2*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="10" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="10" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Jira key" Foreground="#FF4B5563" FontSize="11" Margin="0,0,0,2" />
+                    <TextBlock Grid.Row="0" Grid.Column="1" Margin="8,0,0,2" Text="Description" Foreground="#FF4B5563" FontSize="11" />
+                    <TextBlock Grid.Row="0" Grid.Column="2" Margin="8,0,0,2" Text="Toggl project" Foreground="#FF4B5563" FontSize="11" />
+                    <TextBox x:Name="JiraKeyTextBox" Grid.Row="1" Grid.Column="0" LostFocus="OnJiraKeyLostFocus" Text="{Binding SelectedItem.JiraIssueKey, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jira issue key, e.g. CGMFRAVII-8428" />
+                    <TextBox Grid.Row="1" Grid.Column="1" Margin="8,0,0,0" Text="{Binding SelectedItem.Description, UpdateSourceTrigger=PropertyChanged}" ToolTip="Worklog description" />
+                    <ComboBox Grid.Row="1" Grid.Column="2" Margin="8,0,0,0" ItemsSource="{Binding TogglProjects}" DisplayMemberPath="Name" SelectedValuePath="Id" SelectedValue="{Binding SelectedItem.TogglProjectId, UpdateSourceTrigger=PropertyChanged}" />
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Task name" Foreground="#FF4B5563" FontSize="11" Margin="0,0,0,2" />
+                    <TextBlock Grid.Row="3" Grid.Column="1" Margin="8,0,0,2" Text="From" Foreground="#FF4B5563" FontSize="11" />
+                    <TextBlock Grid.Row="3" Grid.Column="2" Margin="8,0,0,2" Text="To" Foreground="#FF4B5563" FontSize="11" />
+                    <TextBox Grid.Row="4" Grid.Column="0" Text="{Binding SelectedItem.Name, UpdateSourceTrigger=PropertyChanged}" ToolTip="Task name" />
+                    <TextBox Grid.Row="4" Grid.Column="1" Margin="8,0,0,0" Text="{Binding SelectedItem.Start, UpdateSourceTrigger=PropertyChanged}" ToolTip="Start time, e.g. 08:15" />
+                    <TextBox Grid.Row="4" Grid.Column="2" Margin="8,0,0,0" Text="{Binding SelectedItem.End, UpdateSourceTrigger=PropertyChanged}" ToolTip="End time, e.g. 08:45" />
+                    <TextBlock Grid.Row="5" Grid.ColumnSpan="3" Margin="0,3,0,0" Text="Duration is calculated automatically from the times." Foreground="DimGray" FontSize="11" />
+
+                    <TextBlock Grid.Row="6" Grid.ColumnSpan="3" Text="{Binding JiraLookupError}" Foreground="Firebrick" FontSize="11" TextWrapping="Wrap" />
+                    <StackPanel Grid.Row="7" Grid.ColumnSpan="3" Orientation="Horizontal">
                         <CheckBox Content="Billable" IsChecked="{Binding SelectedItem.IsBillable, UpdateSourceTrigger=PropertyChanged}" />
                         <CheckBox Margin="16,0,0,0" Content="Push to Toggl" IsChecked="{Binding SelectedItem.PostToToggl, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Margin="16,0,0,0" Text="{Binding SelectedItem.Duration, StringFormat=Hours worked: {0:g}}" Foreground="DimGray" VerticalAlignment="Center" />

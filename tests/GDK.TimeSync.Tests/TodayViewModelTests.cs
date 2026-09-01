@@ -183,10 +183,39 @@ public sealed class TodayViewModelTests
         var markup = File.ReadAllText(path);
 
         Assert.DoesNotContain("<RowDefinition Height=\"8\" />", markup, StringComparison.Ordinal);
-        Assert.Contains("<RowDefinition Height=\"20\" />", markup, StringComparison.Ordinal);
         Assert.Contains("Header=\"Jira key\" Width=\"140\"", markup, StringComparison.Ordinal);
         Assert.Contains("Header=\"Description\" Width=\"300\"", markup, StringComparison.Ordinal);
         Assert.Contains("Header=\"Toggl project\" Width=\"160\"", markup, StringComparison.Ordinal);
+    }
+
+    // Issue #3: every input in the quick-edit panel carries its own visible label. The panel used to
+    // caption each ROW with one dim line spanning all three columns -- and row one's named only two of
+    // its three fields, in the wrong order, so it pointed the reader at the wrong boxes.
+    [Fact]
+    public void Today_quick_edit_panel_labels_every_field_and_puts_the_jira_key_first()
+    {
+        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GDK.TimeSync.Desktop", "Views", "TodayView.xaml"));
+        var markup = File.ReadAllText(path);
+        var elements = XDocument.Load(path).Descendants().ToArray();
+        var labels = elements
+            .Where(element => element.Name.LocalName == "TextBlock" && element.Attribute("FontSize")?.Value == "11")
+            .Select(element => element.Attribute("Text")?.Value)
+            .ToArray();
+
+        foreach (var expected in new[] { "Jira key", "Description", "Toggl project", "Task name", "From", "To" })
+            Assert.Contains(expected, labels);
+
+        Assert.DoesNotContain("Jira key · Toggl project", markup, StringComparison.Ordinal);
+        Assert.Contains("LostFocus=\"OnJiraKeyLostFocus\"", markup, StringComparison.Ordinal);
+
+        // The key is the first input the user meets, because it is what drives the Jira lookup.
+        var inputs = elements
+            .Where(element => element.Name.LocalName is "TextBox" or "ComboBox" && element.Attribute("Grid.Row")?.Value == "1")
+            .Select(element => element.Attribute("Grid.Column")?.Value)
+            .ToArray();
+        Assert.Equal("0", inputs[0]);
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        Assert.Contains(elements, element => element.Attribute(xaml + "Name")?.Value == "JiraKeyTextBox" && element.Attribute("Grid.Column")?.Value == "0");
     }
 
     [Fact]
@@ -727,6 +756,152 @@ public sealed class TodayViewModelTests
         {
             SavedPlans.Add(plan);
             return Task.CompletedTask;
+        }
+    }
+
+    // ---- Issue #4: Jira lookup on a new row that carries only the key ----
+
+    [Fact]
+    public async Task LookUpJiraKeyAsync_FillsNameDescriptionCategoryAndDefaultProjectOnANewRow()
+    {
+        var today = CreateLookupViewModel(out var jira);
+        await today.LoadProjectsAsync();
+        var item = new PlannedWorkItemViewModel(jiraIssueKey: "CGMFRAVII-8428");
+        today.Items.Add(item);
+
+        await today.LookUpJiraKeyAsync(item);
+
+        Assert.Equal("DMP CPx certificate", item.Name);
+        Assert.Equal("DMP CPx certificate", item.Description);
+        Assert.Equal("DEVELOPMENT", item.TempoCategory);
+        Assert.Equal("CGM", item.TogglProject);
+        Assert.Equal(77, item.TogglProjectId);
+        Assert.Equal(1, jira.Calls);
+    }
+
+    [Fact]
+    public async Task LookUpJiraKeyAsync_DoesNothingForARowImportedFromToggl()
+    {
+        var today = CreateLookupViewModel(out var jira);
+        var item = new PlannedWorkItemViewModel(jiraIssueKey: "CGMFRAVII-8428", source: ItemSource.Toggl);
+        today.Items.Add(item);
+
+        await today.LookUpJiraKeyAsync(item);
+
+        Assert.Equal("", item.Name);
+        Assert.Equal(0, jira.Calls);
+    }
+
+    [Theory]
+    [InlineData("already named", "", "")]
+    [InlineData("", "already described", "")]
+    [InlineData("", "", "already projected")]
+    public async Task LookUpJiraKeyAsync_NeverTouchesARowThatAlreadyHasContent(string name, string description, string project)
+    {
+        var today = CreateLookupViewModel(out var jira);
+        var item = new PlannedWorkItemViewModel(name, "CGMFRAVII-8428", description, togglProject: project);
+        today.Items.Add(item);
+
+        await today.LookUpJiraKeyAsync(item);
+
+        Assert.Equal(name, item.Name);
+        Assert.Equal(description, item.Description);
+        Assert.Equal(project, item.TogglProject);
+        Assert.Equal(0, jira.Calls);
+    }
+
+    [Fact]
+    public async Task LookUpJiraKeyAsync_MakesNoCallForAKeyThatIsNotAValidIssueKey()
+    {
+        var today = CreateLookupViewModel(out var jira);
+        var item = new PlannedWorkItemViewModel(jiraIssueKey: "not a key");
+        today.Items.Add(item);
+
+        await today.LookUpJiraKeyAsync(item);
+
+        Assert.Equal(0, jira.Calls);
+        Assert.Equal("", item.Name);
+    }
+
+    [Fact]
+    public async Task LookUpJiraKeyAsync_LeavesTheRowUntouchedAndStaysSilentWhenJiraIsUnreachable()
+    {
+        var today = CreateLookupViewModel(out _, jiraFails: true);
+        var item = new PlannedWorkItemViewModel(jiraIssueKey: "CGMFRAVII-8428");
+        today.Items.Add(item);
+
+        await today.LookUpJiraKeyAsync(item);
+
+        Assert.Equal("", item.Name);
+        Assert.Null(today.JiraLookupError);
+    }
+
+    [Fact]
+    public async Task LookUpJiraKeyAsync_ReportsAKeyJiraDoesNotKnow()
+    {
+        var today = CreateLookupViewModel(out _, summary: null);
+        var item = new PlannedWorkItemViewModel(jiraIssueKey: "CGMFRAVII-8428");
+        today.Items.Add(item);
+
+        await today.LookUpJiraKeyAsync(item);
+
+        Assert.Equal("", item.Name);
+        Assert.Equal("CGMFRAVII-8428 was not found in Jira.", today.JiraLookupError);
+    }
+
+    [Fact]
+    public async Task LookUpJiraKeyAsync_DiscardsAResultWhoseKeyTheUserHasSinceChanged()
+    {
+        var today = CreateLookupViewModel(out var jira);
+        var item = new PlannedWorkItemViewModel(jiraIssueKey: "CGMFRAVII-8428");
+        today.Items.Add(item);
+        jira.Gate = new TaskCompletionSource();
+
+        var inFlight = today.LookUpJiraKeyAsync(item);
+        item.JiraIssueKey = "CGMFRAVII-9999";
+        jira.Gate.SetResult();
+        await inFlight;
+
+        Assert.Equal("", item.Name);
+        Assert.Equal("", item.Description);
+    }
+
+    [Fact]
+    public async Task AddItemCommand_AppliesTheConfiguredDefaultTogglProjectToANewRow()
+    {
+        var today = CreateLookupViewModel(out _);
+        await today.LoadProjectsAsync();
+
+        today.AddItemCommand.Execute(null);
+
+        var added = today.SelectedItem!;
+        Assert.Equal("CGM", added.TogglProject);
+        Assert.Equal(77, added.TogglProjectId);
+    }
+
+    private static TodayViewModel CreateLookupViewModel(out RecordingJiraLookup jira, bool jiraFails = false, string? summary = "DMP CPx certificate")
+    {
+        jira = new RecordingJiraLookup(jiraFails, summary);
+        var settings = new FixedSettingsStore(new UserSettings
+        {
+            TogglWorkspaceId = 42,
+            DefaultTempoWorkCategory = "DEVELOPMENT",
+            DefaultTogglProject = "CGM"
+        });
+        return new TodayViewModel(integrationClients: new ProjectFactory(), settingsStore: settings, jiraLookup: jira);
+    }
+
+    private sealed class RecordingJiraLookup(bool fails, string? summary) : IJiraIssueLookup
+    {
+        public int Calls { get; private set; }
+        public TaskCompletionSource? Gate { get; set; }
+
+        public async Task<string?> GetSummaryAsync(string issueKey, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            if (Gate is not null) await Gate.Task;
+            if (fails) throw new InvalidOperationException("Jira is not reachable.");
+            return summary;
         }
     }
 

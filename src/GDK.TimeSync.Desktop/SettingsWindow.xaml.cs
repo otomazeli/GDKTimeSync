@@ -32,6 +32,7 @@ public partial class SettingsWindow : Window
         EndOfDayReminderModeComboBox.ItemsSource = viewModel.ReminderModeOptions;
         EndOfDayReminderModeComboBox.SelectedValue = viewModel.EndOfDayReminderMode;
         DefaultTempoWorkCategoryTextBox.Text = viewModel.DefaultTempoWorkCategory;
+        DefaultTogglProjectTextBox.Text = viewModel.DefaultTogglProject;
         AiEnabledCheckBox.IsChecked = viewModel.AiEnabled;
         AutoSyncEnabledCheckBox.IsChecked = viewModel.AutoSyncEnabled;
         SyncIntervalMinutesTextBox.Text = viewModel.SyncIntervalMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -58,6 +59,7 @@ public partial class SettingsWindow : Window
                 ReviewReminderTime = ReviewReminderTimeTextBox.Text.Trim(),
                 EndOfDayReminderMode = EndOfDayReminderModeComboBox.SelectedValue is EndOfDayReminderMode mode ? mode : EndOfDayReminderMode.Both,
                 DefaultTempoWorkCategory = DefaultTempoWorkCategoryTextBox.Text.Trim(),
+                DefaultTogglProject = DefaultTogglProjectTextBox.Text.Trim(),
                 AiEnabled = AiEnabledCheckBox.IsChecked == true,
                 AutoSyncEnabled = AutoSyncEnabledCheckBox.IsChecked == true,
                 SyncIntervalMinutes = syncIntervalMinutes,

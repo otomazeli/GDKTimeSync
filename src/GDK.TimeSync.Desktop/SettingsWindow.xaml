@@ -19,6 +19,10 @@
             <ComboBox x:Name="EndOfDayReminderModeComboBox" Margin="0,5,0,14" DisplayMemberPath="Label" SelectedValuePath="Value" />
             <TextBlock Text="Default Tempo work category" />
             <TextBox x:Name="DefaultTempoWorkCategoryTextBox" Margin="0,5,0,14" />
+            <TextBlock Text="Default Toggl project" />
+            <TextBlock Margin="0,3,0,0" Foreground="DimGray" FontSize="11" TextWrapping="Wrap"
+                       Text="Used for a new task when nothing better is known. Jira does not say which Toggl project work belongs to, so this fills the gap." />
+            <TextBox x:Name="DefaultTogglProjectTextBox" Margin="0,5,0,14" />
             <CheckBox x:Name="AiEnabledCheckBox" Margin="0,0,0,18" Content="Enable optional AI assistance" />
             <CheckBox x:Name="AutoSyncEnabledCheckBox" Margin="0,0,0,10" Content="Automatically pull new Toggl entries (never posts or writes)" />
             <TextBlock Text="Auto-sync interval (minutes)" />

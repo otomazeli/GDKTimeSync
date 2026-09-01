@@ -79,6 +79,7 @@ public partial class App : System.Windows.Application
             null,
             null,
             provider));
+        services.AddSingleton<IJiraIssueLookup, JiraIssueLookup>();
         services.AddSingleton<IIntegrationDiagnosticsService, IntegrationDiagnosticsService>();
         services.AddSingleton<ILiveIntegrationValidationService, LiveIntegrationValidationService>();
         services.AddSingleton<IConfirmedTaskDeliveryService, ConfirmedTaskDeliveryService>();
