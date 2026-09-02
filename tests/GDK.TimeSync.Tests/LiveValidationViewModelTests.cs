@@ -155,14 +155,16 @@ public sealed class LiveValidationViewModelTests
     }
 
     [Fact]
-    public void Review_view_wraps_its_content_in_a_vertical_scroll_viewer()
+    public void Review_view_lays_out_the_worklist_in_a_dock_panel_with_a_data_grid()
     {
+        // The Review page is now a DataGrid worklist, not a scrolling stack of swapping panels.
+        // A DataGrid loses its own virtualization and row-height measurement when wrapped in a
+        // ScrollViewer, so the page root is a DockPanel with the grid filling the remaining space.
         var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GDK.TimeSync.Desktop", "Views", "ReviewView.xaml"));
         var root = XDocument.Load(path).Root!;
-        var scrollViewer = Assert.Single(root.Elements(), element => element.Name.LocalName == "ScrollViewer");
+        var dockPanel = Assert.Single(root.Elements(), element => element.Name.LocalName == "DockPanel");
 
-        Assert.Equal("Auto", scrollViewer.Attribute("VerticalScrollBarVisibility")?.Value);
-        Assert.Contains(scrollViewer.Elements(), element => element.Name.LocalName == "StackPanel");
+        Assert.Contains(dockPanel.Descendants(), element => element.Name.LocalName == "DataGrid");
     }
 
     [Fact]

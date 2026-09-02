@@ -2,11 +2,35 @@ using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
 using GDK.TimeSync.Desktop.ViewModels;
 using GDK.TimeSync.Slack;
+using System.Xml.Linq;
 
 namespace GDK.TimeSync.Tests;
 
 public sealed class ReviewViewModelTests
 {
+    [Fact]
+    public void Review_view_is_a_grid_with_one_batch_confirmation_and_no_guided_validation()
+    {
+        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GDK.TimeSync.Desktop", "Views", "ReviewView.xaml"));
+        var markup = File.ReadAllText(path);
+        var elements = XDocument.Load(path).Descendants().ToArray();
+
+        Assert.Contains(elements, element => element.Name.LocalName == "DataGrid");
+        Assert.Contains("{Binding Tasks}", markup, StringComparison.Ordinal);
+        Assert.Contains("PostSelectedCommand", markup, StringComparison.Ordinal);
+        Assert.Contains("ConfirmPostSelectedCommand", markup, StringComparison.Ordinal);
+        Assert.Contains("CancelBatchCommand", markup, StringComparison.Ordinal);
+        Assert.Contains("BatchConfirmationSummary", markup, StringComparison.Ordinal);
+        Assert.Contains("FailureText", markup, StringComparison.Ordinal);
+
+        // The guided-validation block moved to Diagnostics; none of its bindings may remain here.
+        Assert.DoesNotContain("IsTogglConfirmationVisible", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("LiveValidation", markup, StringComparison.Ordinal);
+
+        // Exactly one confirmation panel, where there used to be five.
+        Assert.Single(markup.Split("IsBatchConfirmationVisible").Skip(1));
+    }
+
     [Fact]
     public async Task AFullPostCycleIsRecordedInOrder()
     {
