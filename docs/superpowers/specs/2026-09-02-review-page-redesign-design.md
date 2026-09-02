@@ -123,6 +123,33 @@ the audit log, the guided Toggl/Jira/Tempo checks, and the existing diagnostics 
 
 Review loses roughly half its height as a result. This is the largest single contributor to "compact".
 
+## Every action is logged
+
+The audit log exists so that a failure on a machine with no tooling can still be explained. A redesign
+of the screen where every external write happens must not leave gaps in it. Every action a user takes
+on Review or on the relocated guided validation writes an entry through the existing `IAuditLog`.
+
+| Category | Action | Entry |
+| --- | --- | --- |
+| `Review` | Page opened / refreshed | `$"Loaded {date}: {n} task(s), {m} already delivered"` |
+| `Review` | Dry Run run | `$"Dry run {date}: {summary}"`, `Warning` when it produced blockers |
+| `Review` | Batch post requested | `$"Post requested for {n} task(s): {keys}, {total}"` — before the confirmation is shown |
+| `Review` | Batch confirmed | `$"Post confirmed for {n} task(s)"` — the moment external writes are authorised |
+| `Review` | Batch cancelled at the confirmation | `$"Post cancelled before delivery ({n} task(s))"` |
+| `Review` | Batch cancelled mid-run | `$"Post cancelled after {done} of {n}"`, `Warning` |
+| `Review` | Batch finished | `$"Post finished: {succeeded} succeeded, {failed} failed"`, `Warning` when any failed |
+| `Delivery` | Per task | already emitted by `ConfirmedTaskDeliveryService` — unchanged, and it remains the record of what each task actually did |
+| `Slack` | Compose / send / cancel | already emitted — extended to cover cancel |
+| `Validation` | Each guided step run and each step confirmed | `$"{step} {outcome} for {itemId} {jiraKey}"` |
+
+Rules that carry over from the existing log and are not relaxed here: no credential, no settings value,
+and no Slack URI ever appears; a failure to write the log never changes what the application does.
+
+**One deliberate exclusion, stated so it can be overruled:** ticking and unticking rows is not logged.
+A selection has no effect until it is confirmed, the confirmation entry already records exactly which
+tasks were chosen, and logging every tick would bury the entries that matter under noise from a user
+simply making up their mind. If the intent is a literal keystroke-level record, say so and it goes in.
+
 ## Testing
 
 | Area | Test |
@@ -135,6 +162,8 @@ Review loses roughly half its height as a result. This is the largest single con
 | Confirmation | No external call happens before the second, explicit click |
 | Failure detail | An in-session Tempo failure surfaces the service message; a row rehydrated from the repository falls back to the coded reason |
 | Markup | The grid, the single confirmation panel, and the absence of the guided-validation block, via the existing `XDocument` idiom |
+| Audit | Every row of the table above is emitted, asserted against a fake `IAuditLog`: a full post cycle produces request, confirm, per-task and finish entries in that order; a cancel at the confirmation produces the cancel entry and no `Delivery` entry at all |
+| Audit | No entry contains a credential, a settings value, or a Slack URI |
 | Diagnostics | Guided validation renders and behaves there exactly as it did on Review |
 
 Existing `LiveValidationViewModelTests` must pass unchanged apart from the markup-path assertions that
