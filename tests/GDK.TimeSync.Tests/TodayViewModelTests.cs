@@ -905,6 +905,64 @@ public sealed class TodayViewModelTests
         }
     }
 
+    // ---- Issue #6: the Toggl project picker showed nothing selected on first load ----
+
+    // The ComboBox binds SelectedValue to TogglProjectId over an ItemsSource of TogglProjects. If the
+    // rows exist before that list is populated, WPF cannot match the value, drops it, and never
+    // re-evaluates. So projects must be loaded first.
+    // The defect is in WPF, not in view-model state: the ComboBox drops a SelectedValue it cannot
+    // match against an empty ItemsSource and never re-evaluates. The view model's own values are
+    // correct either way, so the only thing a test here can pin is the ORDERING that avoids it --
+    // TogglProjects must already be populated by the time the rows are built.
+    [Fact]
+    public async Task InitializeAsync_PopulatesTheProjectListBeforeItBuildsTheRows()
+    {
+        var date = new DateOnly(2026, 9, 3);
+        var stored = PlannedWorkItem.Create(date, "Work", "CGM-1", "Comment", TimeSpan.FromMinutes(30))
+            with { TogglProjectId = 77 };
+        TodayViewModel? today = null;
+        var projectsWhenItemsLoaded = -1;
+        var repository = new StubPlanRepository(DailyPlan.Create(date, [stored]),
+            onGet: () => projectsWhenItemsLoaded = today!.TogglProjects.Count);
+        today = new TodayViewModel(repository, date,
+            integrationClients: new ProjectFactory(),
+            settingsStore: new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42 }));
+
+        await today.InitializeAsync();
+
+        Assert.Equal(1, projectsWhenItemsLoaded);
+        var row = Assert.Single(today.Items);
+        Assert.Equal(77, row.TogglProjectId);
+        Assert.Equal("CGM", row.TogglProject);
+    }
+
+    // Clear()-then-add reset any SelectedValue that HAD resolved, so refreshing wiped good selections.
+    [Fact]
+    public async Task LoadProjectsAsync_DoesNotClearTheListWhenTheSameProjectsComeBack()
+    {
+        var today = new TodayViewModel(
+            integrationClients: new ProjectFactory(),
+            settingsStore: new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42 }));
+        await today.LoadProjectsAsync();
+        var firstInstance = today.TogglProjects[0];
+
+        await today.LoadProjectsAsync();
+
+        Assert.Same(firstInstance, today.TogglProjects[0]);
+        Assert.Single(today.TogglProjects);
+    }
+
+    private sealed class StubPlanRepository(DailyPlan plan, Action? onGet = null) : IDailyPlanRepository
+    {
+        public Task<DailyPlan?> GetAsync(DateOnly date, CancellationToken cancellationToken = default)
+        {
+            onGet?.Invoke();
+            return Task.FromResult<DailyPlan?>(date == plan.Date ? plan : null);
+        }
+
+        public Task SaveAsync(DailyPlan value, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
     private sealed class FixedSettingsStore(UserSettings settings) : IUserSettingsStore
     {
         public UserSettings Load() => settings;

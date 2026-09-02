@@ -118,10 +118,13 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
         if (repository is null || isInitialized)
             return;
 
+        // Projects first, deliberately. The Toggl project ComboBox binds SelectedValue to an item's
+        // TogglProjectId over TogglProjects as its ItemsSource; WPF cannot match a SelectedValue
+        // against an empty ItemsSource, drops it silently, and never re-evaluates once the list
+        // fills. Building the rows first therefore left every picker blank.
+        await LoadProjectsAsync(cancellationToken);
         await LoadItemsForCurrentDateAsync(cancellationToken);
         isInitialized = true;
-        if (PersistenceError is null)
-            await LoadProjectsAsync(cancellationToken);
     }
 
     // Raised whenever the user picks a date -- including re-picking the one already shown, which is
@@ -163,6 +166,10 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             else
                 foreach (var item in plan.Items)
                     Items.Add(new PlannedWorkItemViewModel(item.Name, item.JiraIssueKey, item.Comment, item.Duration, item.TogglProject, item.TempoCategory, item.Id, item.Start, item.End, item.IsBillable, item.Status, item.TogglProjectId, item.PostToToggl, item.TogglEntryId, item.Source));
+            // Resolve display names here rather than only after a project load: rows are rebuilt on
+            // every date change and on initialize, and the project list is now loaded first, so this
+            // is the point where both are guaranteed to exist.
+            ApplyProjectNames();
             PersistenceError = null;
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
@@ -185,7 +192,6 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
 
     public async Task LoadProjectsAsync(CancellationToken cancellationToken = default)
     {
-        TogglProjects.Clear();
         ProjectLoadError = null;
         if (integrationClients is null || settingsStore is null) return;
 
@@ -194,8 +200,16 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             var workspaceId = settingsStore.Load().TogglWorkspaceId;
             if (workspaceId is not > 0) return;
             using var toggl = await integrationClients.CreateTogglAsync(cancellationToken);
-            foreach (var project in await toggl.GetProjectsAsync(workspaceId.Value, cancellationToken))
+            var loaded = await toggl.GetProjectsAsync(workspaceId.Value, cancellationToken);
+
+            // Reconciled in place rather than Clear()-then-add: clearing an ItemsSource resets every
+            // ComboBox SelectedValue bound over it, so a refresh used to wipe selections that had
+            // resolved perfectly well.
+            foreach (var gone in TogglProjects.Where(existing => loaded.All(project => project.Id != existing.Id)).ToArray())
+                TogglProjects.Remove(gone);
+            foreach (var project in loaded.Where(project => TogglProjects.All(existing => existing.Id != project.Id)))
                 TogglProjects.Add(project);
+
             ApplyProjectNames();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
