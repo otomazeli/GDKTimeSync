@@ -52,18 +52,61 @@ public sealed class ReviewTaskViewModelTests
         Assert.Equal("Tempo: User is invalid", row.FailureText);
     }
 
+    // Each fixture matches the attempt shape delivery would really produce for that code: delivery is
+    // ordered Toggl -> Jira -> Tempo, so a Jira/Tempo failure can only occur once Toggl has already
+    // succeeded and TogglEntryId is set.
     [Theory]
-    [InlineData(DeliveryFailureCode.TogglFailed, "Toggl: Toggl delivery failed.")]
-    [InlineData(DeliveryFailureCode.JiraFailed, "Jira: Jira delivery failed.")]
-    [InlineData(DeliveryFailureCode.JiraIssueNotFound, "Jira: Jira issue was not found.")]
-    [InlineData(DeliveryFailureCode.TempoFailed, "Tempo: Tempo delivery failed.")]
-    public void WithoutDetailTheFailureTextFallsBackToTheCodedReason(DeliveryFailureCode code, string expected)
+    [InlineData(DeliveryFailureCode.TogglFailed, null, "Toggl: Toggl delivery failed.")]
+    [InlineData(DeliveryFailureCode.JiraFailed, 101L, "Jira: Jira delivery failed.")]
+    [InlineData(DeliveryFailureCode.JiraIssueNotFound, 101L, "Jira: Jira issue was not found.")]
+    [InlineData(DeliveryFailureCode.TempoFailed, 101L, "Tempo: Tempo delivery failed.")]
+    public void WithoutDetailTheFailureTextFallsBackToTheCodedReason(DeliveryFailureCode code, long? togglEntryId, string expected)
     {
         var item = Item();
-        var row = new ReviewTaskViewModel(item, new DeliveryAttempt(item.Id, null, null,
+        var row = new ReviewTaskViewModel(item, new DeliveryAttempt(item.Id, togglEntryId, null,
             DeliveryAttemptStatus.Failed, code, SlackDeliveryState.NotSupported));
 
         Assert.Equal(expected, row.FailureText);
+    }
+
+    [Fact]
+    public void ATogglFailureMarksTogglFailedAndLeavesJiraAndTempoPending()
+    {
+        var item = Item();
+        var row = new ReviewTaskViewModel(item, new DeliveryAttempt(item.Id, null, null,
+            DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed, SlackDeliveryState.NotSupported));
+
+        Assert.Equal(DeliveryMark.Failed, row.Toggl);
+        Assert.Equal(DeliveryMark.Pending, row.Jira);
+        Assert.Equal(DeliveryMark.Pending, row.Tempo);
+    }
+
+    [Theory]
+    [InlineData(DeliveryFailureCode.JiraFailed)]
+    [InlineData(DeliveryFailureCode.JiraIssueNotFound)]
+    public void AJiraFailureMarksTogglDeliveredJiraFailedAndTempoPending(DeliveryFailureCode code)
+    {
+        var item = Item();
+        var row = new ReviewTaskViewModel(item, new DeliveryAttempt(item.Id, 101, null,
+            DeliveryAttemptStatus.Failed, code, SlackDeliveryState.NotSupported));
+
+        Assert.Equal(DeliveryMark.Delivered, row.Toggl);
+        Assert.Equal(DeliveryMark.Failed, row.Jira);
+        Assert.Equal(DeliveryMark.Pending, row.Tempo);
+    }
+
+    // Cancelled blames no step in the derivation table: all three marks stay Pending so a later
+    // change to Mark's failedHere lists cannot silently start blaming one.
+    [Fact]
+    public void ACancelledAttemptLeavesAllThreeMarksPending()
+    {
+        var item = Item();
+        var row = new ReviewTaskViewModel(item, new DeliveryAttempt(item.Id, null, null,
+            DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled, SlackDeliveryState.NotSupported));
+
+        Assert.Equal(DeliveryMark.Pending, row.Toggl);
+        Assert.Equal(DeliveryMark.Pending, row.Jira);
+        Assert.Equal(DeliveryMark.Pending, row.Tempo);
     }
 
     // Regression guard for the Task 1 defect: PostAllCoordinator.RequiresManualReconciliation builds
