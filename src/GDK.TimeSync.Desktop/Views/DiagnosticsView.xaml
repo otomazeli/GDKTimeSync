@@ -1,0 +1,114 @@
+<UserControl x:Class="GDK.TimeSync.Desktop.Views.DiagnosticsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Top">
+            <TextBlock Text="Diagnostics" FontSize="24" FontWeight="SemiBold" />
+            <TextBlock Margin="0,8,0,16" Foreground="DimGray" TextWrapping="Wrap"
+                       Text="Every action and integration call from today. Credentials are never recorded." />
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                <Button Width="110" Command="{Binding CopyAllCommand}" Content="Copy all" />
+                <Button Width="130" Margin="8,0,0,0" Command="{Binding OpenFolderCommand}" Content="Open log folder" />
+                <Button Width="90" Margin="8,0,0,0" Command="{Binding RefreshCommand}" Content="Refresh" />
+            </StackPanel>
+            <TextBlock Margin="0,0,0,10" Text="{Binding StatusText}" Foreground="DimGray" FontSize="11" TextWrapping="Wrap" />
+        </StackPanel>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+            <StackPanel>
+                <ItemsControl ItemsSource="{Binding Entries}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}" FontFamily="Consolas" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,0,0,7" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Separator Margin="0,12,0,8" />
+                <StackPanel DataContext="{Binding LiveValidation}">
+                    <TextBlock Text="Guided integration validation" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Margin="0,4,0,0" Text="Select a local planned item, then explicitly validate each integration step." TextWrapping="Wrap" />
+                    <Button Width="140" Margin="0,8,0,0" HorizontalAlignment="Left" Command="{Binding RunDiagnosticsCommand}">Run diagnostics</Button>
+                    <ItemsControl Margin="0,4,0,0" ItemsSource="{Binding Diagnostics}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Target, StringFormat={}{0}:}" />
+                                    <TextBlock Margin="4,0,0,0" Text="{Binding SafeMessage}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding Items}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="0,0,0,6">
+                                    <TextBlock Text="{Binding JiraIssueKey}" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding Comment}" TextWrapping="Wrap" />
+                                    <Button Width="130" Margin="0,4,0,0" HorizontalAlignment="Left" Command="{Binding DataContext.LiveValidation.SelectItemCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">Select for validation</Button>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <StackPanel Margin="0,4,0,0">
+                        <TextBlock Text="{Binding SelectedItem.JiraIssueKey}" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding SelectedItem.Comment}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding SelectedItem.Duration, StringFormat={}{0:g}}" />
+                        <TextBlock Text="{Binding SelectedItem.Start, StringFormat=Start: {0:t}}" />
+                        <TextBlock Text="{Binding SelectedItem.End, StringFormat=End: {0:t}}" />
+                        <TextBlock Text="{Binding SelectedItem.TogglProject, StringFormat=Toggl project: {0}}" />
+                        <TextBlock Text="{Binding SelectedItem.TempoCategory, StringFormat=Tempo category: {0}}" />
+                        <StackPanel Margin="0,6,0,0" Orientation="Horizontal">
+                            <Button Command="{Binding OpenTogglConfirmationCommand}">Create Toggl entry</Button>
+                            <Button Margin="8,0,0,0" Command="{Binding ValidateJiraCommand}">Validate Jira</Button>
+                            <Button Margin="8,0,0,0" Command="{Binding OpenTempoConfirmationCommand}">Create and verify Tempo</Button>
+                        </StackPanel>
+                    </StackPanel>
+                    <StackPanel Margin="0,8,0,0">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers><DataTrigger Binding="{Binding IsTogglConfirmationVisible}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <TextBlock Text="Create a Toggl entry for this selected item?" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding SelectedItem.JiraIssueKey}" />
+                        <TextBlock Text="{Binding SelectedItem.Comment}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding SelectedItem.Duration, StringFormat={}{0:g}}" />
+                        <TextBlock Text="{Binding SelectedItem.TogglProject, StringFormat=Toggl project: {0}}" />
+                        <TextBlock Text="{Binding SelectedItem.Start, StringFormat=Local start: {0:t}}" />
+                        <TextBlock Text="{Binding SelectedItem.End, StringFormat=Local end: {0:t}}" />
+                        <StackPanel Orientation="Horizontal"><Button Command="{Binding ConfirmTogglCommand}">Confirm Toggl entry</Button><Button Margin="8,0,0,0" Command="{Binding CancelTogglConfirmationCommand}">Cancel</Button></StackPanel>
+                    </StackPanel>
+                    <StackPanel Margin="0,8,0,0">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers><DataTrigger Binding="{Binding IsTempoConfirmationVisible}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <TextBlock Text="Create and verify a Tempo worklog for this selected item?" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding SelectedItem.JiraIssueKey}" />
+                        <TextBlock Text="{Binding SelectedItem.Comment}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding SelectedItem.Duration, StringFormat={}{0:g}}" />
+                        <TextBlock Text="{Binding SelectedItem.Start, StringFormat=Local start: {0:t}}" />
+                        <TextBlock Text="{Binding TempoWorker, StringFormat=Tempo worker: {0}}" />
+                        <TextBlock Text="{Binding TempoBaseUrl, StringFormat=Tempo server: {0}}" />
+                        <TextBlock Text="{Binding TempoConfigurationCategory, StringFormat=Tempo category: {0}}" />
+                        <StackPanel Orientation="Horizontal"><Button Command="{Binding ConfirmTempoCommand}">Confirm Tempo worklog</Button><Button Margin="8,0,0,0" Command="{Binding CancelTempoConfirmationCommand}">Cancel</Button></StackPanel>
+                    </StackPanel>
+                    <Button Width="170" Margin="0,8,0,0" HorizontalAlignment="Left" Command="{Binding CancelOperationCommand}">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers><DataTrigger Binding="{Binding IsInFlight}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                        Cancel current operation
+                    </Button>
+                    <TextBlock Margin="0,8,0,0" Text="{Binding StepStatus}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,4,0,0" Text="{Binding RecoveryMessage}" Foreground="Firebrick" TextWrapping="Wrap" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

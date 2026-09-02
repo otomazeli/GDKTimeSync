@@ -87,6 +87,127 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         Assert.Equal(TimeSpan.FromMinutes(45), request.Stop - request.Start);
     }
 
+    [Theory]
+    [InlineData("toggl", DeliveryFailureCode.TogglFailed)]
+    [InlineData("jira", DeliveryFailureCode.JiraFailed)]
+    [InlineData("tempo", DeliveryFailureCode.TempoFailed)]
+    public async Task DeliverConfirmedAsync_AttributesAClientSetupFailureToTheClientThatFailed(string failing, DeliveryFailureCode expected)
+    {
+        var item = PlannedWorkItem.Create(new DateOnly(2026, 9, 1), "Work", "CGM-1", "Comment",
+            TimeSpan.FromMinutes(30), "CGM", "DEVELOPMENT", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var service = new ConfirmedTaskDeliveryService(
+            new FailingIntegrationClientFactory(failing),
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "planner" }),
+            new InMemoryAttemptRepository());
+
+        var attempt = await service.DeliverConfirmedAsync(item);
+
+        Assert.Equal(DeliveryAttemptStatus.Failed, attempt.Status);
+        Assert.Equal(expected, attempt.FailureCode);
+    }
+
+    [Fact]
+    public async Task DeliverConfirmedAsync_ConvertsACancellationRaisedInsideDeliveryToCancelled()
+    {
+        // A cancellation that surfaces anywhere inside the `using` block -- not just from the three
+        // client-creation calls Task 3 gave their own try/catch -- must still come back as a
+        // Cancelled attempt rather than escaping DeliverConfirmedAsync unhandled. Disposing the
+        // Toggl client after a fully successful delivery is a convenient, real IDisposable-shaped
+        // place to raise that cancellation from inside the block.
+        var item = PlannedWorkItem.Create(new DateOnly(2026, 9, 1), "Work", "CGM-1", "Comment",
+            TimeSpan.FromMinutes(30), "CGM", "DEVELOPMENT", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        using var cts = new CancellationTokenSource();
+        var service = new ConfirmedTaskDeliveryService(
+            new CancelOnDisposeIntegrationClientFactory(cts),
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "planner" }),
+            new StatelessAttemptRepository());
+
+        var attempt = await service.DeliverConfirmedAsync(item, cts.Token);
+
+        Assert.Equal(DeliveryAttemptStatus.Cancelled, attempt.Status);
+        Assert.Equal(DeliveryFailureCode.Cancelled, attempt.FailureCode);
+    }
+
+    // Wraps a real (successful) Toggl client but cancels the shared token and raises
+    // OperationCanceledException from Dispose(), simulating a cancellation raised inside the
+    // `using` block after the client-creation try/catches have already succeeded.
+    private sealed class CancelOnDisposeTogglClient(ITogglClient inner, CancellationTokenSource cancelOnDispose) : ITogglClient
+    {
+        public Task<IReadOnlyList<TogglTimeEntry>> GetTimeEntriesAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
+            inner.GetTimeEntriesAsync(startDate, endDate, cancellationToken);
+        public Task<IReadOnlyList<TogglProject>> GetProjectsAsync(long workspaceId, CancellationToken cancellationToken = default) =>
+            inner.GetProjectsAsync(workspaceId, cancellationToken);
+        public Task<TogglTimeEntry> CreateTimeEntryAsync(TogglCreateTimeEntryRequest request, CancellationToken cancellationToken = default) =>
+            inner.CreateTimeEntryAsync(request, cancellationToken);
+        public void Dispose()
+        {
+            inner.Dispose();
+            cancelOnDispose.Cancel();
+            throw new OperationCanceledException(cancelOnDispose.Token);
+        }
+    }
+
+    private sealed class CancelOnDisposeIntegrationClientFactory(CancellationTokenSource cancelOnDispose) : IIntegrationClientFactory
+    {
+        private readonly RecordingIntegrationClientFactory inner = new();
+
+        public async Task<ITogglClient> CreateTogglAsync(CancellationToken cancellationToken = default) =>
+            new CancelOnDisposeTogglClient(await inner.CreateTogglAsync(cancellationToken), cancelOnDispose);
+        public Task<JiraClient> CreateJiraAsync(CancellationToken cancellationToken = default) => inner.CreateJiraAsync(cancellationToken);
+        public Task<TempoClient> CreateTempoAsync(CancellationToken cancellationToken = default) => inner.CreateTempoAsync(cancellationToken);
+    }
+
+    // Never actually persists -- isolates the assertion to what RecordSetupFailureAsync builds when
+    // a cancellation is caught, regardless of whatever PostAllCoordinator already saved for the item.
+    private sealed class StatelessAttemptRepository : IDeliveryAttemptRepository
+    {
+        public Task<DeliveryAttempt?> GetAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<DeliveryAttempt?>(null);
+        public Task<IReadOnlyList<DeliveryAttempt>> ListAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<DeliveryAttempt>>([]);
+        public Task<DeliveryAttemptClaim> ClaimAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new DeliveryAttemptClaim(new DeliveryAttempt(id, null, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported), true));
+        public Task SaveAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    // Fails exactly one client construction so the resulting failure code identifies which one.
+    // CreateJiraAsync only fails for the "jira" case: for "tempo" it must succeed with a real
+    // JiraClient (a fake can't stand in for the sealed type), so CreateTempoAsync is the one that fails.
+    private sealed class FailingIntegrationClientFactory(string failing) : IIntegrationClientFactory
+    {
+        public Task<ITogglClient> CreateTogglAsync(CancellationToken cancellationToken = default) =>
+            failing == "toggl"
+                ? throw new InvalidOperationException("Toggl configuration is not configured.")
+                : Task.FromResult<ITogglClient>(new UnusedTogglClient());
+
+        public Task<JiraClient> CreateJiraAsync(CancellationToken cancellationToken = default) =>
+            failing == "jira"
+                ? throw new InvalidOperationException("Jira configuration is not configured.")
+                : Task.FromResult(new JiraClient(
+                    new HttpClient(new NeverCalledHttpMessageHandler()) { BaseAddress = new Uri("https://jira.example.test") },
+                    new JiraOptions { BaseUrl = "https://jira.example.test", PersonalAccessToken = "unit-token" },
+                    new IssueKeyValidator(new IssueKeyValidationOptions())));
+
+        public Task<TempoClient> CreateTempoAsync(CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Tempo configuration is not configured.");
+    }
+
+    // Delivery never reaches this client's members because a later construction fails first.
+    private sealed class UnusedTogglClient : ITogglClient
+    {
+        public Task<IReadOnlyList<TogglTimeEntry>> GetTimeEntriesAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<IReadOnlyList<TogglProject>> GetProjectsAsync(long workspaceId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<TogglTimeEntry> CreateTimeEntryAsync(TogglCreateTimeEntryRequest request, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public void Dispose() { }
+    }
+
+    private sealed class NeverCalledHttpMessageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("HTTP should not be called.");
+    }
+
     private sealed class FixedSettingsStore(UserSettings settings) : IUserSettingsStore
     {
         public UserSettings Load() => settings;

@@ -34,7 +34,15 @@ public sealed record DeliveryAttempt(
     SlackDeliveryState SlackState,
     DateTimeOffset? TogglWriteRecordedAtUtc = null,
     DateTimeOffset? TempoWriteRecordedAtUtc = null,
-    DateTimeOffset? ReconciliationRecordedAtUtc = null);
+    DateTimeOffset? ReconciliationRecordedAtUtc = null)
+{
+    // The service's own explanation of a failure -- "User is invalid", the field Tempo rejected.
+    // Deliberately NOT persisted: SqliteDeliveryAttemptRepository reads and writes named columns, so
+    // this is dropped on save and absent on load. It answers "why did this just fail?" while the user
+    // is still looking at the row; a row rehydrated on a later launch falls back to FailureCode and
+    // the audit log, which does keep the detail.
+    public string? FailureDetail { get; init; }
+}
 
 public sealed record DeliveryAttemptClaim(DeliveryAttempt Attempt, bool IsAcquired);
 
@@ -44,4 +52,14 @@ public interface IDeliveryAttemptRepository
     Task<IReadOnlyList<DeliveryAttempt>> ListAsync(CancellationToken cancellationToken = default);
     Task<DeliveryAttemptClaim> ClaimAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default);
     Task SaveAsync(DeliveryAttempt attempt, CancellationToken cancellationToken = default);
+}
+
+// History needs the human-readable task an attempt belongs to; a raw attempt only carries its
+// item's GUID. PlanDate/JiraIssueKey/Description are null/empty when the planned item behind an
+// old attempt no longer exists.
+public sealed record DeliveryHistoryEntry(DeliveryAttempt Attempt, DateOnly? PlanDate, string JiraIssueKey, string Description);
+
+public interface IDeliveryHistoryRepository
+{
+    Task<IReadOnlyList<DeliveryHistoryEntry>> ListHistoryAsync(CancellationToken cancellationToken = default);
 }

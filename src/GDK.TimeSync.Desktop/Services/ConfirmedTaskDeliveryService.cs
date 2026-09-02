@@ -9,7 +9,8 @@ namespace GDK.TimeSync.Desktop.Services;
 public sealed class ConfirmedTaskDeliveryService(
     IIntegrationClientFactory clients,
     IUserSettingsStore settings,
-    IDeliveryAttemptRepository attempts) : IConfirmedTaskDeliveryService
+    IDeliveryAttemptRepository attempts,
+    IAuditLog? auditLog = null) : IConfirmedTaskDeliveryService
 {
     // Shared across calls (this service is a DI singleton) so a reconciliation record raised by one
     // delivery -- built with its own short-lived PostAllCoordinator and API clients -- survives to
@@ -19,6 +20,14 @@ public sealed class ConfirmedTaskDeliveryService(
     public async Task<DeliveryAttempt> DeliverConfirmedAsync(PlannedWorkItem item, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(item);
+        auditLog?.Write(AuditLevel.Info, "Delivery", $"Confirmed {item.Id} {item.JiraIssueKey} {item.Day}");
+        var attempt = await DeliverAsync(item, cancellationToken);
+        auditLog?.Write(attempt.FailureCode is not null ? AuditLevel.Error : AuditLevel.Info, "Delivery", $"{item.Id} -> {attempt.Status} {attempt.FailureCode}");
+        return attempt;
+    }
+
+    private async Task<DeliveryAttempt> DeliverAsync(PlannedWorkItem item, CancellationToken cancellationToken)
+    {
         UserSettings configuration;
         try
         {
@@ -31,26 +40,39 @@ public sealed class ConfirmedTaskDeliveryService(
         if (configuration.TogglWorkspaceId is not > 0 || string.IsNullOrWhiteSpace(configuration.JiraUser))
             return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TogglFailed);
 
+        ITogglClient toggl;
+        JiraClient jira;
+        TempoClient tempo;
+        try { toggl = await clients.CreateTogglAsync(cancellationToken); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.Cancelled); }
+        catch { return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TogglFailed); }
+
+        try { jira = await clients.CreateJiraAsync(cancellationToken); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.Cancelled); }
+        catch { toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.JiraFailed); }
+
+        try { tempo = await clients.CreateTempoAsync(cancellationToken); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { jira.Dispose(); toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.Cancelled); }
+        catch { jira.Dispose(); toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TempoFailed); }
+
         try
         {
-            using var toggl = await clients.CreateTogglAsync(cancellationToken);
-            using var jira = await clients.CreateJiraAsync(cancellationToken);
-            using var tempo = await clients.CreateTempoAsync(cancellationToken);
-            var coordinator = new PostAllCoordinator(
-                new TogglDeliveryClient(toggl, configuration.TogglWorkspaceId.Value),
-                new JiraDeliveryClient(jira),
-                new TempoDeliveryClient(tempo, configuration.JiraUser),
-                attempts,
-                pendingReconciliation);
-            return (await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]), cancellationToken)).Attempts.Single();
+            using (toggl)
+            using (jira)
+            using (tempo)
+            {
+                var coordinator = new PostAllCoordinator(
+                    new TogglDeliveryClient(toggl, configuration.TogglWorkspaceId.Value),
+                    new JiraDeliveryClient(jira),
+                    new TempoDeliveryClient(tempo, configuration.JiraUser),
+                    attempts,
+                    pendingReconciliation);
+                return (await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]), cancellationToken)).Attempts.Single();
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.Cancelled);
-        }
-        catch
-        {
-            return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TogglFailed);
         }
     }
 

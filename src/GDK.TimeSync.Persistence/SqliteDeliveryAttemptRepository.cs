@@ -2,7 +2,7 @@ using GDK.TimeSync.Core;
 
 namespace GDK.TimeSync.Persistence;
 
-public sealed class SqliteDeliveryAttemptRepository(SqliteDatabase database) : IDeliveryAttemptRepository
+public sealed class SqliteDeliveryAttemptRepository(SqliteDatabase database) : IDeliveryAttemptRepository, IDeliveryHistoryRepository
 {
     public async Task<DeliveryAttempt?> GetAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default)
     {
@@ -23,17 +23,33 @@ public sealed class SqliteDeliveryAttemptRepository(SqliteDatabase database) : I
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var attempts = new List<DeliveryAttempt>();
         while (await reader.ReadAsync(cancellationToken))
-            attempts.Add(new DeliveryAttempt(
-                Guid.Parse(reader.GetString(0)),
-                reader.IsDBNull(1) ? null : reader.GetInt64(1),
-                reader.IsDBNull(2) ? null : reader.GetInt64(2),
-                (DeliveryAttemptStatus)reader.GetInt32(3),
-                reader.IsDBNull(4) ? null : (DeliveryFailureCode)reader.GetInt32(4),
-                (SlackDeliveryState)reader.GetInt32(5),
-                ReadTimestamp(reader, 6),
-                ReadTimestamp(reader, 7),
-                ReadTimestamp(reader, 8)));
+            attempts.Add(ReadAttempt(reader));
         return attempts;
+    }
+
+    public async Task<IReadOnlyList<DeliveryHistoryEntry>> ListHistoryAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await database.OpenReadOnlyConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        // LEFT JOIN: an attempt outlives its planned item if the plan row was replaced, and such a
+        // row must still be listed (with no date/description) rather than disappear from history.
+        command.CommandText = """
+            SELECT a.planned_work_item_id, a.toggl_entry_id, a.tempo_worklog_id, a.status, a.failure_code, a.slack_state,
+                   a.toggl_write_recorded_at_utc, a.tempo_write_recorded_at_utc, a.reconciliation_recorded_at_utc,
+                   i.plan_date, i.jira_issue_key, i.comment
+            FROM delivery_attempts a
+            LEFT JOIN planned_work_items i ON i.id = a.planned_work_item_id
+            ORDER BY i.plan_date DESC, i.start_time, i.jira_issue_key
+            """;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var entries = new List<DeliveryHistoryEntry>();
+        while (await reader.ReadAsync(cancellationToken))
+            entries.Add(new DeliveryHistoryEntry(
+                ReadAttempt(reader),
+                reader.IsDBNull(9) ? null : DateOnly.Parse(reader.GetString(9), System.Globalization.CultureInfo.InvariantCulture),
+                reader.IsDBNull(10) ? "" : reader.GetString(10),
+                reader.IsDBNull(11) ? "" : reader.GetString(11)));
+        return entries;
     }
 
     public async Task<DeliveryAttemptClaim> ClaimAsync(Guid plannedWorkItemId, CancellationToken cancellationToken = default)
@@ -111,6 +127,17 @@ public sealed class SqliteDeliveryAttemptRepository(SqliteDatabase database) : I
         command.Parameters.AddWithValue("$reconciliationAt", WriteTimestamp(attempt.ReconciliationRecordedAtUtc));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
+
+    private static DeliveryAttempt ReadAttempt(Microsoft.Data.Sqlite.SqliteDataReader reader) =>
+        new(Guid.Parse(reader.GetString(0)),
+            reader.IsDBNull(1) ? null : reader.GetInt64(1),
+            reader.IsDBNull(2) ? null : reader.GetInt64(2),
+            (DeliveryAttemptStatus)reader.GetInt32(3),
+            reader.IsDBNull(4) ? null : (DeliveryFailureCode)reader.GetInt32(4),
+            (SlackDeliveryState)reader.GetInt32(5),
+            ReadTimestamp(reader, 6),
+            ReadTimestamp(reader, 7),
+            ReadTimestamp(reader, 8));
 
     private static DateTimeOffset? ReadTimestamp(Microsoft.Data.Sqlite.SqliteDataReader reader, int ordinal) =>
         reader.IsDBNull(ordinal) ? null : DateTimeOffset.Parse(reader.GetString(ordinal), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);

@@ -40,7 +40,7 @@ public sealed class EndToEndDryRunTests
         {
             var attempt = await attempts.GetAsync(item.Id);
             var postedToJira = attempt is { Status: DeliveryAttemptStatus.Succeeded, TempoWorklogId: not null };
-            completedItems.Add(new SlackDailyCompletedItem(item.TogglProject, item.JiraIssueKey, item.Comment, item.Status, postedToJira));
+            completedItems.Add(new SlackDailyCompletedItem(item.JiraIssueKey, item.Comment, item.Status, postedToJira));
         }
 
         var composer = new SlackDailyUpdateComposer();
@@ -48,7 +48,8 @@ public sealed class EndToEndDryRunTests
         var slackUpdate = composer.Compose(date, completedItems, options);
 
         Assert.NotNull(slackUpdate);
-        Assert.DoesNotContain("not posted in Jira", slackUpdate!.SlackExtraLines, StringComparison.Ordinal);
+        Assert.DoesNotContain("⚪", slackUpdate!.SlackExtraLines, StringComparison.Ordinal);
+        Assert.Contains("🔷", slackUpdate.SlackExtraLines, StringComparison.Ordinal);
 
         var claimed = await dailyDeliveries.TryClaimAsync(slackUpdate.Date, slackUpdate.ContentFingerprint);
         Assert.True(claimed);
@@ -83,13 +84,13 @@ public sealed class EndToEndDryRunTests
         var postedToJira = attempt is { Status: DeliveryAttemptStatus.Succeeded, TempoWorklogId: not null };
         var completedItems = new List<SlackDailyCompletedItem>
         {
-            new(item.TogglProject, item.JiraIssueKey, item.Comment, item.Status, postedToJira)
+            new(item.JiraIssueKey, item.Comment, item.Status, postedToJira)
         };
 
         var slackUpdate = new SlackDailyUpdateComposer().Compose(date, completedItems, new SlackDailyUpdateOptions("Daily update", "Completed tasks"));
 
         Assert.NotNull(slackUpdate);
-        Assert.Contains("(not posted in Jira)", slackUpdate!.SlackExtraLines, StringComparison.Ordinal);
+        Assert.Contains("⚪", slackUpdate!.SlackExtraLines, StringComparison.Ordinal);
     }
 
     private sealed class RecordingTogglClient(List<string> events) : IPlannedItemTogglClient

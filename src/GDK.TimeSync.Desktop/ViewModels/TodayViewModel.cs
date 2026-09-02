@@ -29,15 +29,22 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     private Guid? suggestedItemId;
     private readonly IIntegrationClientFactory? integrationClients;
     private readonly IUserSettingsStore? settingsStore;
+    private readonly IAuditLog? auditLog;
+    private readonly IJiraIssueLookup? jiraLookup;
+    private readonly IssueKeyValidator? issueKeyValidator;
     private string? projectLoadError;
+    private string? jiraLookupError;
 
-    public TodayViewModel(IDailyPlanRepository? repository = null, DateOnly? date = null, IAiConsentService? aiConsentService = null, IAssistedTextGenerator? assistedTextGenerator = null, IIntegrationClientFactory? integrationClients = null, IUserSettingsStore? settingsStore = null)
+    public TodayViewModel(IDailyPlanRepository? repository = null, DateOnly? date = null, IAiConsentService? aiConsentService = null, IAssistedTextGenerator? assistedTextGenerator = null, IIntegrationClientFactory? integrationClients = null, IUserSettingsStore? settingsStore = null, IAuditLog? auditLog = null, IJiraIssueLookup? jiraLookup = null, IssueKeyValidator? issueKeyValidator = null)
     {
         this.repository = repository;
         this.aiConsentService = aiConsentService;
         this.assistedTextGenerator = assistedTextGenerator;
         this.integrationClients = integrationClients;
         this.settingsStore = settingsStore;
+        this.auditLog = auditLog;
+        this.jiraLookup = jiraLookup;
+        this.issueKeyValidator = issueKeyValidator ?? new IssueKeyValidator(new IssueKeyValidationOptions());
         currentDate = date ?? DateOnly.FromDateTime(DateTime.Today);
         Items.CollectionChanged += OnItemsChanged;
         AddItemCommand = new RelayCommand(_ => AddItem());
@@ -90,12 +97,21 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     public IReadOnlyList<WorkStatusOption> WorkStatuses => WorkStatusOption.All;
     public string? PersistenceError { get => persistenceError; private set => SetField(ref persistenceError, value); }
     public string? ProjectLoadError { get => projectLoadError; private set => SetField(ref projectLoadError, value); }
+    public string? JiraLookupError { get => jiraLookupError; private set => SetField(ref jiraLookupError, value); }
     public PlannedWorkItemViewModel? SelectedItem { get => selectedItem; set => SetField(ref selectedItem, value); }
     public DescriptionSuggestionRequest? PendingAiRequest { get => pendingAiRequest; private set => SetField(ref pendingAiRequest, value); }
     public string? SuggestedDescription { get => suggestedDescription; private set => SetSuggestedDescription(value); }
     public bool HasSuggestedDescription => !string.IsNullOrWhiteSpace(SuggestedDescription);
     public string? AiStatus { get => aiStatus; private set => SetField(ref aiStatus, value); }
     public bool IsAiConsentVisible { get => isAiConsentVisible; private set => SetField(ref isAiConsentVisible, value); }
+
+    // AI assistance is off by default and has no provider behind it, so the draft button stays
+    // hidden until the user opts in from Settings rather than sitting there always failing.
+    public bool IsAiEnabled => aiConsentService?.IsEnabled == true;
+
+    // Settings is a separate dialog that does not push changes here; the shell re-asks on every
+    // navigation to Today, which is the only way back to this page after saving settings.
+    public void RefreshAiAvailability() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsAiEnabled)));
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -108,13 +124,23 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             await LoadProjectsAsync(cancellationToken);
     }
 
+    // Raised whenever the user picks a date -- including re-picking the one already shown, which is
+    // how "Today" is used as a refresh. MainViewModel listens and pulls that date from Toggl:
+    // loading the local plan alone left a freshly-picked day showing stale rows until the auto-sync
+    // interval happened to elapse, which read as "sync stopped working".
+    public event EventHandler? DateSelected;
+
     public async Task SelectDateAsync(DateOnly newDate, CancellationToken cancellationToken = default)
     {
-        if (newDate == Date) return;
+        if (newDate != Date)
+        {
+            await FlushAsync();
+            Date = newDate;
+            await LoadItemsForCurrentDateAsync(cancellationToken);
+        }
 
-        await FlushAsync();
-        Date = newDate;
-        await LoadItemsForCurrentDateAsync(cancellationToken);
+        DateSelected?.Invoke(this, EventArgs.Empty);
+        auditLog?.Write(AuditLevel.Info, "Today", $"Date selected: {Date}");
     }
 
     private async Task LoadItemsForCurrentDateAsync(CancellationToken cancellationToken)
@@ -226,8 +252,76 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     private void AddItem()
     {
         var item = new PlannedWorkItemViewModel();
+        ApplyDefaultTogglProject(item);
         Items.Add(item);
         SelectedItem = item;
+    }
+
+    // Jira has no notion of a Toggl project, so a new row falls back to the configured default.
+    private void ApplyDefaultTogglProject(PlannedWorkItemViewModel item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.TogglProject)) return;
+
+        var name = settingsStore?.Load().DefaultTogglProject;
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        item.TogglProject = name;
+        // Delivery posts by id, not name. If the default names a project this workspace does not have
+        // (renamed, deleted, or dropped for having no readable name), the name still shows in the grid
+        // and the id stays null -- the same state an unmatched project has always had here.
+        item.TogglProjectId = TogglProjects.FirstOrDefault(project =>
+            string.Equals(project.Name, name, StringComparison.OrdinalIgnoreCase))?.Id;
+    }
+
+    // Fired when the user leaves the Jira key field. Only ever fills a row the user has just started:
+    // one they typed themselves, carrying nothing but a key. A row imported from Toggl already has a
+    // better description and project than Jira could give, and an edited row must never be rewritten.
+    public async Task LookUpJiraKeyAsync(PlannedWorkItemViewModel item, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        JiraLookupError = null;
+
+        if (jiraLookup is null || item.Source == ItemSource.Toggl) return;
+        if (!string.IsNullOrWhiteSpace(item.Name) || !string.IsNullOrWhiteSpace(item.Description) || !string.IsNullOrWhiteSpace(item.TogglProject)) return;
+
+        var key = item.JiraIssueKey?.Trim() ?? "";
+        // Validate before spending a round trip: the key field fires this on every focus loss,
+        // including halfway through typing one.
+        if (key.Length == 0 || issueKeyValidator?.IsValid(key) != true) return;
+
+        string? summary;
+        try
+        {
+            summary = await jiraLookup.GetSummaryAsync(key, cancellationToken);
+        }
+        catch
+        {
+            // Jira being unreachable must not interrupt typing. The audit log already records why.
+            return;
+        }
+
+        // The key may have moved on while the request was out; applying a stale summary would
+        // silently describe the row as the wrong issue.
+        if (!string.Equals(item.JiraIssueKey?.Trim(), key, StringComparison.Ordinal)) return;
+
+        if (summary is null)
+        {
+            JiraLookupError = $"{key} was not found in Jira.";
+            return;
+        }
+
+        item.Name = summary;
+        item.Description = summary;
+        if (string.IsNullOrWhiteSpace(item.TempoCategory))
+            item.TempoCategory = DefaultTempoCategory();
+        ApplyDefaultTogglProject(item);
+        auditLog?.Write(AuditLevel.Info, "Today", $"Filled {key} from Jira");
+    }
+
+    private string DefaultTempoCategory()
+    {
+        var configured = settingsStore?.Load().DefaultTempoWorkCategory;
+        return string.IsNullOrWhiteSpace(configured) ? "DEVELOPMENT" : configured;
     }
 
     private void RemoveItem(object? item)

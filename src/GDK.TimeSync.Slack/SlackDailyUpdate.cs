@@ -4,7 +4,7 @@ using GDK.TimeSync.Core;
 
 namespace GDK.TimeSync.Slack;
 
-public sealed record SlackDailyCompletedItem(string TogglProject, string JiraIssueKey, string Description, WorkStatus Status, bool PostedToJira = true);
+public sealed record SlackDailyCompletedItem(string JiraIssueKey, string Description, WorkStatus Status, bool PostedToJira = true);
 
 public sealed record SlackDailyUpdateOptions(string Title, string Header, IReadOnlyList<string>? ExtraLines = null, string JiraUser = "");
 

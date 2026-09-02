@@ -1,13 +1,14 @@
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
 
 namespace GDK.TimeSync.Desktop.ViewModels;
 
 public sealed record ReminderModeOption(EndOfDayReminderMode Value, string Label);
 
-public sealed class SettingsViewModel(ICredentialStore credentials, IUserSettingsStore settings, IConfigurationStateService configurationState) : INotifyPropertyChanged
+public sealed class SettingsViewModel(ICredentialStore credentials, IUserSettingsStore settings, IConfigurationStateService configurationState, IAuditLog? auditLog = null) : INotifyPropertyChanged
 {
     private bool isTogglTokenConfigured;
     private bool isJiraPatConfigured;
@@ -19,6 +20,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
     private string reviewReminderTime = "16:00";
     private EndOfDayReminderMode endOfDayReminderMode = EndOfDayReminderMode.Both;
     private string defaultTempoWorkCategory = "DEVELOPMENT";
+    private string defaultTogglProject = "";
     private string slackTitle = "Daily update";
     private string slackTaskHeading = "Completed tasks";
     private string slackExtraLines = string.Empty;
@@ -89,6 +91,12 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         set => SetField(ref defaultTempoWorkCategory, value);
     }
 
+    public string DefaultTogglProject
+    {
+        get => defaultTogglProject;
+        set => SetField(ref defaultTogglProject, value);
+    }
+
     public bool AiEnabled
     {
         get => aiEnabled;
@@ -133,6 +141,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             ReviewReminderTime = ReviewReminderTime,
             EndOfDayReminderMode = EndOfDayReminderMode,
             DefaultTempoWorkCategory = DefaultTempoWorkCategory,
+            DefaultTogglProject = DefaultTogglProject,
             AiEnabled = AiEnabled,
             AutoSyncEnabled = AutoSyncEnabled,
             SyncIntervalMinutes = SyncIntervalMinutes,
@@ -150,6 +159,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             ReviewReminderTime = ReviewReminderTime,
             EndOfDayReminderMode = EndOfDayReminderMode,
             DefaultTempoWorkCategory = DefaultTempoWorkCategory,
+            DefaultTogglProject = DefaultTogglProject,
             AiEnabled = AiEnabled,
             AutoSyncEnabled = AutoSyncEnabled,
             SyncIntervalMinutes = SyncIntervalMinutes,
@@ -180,11 +190,19 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             ReviewReminderTime = normalizedReviewReminderTime,
             EndOfDayReminderMode = EndOfDayReminderModes.Normalize(proposedSettings.EndOfDayReminderMode),
             DefaultTempoWorkCategory = proposedSettings.DefaultTempoWorkCategory.Trim(),
+            DefaultTogglProject = proposedSettings.DefaultTogglProject.Trim(),
             SlackTitle = NormalizeSlackText(proposedSettings.SlackTitle),
             SlackTaskHeading = NormalizeSlackText(proposedSettings.SlackTaskHeading),
             SlackExtraLines = proposedSettings.SlackExtraLines.Select(NormalizeSlackText).Where(line => line.Length > 0).ToArray()
         };
         UserSettingsService.ValidateSlackPresentation(normalizedSettings);
+
+        // Read purely to name the changed fields in the audit entry. A diagnostic must never be
+        // able to abort the save -- Load() only catches JsonException, so an IO or access failure
+        // reading settings.json would otherwise take the credential writes down with it.
+        UserSettings previousSettings;
+        try { previousSettings = settings.Load(); }
+        catch { previousSettings = new UserSettings(); }
 
         IsSaving = true;
         try
@@ -212,6 +230,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
                 settings.Save(normalizedSettings);
             }
             catch (Exception exception) { throw new SettingsSaveException("Credentials may have been saved, but non-secret settings could not be saved.", exception); }
+            auditLog?.Write(AuditLevel.Info, "Settings", $"Saved: {DescribeChangedFields(previousSettings, normalizedSettings)}");
             await configurationState.RefreshAsync(cancellationToken);
             await UpdateCredentialStatusAsync(cancellationToken);
             LoadNonSecretSettings(normalizedSettings);
@@ -230,6 +249,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         ReviewReminderTime = currentSettings.ReviewReminderTime;
         EndOfDayReminderMode = EndOfDayReminderModes.Normalize(currentSettings.EndOfDayReminderMode);
         DefaultTempoWorkCategory = currentSettings.DefaultTempoWorkCategory;
+        DefaultTogglProject = currentSettings.DefaultTogglProject;
         AiEnabled = currentSettings.AiEnabled;
         AutoSyncEnabled = currentSettings.AutoSyncEnabled;
         SyncIntervalMinutes = currentSettings.SyncIntervalMinutes;
@@ -252,6 +272,27 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
     }
 
     private static IReadOnlyList<string> SplitSlackLines(string value) => value.Split(["\r\n", "\n"], StringSplitOptions.None);
+
+    // Field names only, never values -- the point is an audit trail of what changed, not a record of
+    // Jira URLs, workspace IDs, or Slack presentation text.
+    private static string DescribeChangedFields(UserSettings previous, UserSettings updated)
+    {
+        var changed = new List<string>();
+        if (previous.JiraBaseUrl != updated.JiraBaseUrl) changed.Add(nameof(UserSettings.JiraBaseUrl));
+        if (previous.JiraUser != updated.JiraUser) changed.Add(nameof(UserSettings.JiraUser));
+        if (previous.TogglWorkspaceId != updated.TogglWorkspaceId) changed.Add(nameof(UserSettings.TogglWorkspaceId));
+        if (previous.ReviewReminderTime != updated.ReviewReminderTime) changed.Add(nameof(UserSettings.ReviewReminderTime));
+        if (previous.EndOfDayReminderMode != updated.EndOfDayReminderMode) changed.Add(nameof(UserSettings.EndOfDayReminderMode));
+        if (previous.DefaultTempoWorkCategory != updated.DefaultTempoWorkCategory) changed.Add(nameof(UserSettings.DefaultTempoWorkCategory));
+        if (previous.DefaultTogglProject != updated.DefaultTogglProject) changed.Add(nameof(UserSettings.DefaultTogglProject));
+        if (previous.AiEnabled != updated.AiEnabled) changed.Add(nameof(UserSettings.AiEnabled));
+        if (previous.AutoSyncEnabled != updated.AutoSyncEnabled) changed.Add(nameof(UserSettings.AutoSyncEnabled));
+        if (previous.SyncIntervalMinutes != updated.SyncIntervalMinutes) changed.Add(nameof(UserSettings.SyncIntervalMinutes));
+        if (previous.SlackTitle != updated.SlackTitle) changed.Add(nameof(UserSettings.SlackTitle));
+        if (previous.SlackTaskHeading != updated.SlackTaskHeading) changed.Add(nameof(UserSettings.SlackTaskHeading));
+        if (!previous.SlackExtraLines.SequenceEqual(updated.SlackExtraLines)) changed.Add(nameof(UserSettings.SlackExtraLines));
+        return changed.Count > 0 ? string.Join(", ", changed) : "(no fields changed)";
+    }
 
     private static string NormalizeSlackText(string? value)
     {

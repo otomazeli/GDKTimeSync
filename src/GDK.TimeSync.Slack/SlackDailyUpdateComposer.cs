@@ -21,10 +21,9 @@ public sealed class SlackDailyUpdateComposer
         foreach (var item in completedItems)
         {
             ArgumentNullException.ThrowIfNull(item);
-            var line = $"{item.TogglProject} | {item.JiraIssueKey} {item.Description} | *{DisplayName(item.Status)}*";
-            if (!item.PostedToJira)
-                line += " (not posted in Jira)";
-            lines.Add(line);
+            // The Jira mark is always present: a reader skimming the channel should never have to
+            // notice something absent to know a task has not reached Jira yet.
+            lines.Add($"{item.JiraIssueKey} {item.Description} | {WorkStatusDisplay.Emoji(item.Status)} {JiraMark(item.PostedToJira)}");
         }
 
         return new SlackDailyUpdate(date, options?.Title ?? "", options?.Header ?? "", string.Join("\n", lines), options?.JiraUser ?? "");
@@ -36,13 +35,5 @@ public sealed class SlackDailyUpdateComposer
             lines.Add(value);
     }
 
-    private static string DisplayName(WorkStatus status) => status switch
-    {
-        WorkStatus.CodeReview => "Code review",
-        WorkStatus.Analyzing => "Analyzing",
-        WorkStatus.Done => "Done",
-        WorkStatus.InProgress => "In Progress",
-        WorkStatus.Waiting => "Waiting",
-        _ => throw new ArgumentOutOfRangeException(nameof(status))
-    };
+    private static string JiraMark(bool postedToJira) => postedToJira ? "🔷" : "⚪";
 }

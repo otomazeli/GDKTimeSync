@@ -17,6 +17,10 @@ public partial class App : System.Windows.Application
     private ITogglAutoSyncService? togglAutoSyncService;
     private volatile bool isExiting;
 
+    public static string LogDirectory { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "GDK", "TimeSync", "logs");
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -26,6 +30,9 @@ public partial class App : System.Windows.Application
         ConfigureServices(services);
 
         serviceProvider = services.BuildServiceProvider();
+        var auditLog = serviceProvider.GetRequiredService<IAuditLog>();
+        (auditLog as FileAuditLog)?.DeleteFilesOlderThan(14);
+        auditLog.Write(AuditLevel.Info, "App", $"Started version {typeof(App).Assembly.GetName().Version} — log at {LogDirectory}");
         // Must run before StartAsync: CheckNow() inside it can raise ReviewDue synchronously,
         // and HandleReviewReminderAsync silently drops the reminder if trayIcon isn't set yet.
         InitializeTrayIcon();
@@ -48,10 +55,16 @@ public partial class App : System.Windows.Application
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "GDK TimeSync",
             "timesync.db"));
-        services.AddHttpClient(IntegrationClientFactory.TogglHttpClientName);
-        services.AddHttpClient(IntegrationClientFactory.JiraHttpClientName);
-        services.AddHttpClient(IntegrationClientFactory.TempoHttpClientName);
-        services.AddHttpClient(SlackClientFactory.HttpClientName);
+        services.AddSingleton<IAuditLog>(_ => new FileAuditLog(LogDirectory));
+
+        services.AddHttpClient(IntegrationClientFactory.TogglHttpClientName)
+            .AddHttpMessageHandler(provider => new AuditLoggingHandler(provider.GetRequiredService<IAuditLog>(), IntegrationClientFactory.TogglHttpClientName));
+        services.AddHttpClient(IntegrationClientFactory.JiraHttpClientName)
+            .AddHttpMessageHandler(provider => new AuditLoggingHandler(provider.GetRequiredService<IAuditLog>(), IntegrationClientFactory.JiraHttpClientName));
+        services.AddHttpClient(IntegrationClientFactory.TempoHttpClientName)
+            .AddHttpMessageHandler(provider => new AuditLoggingHandler(provider.GetRequiredService<IAuditLog>(), IntegrationClientFactory.TempoHttpClientName));
+        services.AddHttpClient(SlackClientFactory.HttpClientName)
+            .AddHttpMessageHandler(provider => new AuditLoggingHandler(provider.GetRequiredService<IAuditLog>(), SlackClientFactory.HttpClientName, redactUri: true));
         services.AddSingleton<UserSettingsService>();
         services.AddSingleton<IUserSettingsStore>(provider => provider.GetRequiredService<UserSettingsService>());
         services.AddSingleton<IAiConsentService, AiConsentService>();
@@ -66,6 +79,7 @@ public partial class App : System.Windows.Application
             null,
             null,
             provider));
+        services.AddSingleton<IJiraIssueLookup, JiraIssueLookup>();
         services.AddSingleton<IIntegrationDiagnosticsService, IntegrationDiagnosticsService>();
         services.AddSingleton<ILiveIntegrationValidationService, LiveIntegrationValidationService>();
         services.AddSingleton<IConfirmedTaskDeliveryService, ConfirmedTaskDeliveryService>();
@@ -89,6 +103,13 @@ public partial class App : System.Windows.Application
         services.AddSingleton<TemplatesViewModel>();
         RegisterReviewServices(services);
         services.AddSingleton<HistoryViewModel>();
+        services.AddSingleton(_ => new AuditLogReader(LogDirectory));
+        services.AddSingleton<DiagnosticsViewModel>(provider => new DiagnosticsViewModel(
+            provider.GetRequiredService<AuditLogReader>(),
+            provider.GetRequiredService<IClipboardService>(),
+            provider.GetRequiredService<TodayViewModel>(),
+            provider.GetRequiredService<IIntegrationDiagnosticsService>(),
+            provider.GetRequiredService<ILiveIntegrationValidationService>()));
         services.AddSingleton<ShellViewModel>();
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<MainWindow>();
@@ -103,9 +124,8 @@ public partial class App : System.Windows.Application
             provider.GetRequiredService<IDailySlackDeliveryRepository>(),
             provider.GetRequiredService<ISlackClientFactory>(),
             provider.GetRequiredService<IUserSettingsStore>(),
-            provider.GetRequiredService<IIntegrationDiagnosticsService>(),
-            provider.GetRequiredService<ILiveIntegrationValidationService>(),
-            provider.GetRequiredService<IClipboardService>()));
+            provider.GetRequiredService<IClipboardService>(),
+            provider.GetRequiredService<IAuditLog>()));
 
     protected override void OnExit(ExitEventArgs e)
     {
@@ -178,6 +198,7 @@ public partial class App : System.Windows.Application
     private async void ExitApplication()
     {
         if (isExiting) return;
+        serviceProvider?.GetService<IAuditLog>()?.Write(AuditLevel.Info, "App", "Shutting down");
         isExiting = true;
         await StopAutoSyncIgnoringFailureAsync();
         await ReminderLifecycle.StopThenAsync(DetachReminderService(), OnReviewDue, FlushAndShutdownAsync);

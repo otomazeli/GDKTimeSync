@@ -16,17 +16,17 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     private readonly ISlackClientFactory? slackClientFactory;
     private readonly IUserSettingsStore? settings;
     private readonly IClipboardService? clipboard;
+    private readonly IAuditLog? auditLog;
     private string dryRunSummary = "Run Dry Run to validate the current local plan.";
-    private PlannedWorkItem? selectedTask;
-    private DeliveryAttempt? lastTaskAttempt;
     private SlackDailyUpdate? slackPreview;
-    private string? taskDeliveryError;
     private string? slackDeliveryError;
-    private bool isTaskConfirmationVisible;
     private bool isSlackConfirmationVisible;
     private bool canConfirmSlack;
-    private bool isTaskDeliveryInFlight;
     private DateOnly? planDate;
+    private CancellationTokenSource? batchCancellation;
+    private bool isBatchConfirmationVisible;
+    private bool isBatchInFlight;
+    private string? batchStatus;
 
     public ReviewViewModel(
         ILocalPlanSnapshotProvider? planProvider = null,
@@ -35,9 +35,8 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         IDailySlackDeliveryRepository? dailyDeliveries = null,
         ISlackClientFactory? slackClientFactory = null,
         IUserSettingsStore? settings = null,
-        IIntegrationDiagnosticsService? diagnosticsService = null,
-        ILiveIntegrationValidationService? validationService = null,
-        IClipboardService? clipboard = null)
+        IClipboardService? clipboard = null,
+        IAuditLog? auditLog = null)
     {
         this.planProvider = planProvider;
         this.deliveryService = deliveryService;
@@ -46,16 +45,13 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         this.slackClientFactory = slackClientFactory;
         this.settings = settings;
         this.clipboard = clipboard;
-        LiveValidation = new LiveValidationViewModel(planProvider, diagnosticsService, validationService);
+        this.auditLog = auditLog;
         DryRunCommand = new RelayCommand(_ => RunDryRun());
         RefreshCommand = new RelayCommand(_ => _ = RefreshAsync());
-        OpenTaskConfirmationCommand = new RelayCommand(value =>
-        {
-            if (value is PlannedWorkItem item)
-                OpenTaskConfirmation(item.Id);
-        });
-        ConfirmTaskCommand = new RelayCommand(_ => _ = ConfirmTaskAsync(), () => CanConfirmTask);
-        CancelTaskConfirmationCommand = new RelayCommand(_ => CancelTaskConfirmation(), () => IsTaskConfirmationVisible);
+        PostSelectedCommand = new RelayCommand(_ => OpenBatchConfirmation(), () => SelectedCount > 0 && !IsBatchInFlight);
+        ConfirmPostSelectedCommand = new RelayCommand(_ => _ = ConfirmPostSelectedAsync());
+        CancelPostSelectedCommand = new RelayCommand(_ => CancelPostSelected(), () => IsBatchConfirmationVisible);
+        CancelBatchCommand = new RelayCommand(_ => CancelBatch(), () => IsBatchInFlight);
         ComposeSlackPreviewCommand = new RelayCommand(_ => _ = ComposeSlackPreviewAsync());
         ConfirmSlackCommand = new RelayCommand(_ => _ = ConfirmSlackAsync(), () => CanConfirmSlack);
         CancelSlackConfirmationCommand = new RelayCommand(_ => CancelSlackConfirmation(), () => IsSlackConfirmationVisible);
@@ -66,21 +62,19 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
     public RelayCommand DryRunCommand { get; }
     public RelayCommand RefreshCommand { get; }
-    public RelayCommand OpenTaskConfirmationCommand { get; }
-    public RelayCommand ConfirmTaskCommand { get; }
-    public RelayCommand CancelTaskConfirmationCommand { get; }
+    public RelayCommand PostSelectedCommand { get; }
+    public RelayCommand ConfirmPostSelectedCommand { get; }
+    public RelayCommand CancelPostSelectedCommand { get; }
+    public RelayCommand CancelBatchCommand { get; }
     public RelayCommand ComposeSlackPreviewCommand { get; }
     public RelayCommand ConfirmSlackCommand { get; }
     public RelayCommand CancelSlackConfirmationCommand { get; }
     public RelayCommand CopySlackPreviewCommand { get; }
-    public LiveValidationViewModel LiveValidation { get; }
-    public ObservableCollection<PlannedWorkItem> Items { get; } = [];
+    public ObservableCollection<ReviewTaskViewModel> Tasks { get; } = [];
     public ObservableCollection<string> DryRunBlockers { get; } = [];
     public ObservableCollection<string> SlackBlockers { get; } = [];
     public string DryRunSummary { get => dryRunSummary; private set => SetField(ref dryRunSummary, value); }
     public DateOnly? PlanDate { get => planDate; private set => SetField(ref planDate, value); }
-    public PlannedWorkItem? SelectedTask { get => selectedTask; private set => SetField(ref selectedTask, value); }
-    public DeliveryAttempt? LastTaskAttempt { get => lastTaskAttempt; private set => SetField(ref lastTaskAttempt, value); }
     public SlackDailyUpdate? SlackPreview
     {
         get => slackPreview;
@@ -95,32 +89,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     public string SlackPreviewText => SlackPreview is null
         ? ""
         : string.Join("\n", new[] { SlackPreview.SlackTitle, SlackPreview.SlackTaskHeading, SlackPreview.SlackExtraLines }.Where(part => !string.IsNullOrWhiteSpace(part)));
-    public string? TaskDeliveryError { get => taskDeliveryError; private set => SetField(ref taskDeliveryError, value); }
     public string? SlackDeliveryError { get => slackDeliveryError; private set => SetField(ref slackDeliveryError, value); }
-    public bool IsTaskDeliveryInFlight
-    {
-        get => isTaskDeliveryInFlight;
-        private set
-        {
-            if (isTaskDeliveryInFlight == value) return;
-            SetField(ref isTaskDeliveryInFlight, value);
-            ConfirmTaskCommand.NotifyCanExecuteChanged();
-        }
-    }
-    public bool CanConfirmTask => IsTaskConfirmationVisible && !IsTaskDeliveryInFlight;
-    public string TaskDeliveryStatus => LastTaskAttempt?.Status.ToString() ?? "Not delivered";
-    public bool IsTaskConfirmationVisible
-    {
-        get => isTaskConfirmationVisible;
-        private set
-        {
-            if (isTaskConfirmationVisible == value) return;
-            SetField(ref isTaskConfirmationVisible, value);
-            ConfirmTaskCommand.NotifyCanExecuteChanged();
-            CancelTaskConfirmationCommand.NotifyCanExecuteChanged();
-            OnPropertyChanged(nameof(CanConfirmTask));
-        }
-    }
     public bool IsSlackConfirmationVisible
     {
         get => isSlackConfirmationVisible;
@@ -142,67 +111,171 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         }
     }
 
-    public Task RefreshAsync(CancellationToken cancellationToken = default)
+    public int SelectedCount => Tasks.Count(task => task.IsSelected);
+    public TimeSpan SelectedDuration => Tasks.Where(task => task.IsSelected).Aggregate(TimeSpan.Zero, (total, task) => total + task.Duration);
+    public string DaySummary => $"{Tasks.Count} task(s) · {SelectedDuration:h\\:mm} selected";
+
+    public bool IsBatchConfirmationVisible
     {
-        if (LiveValidation.IsInFlight) return Task.CompletedTask;
-        Items.Clear();
+        get => isBatchConfirmationVisible;
+        private set
+        {
+            if (isBatchConfirmationVisible == value) return;
+            SetField(ref isBatchConfirmationVisible, value);
+            ConfirmPostSelectedCommand.NotifyCanExecuteChanged();
+            CancelPostSelectedCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    public bool IsBatchInFlight
+    {
+        get => isBatchInFlight;
+        private set
+        {
+            if (isBatchInFlight == value) return;
+            SetField(ref isBatchInFlight, value);
+            PostSelectedCommand.NotifyCanExecuteChanged();
+            CancelBatchCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    public string? BatchStatus { get => batchStatus; private set => SetField(ref batchStatus, value); }
+    public string BatchConfirmationSummary =>
+        $"{SelectedCount} task(s) → Toggl, Jira, Tempo · {SelectedDuration:h\\:mm} total";
+
+    public async Task RefreshAsync(CancellationToken cancellationToken = default)
+    {
+        foreach (var existing in Tasks) existing.PropertyChanged -= OnTaskChanged;
+        Tasks.Clear();
+
         var plan = planProvider?.GetSnapshot();
         PlanDate = plan?.Date;
-        if (plan is not null)
-            foreach (var item in plan.Items)
-                Items.Add(item);
-        LiveValidation.LoadItems(Items);
-        return Task.CompletedTask;
-    }
-
-    public void OpenTaskConfirmation(Guid itemId)
-    {
-        var item = planProvider?.GetSnapshot().Items.SingleOrDefault(value => value.Id == itemId);
-        if (item is null) return;
-        if (!item.PostToToggl && item.TogglEntryId is null)
+        if (plan is null)
         {
-            TaskDeliveryError = "Task is not marked for Toggl delivery.";
-            IsTaskConfirmationVisible = false;
-            SelectedTask = null;
+            NotifySelectionChanged();
+            auditLog?.Write(AuditLevel.Info, "Review", $"Loaded (no plan): {Tasks.Count} task(s)");
             return;
         }
-        SelectedTask = item;
-        if (LastTaskAttempt?.PlannedWorkItemId != item.Id)
-            LastTaskAttempt = null;
-        TaskDeliveryError = null;
-        IsTaskConfirmationVisible = true;
+
+        var recorded = new Dictionary<Guid, DeliveryAttempt>();
+        if (attempts is not null)
+        {
+            try
+            {
+                foreach (var attempt in await attempts.ListAsync(cancellationToken))
+                    recorded[attempt.PlannedWorkItemId] = attempt;
+            }
+            catch
+            {
+                // A missing delivery history must not stop the day being reviewed; rows simply show
+                // as pending, which is what they were before this page knew about attempts at all.
+            }
+        }
+
+        foreach (var item in plan.Items)
+        {
+            var row = new ReviewTaskViewModel(item, recorded.GetValueOrDefault(item.Id));
+            row.PropertyChanged += OnTaskChanged;
+            Tasks.Add(row);
+        }
+
+        NotifySelectionChanged();
+        var alreadyDelivered = Tasks.Count(task => recorded.GetValueOrDefault(task.Id)?.Status == DeliveryAttemptStatus.Succeeded);
+        auditLog?.Write(AuditLevel.Info, "Review", $"Loaded {PlanDate}: {Tasks.Count} task(s), {alreadyDelivered} already delivered");
     }
 
-    public void CancelTaskConfirmation()
+    private void OnTaskChanged(object? sender, PropertyChangedEventArgs e)
     {
-        IsTaskConfirmationVisible = false;
-        SelectedTask = null;
+        if (e.PropertyName == nameof(ReviewTaskViewModel.IsSelected)) NotifySelectionChanged();
     }
 
-    public async Task ConfirmTaskAsync(CancellationToken cancellationToken = default)
+    private void NotifySelectionChanged()
     {
-        if (!CanConfirmTask || SelectedTask is not { } item || deliveryService is null) return;
+        OnPropertyChanged(nameof(SelectedCount));
+        OnPropertyChanged(nameof(SelectedDuration));
+        OnPropertyChanged(nameof(DaySummary));
+        PostSelectedCommand.NotifyCanExecuteChanged();
+    }
 
-        IsTaskDeliveryInFlight = true;
-        CancelTaskConfirmation();
+    private void OpenBatchConfirmation()
+    {
+        if (SelectedCount == 0) return;
+        BatchStatus = null;
+        IsBatchConfirmationVisible = true;
+        var keys = string.Join(", ", Tasks.Where(task => task.IsSelected).Select(task => task.JiraIssueKey));
+        auditLog?.Write(AuditLevel.Info, "Review", $"Post requested for {SelectedCount} task(s): {keys}, {SelectedDuration:h\\:mm}");
+    }
+
+    public void CancelPostSelected()
+    {
+        auditLog?.Write(AuditLevel.Info, "Review", $"Post cancelled before delivery ({SelectedCount} task(s))");
+        IsBatchConfirmationVisible = false;
+    }
+
+    public async Task ConfirmPostSelectedAsync(CancellationToken cancellationToken = default)
+    {
+        if (!IsBatchConfirmationVisible || deliveryService is null || IsBatchInFlight) return;
+
+        IsBatchConfirmationVisible = false;
+        IsBatchInFlight = true;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        batchCancellation = cancellation;
+        var succeeded = 0;
+        var failed = 0;
+        var chosen = Tasks.Where(task => task.IsSelected).ToArray();
+        auditLog?.Write(AuditLevel.Info, "Review", $"Post confirmed for {chosen.Length} task(s)");
         try
         {
-            LastTaskAttempt = await deliveryService.DeliverConfirmedAsync(item, cancellationToken);
-            TaskDeliveryError = null;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            TaskDeliveryError = "Task delivery was cancelled.";
-        }
-        catch
-        {
-            TaskDeliveryError = "Task delivery could not be completed.";
+            // Snapshotted once, not per row: TogglAutoSyncService can mutate the plan every 5 minutes
+            // regardless of which page is visible, so a row captured at RefreshAsync time can be stale
+            // by the time this batch delivers it. Re-reading once here (rather than per iteration, which
+            // would be wasted work and could shift mid-batch) keeps every row's data as fresh as possible
+            // without changing the plan out from under the batch while it runs.
+            var plan = planProvider?.GetSnapshot();
+            foreach (var row in chosen)
+            {
+                // Checked before each task, never during one: a cancel must not tear a delivery in half.
+                if (cancellation.IsCancellationRequested)
+                {
+                    auditLog?.Write(AuditLevel.Warning, "Review", $"Post cancelled after {succeeded + failed} of {chosen.Length}");
+                    break;
+                }
+                try
+                {
+                    // Resolve against the fresh snapshot by id; fall back to the captured item if the
+                    // row has vanished from the plan (e.g. removed since RefreshAsync).
+                    var item = plan?.Items.FirstOrDefault(candidate => candidate.Id == row.Id) ?? row.Item;
+                    // CancellationToken.None deliberately: PostAllCoordinator re-checks its token
+                    // mid-item, between the Toggl entry and the Tempo worklog. Handing it the
+                    // cancellable one would let a cancel tear a delivery in half and persist an
+                    // attempt with a Toggl entry and no worklog. A task already started always
+                    // finishes; the check above is what stops the NEXT one.
+                    var attempt = await deliveryService.DeliverConfirmedAsync(item, CancellationToken.None);
+                    row.ApplyAttempt(attempt);
+                    if (attempt.Status == DeliveryAttemptStatus.Succeeded) succeeded++; else failed++;
+                }
+                catch (Exception exception)
+                {
+                    failed++;
+                    row.ApplyAttempt(new DeliveryAttempt(row.Item.Id, null, null, DeliveryAttemptStatus.Failed,
+                        DeliveryFailureCode.PersistenceFailed, SlackDeliveryState.NotSupported) { FailureDetail = exception.Message });
+                }
+            }
+            var notAttempted = chosen.Length - succeeded - failed;
+            BatchStatus = notAttempted > 0
+                ? $"{succeeded} succeeded, {failed} failed, {notAttempted} not attempted."
+                : $"{succeeded} succeeded, {failed} failed.";
+            auditLog?.Write(failed > 0 ? AuditLevel.Warning : AuditLevel.Info, "Review", $"Post finished: {succeeded} succeeded, {failed} failed");
         }
         finally
         {
-            IsTaskDeliveryInFlight = false;
+            batchCancellation = null;
+            IsBatchInFlight = false;
+            NotifySelectionChanged();
         }
     }
+
+    public void CancelBatch() => batchCancellation?.Cancel();
 
     public async Task ComposeSlackPreviewAsync(CancellationToken cancellationToken = default)
     {
@@ -240,7 +313,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
                 var postedToJira = attemptsByItemId.GetValueOrDefault(item.Id) is { Status: DeliveryAttemptStatus.Succeeded, TempoWorklogId: not null };
                 if (!postedToJira)
                     notPostedCount++;
-                completed.Add(new SlackDailyCompletedItem(item.TogglProject, item.JiraIssueKey, item.Comment, item.Status, postedToJira));
+                completed.Add(new SlackDailyCompletedItem(item.JiraIssueKey, item.Comment, item.Status, postedToJira));
             }
 
             if (notPostedCount > 0)
@@ -257,6 +330,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
             CanConfirmSlack = true;
             IsSlackConfirmationVisible = true;
+            auditLog?.Write(AuditLevel.Info, "Slack", $"Composed {SlackPreviewText.Split('\n').Length} line(s) for {plan.Date}");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -270,6 +344,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
     public void CancelSlackConfirmation()
     {
+        auditLog?.Write(AuditLevel.Info, "Slack", $"Slack send cancelled for {PlanDate}");
         IsSlackConfirmationVisible = false;
         CanConfirmSlack = false;
     }
@@ -284,6 +359,13 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     {
         if (!CanConfirmSlack || SlackPreview is null || dailyDeliveries is null || slackClientFactory is null) return;
 
+        await ConfirmSlackCoreAsync(SlackPreview, dailyDeliveries, slackClientFactory, cancellationToken);
+        auditLog?.Write(SlackDeliveryError is null ? AuditLevel.Info : AuditLevel.Error, "Slack",
+            SlackDeliveryError is null ? "Sent" : $"Send failed: {SlackDeliveryError}");
+    }
+
+    private async Task ConfirmSlackCoreAsync(SlackDailyUpdate preview, IDailySlackDeliveryRepository dailyDeliveries, ISlackClientFactory slackClientFactory, CancellationToken cancellationToken)
+    {
         CanConfirmSlack = false;
         IsSlackConfirmationVisible = false;
         try
@@ -307,14 +389,14 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
             using (client)
             {
-            if (!await dailyDeliveries.TryClaimAsync(SlackPreview.Date, SlackPreview.ContentFingerprint, cancellationToken))
+            if (!await dailyDeliveries.TryClaimAsync(preview.Date, preview.ContentFingerprint, cancellationToken))
             {
                 SlackDeliveryError = "A daily Slack delivery already exists and cannot be sent again.";
                 return;
             }
 
-            await client.PostAsync(SlackPreview, cancellationToken);
-            await dailyDeliveries.SaveAsync(new DailySlackDelivery(SlackPreview.Date, SlackPreview.ContentFingerprint, DailySlackDeliveryState.Sent, null), CancellationToken.None);
+            await client.PostAsync(preview, cancellationToken);
+            await dailyDeliveries.SaveAsync(new DailySlackDelivery(preview.Date, preview.ContentFingerprint, DailySlackDeliveryState.Sent, null), CancellationToken.None);
             SlackDeliveryError = null;
             }
         }
@@ -359,6 +441,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         {
             DryRunBlockers.Add("No local plan is available to review.");
             DryRunSummary = "Dry Run found 1 blocker.";
+            auditLog?.Write(AuditLevel.Warning, "Review", $"Dry run {PlanDate}: {DryRunSummary}");
             return;
         }
 
@@ -374,6 +457,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
         var duration = TimeSpan.FromTicks(plan.Items.Sum(item => item.Duration.Ticks));
         DryRunSummary = $"{plan.Items.Count} planned item(s), {duration.TotalMinutes:0} planned minute(s). Dry Run does not deliver tasks or Slack.";
+        auditLog?.Write(DryRunBlockers.Count > 0 ? AuditLevel.Warning : AuditLevel.Info, "Review", $"Dry run {PlanDate}: {DryRunSummary}");
     }
 
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
@@ -381,8 +465,6 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         if (EqualityComparer<T>.Default.Equals(field, value)) return;
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        if (propertyName == nameof(LastTaskAttempt))
-            OnPropertyChanged(nameof(TaskDeliveryStatus));
     }
 
     private void OnPropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));

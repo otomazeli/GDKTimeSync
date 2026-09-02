@@ -2,98 +2,269 @@ using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
 using GDK.TimeSync.Desktop.ViewModels;
 using GDK.TimeSync.Slack;
+using System.Xml.Linq;
 
 namespace GDK.TimeSync.Tests;
 
 public sealed class ReviewViewModelTests
 {
     [Fact]
-    public async Task Confirmed_task_delivers_only_the_selected_item()
+    public void Review_view_is_a_grid_with_one_batch_confirmation_and_no_guided_validation()
     {
-        var date = new DateOnly(2026, 8, 13);
-        var first = PlannedWorkItem.Create(date, "First", "CGM-1", "First work", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
-        var second = PlannedWorkItem.Create(date, "Second", "CGM-2", "Second work", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GDK.TimeSync.Desktop", "Views", "ReviewView.xaml"));
+        var markup = File.ReadAllText(path);
+        var elements = XDocument.Load(path).Descendants().ToArray();
+
+        Assert.Contains(elements, element => element.Name.LocalName == "DataGrid");
+        Assert.Contains("{Binding Tasks}", markup, StringComparison.Ordinal);
+        Assert.Contains("PostSelectedCommand", markup, StringComparison.Ordinal);
+        Assert.Contains("ConfirmPostSelectedCommand", markup, StringComparison.Ordinal);
+        Assert.Contains("CancelBatchCommand", markup, StringComparison.Ordinal);
+        Assert.Contains("BatchConfirmationSummary", markup, StringComparison.Ordinal);
+        Assert.Contains("FailureText", markup, StringComparison.Ordinal);
+        Assert.Contains("{Binding DryRunBlockers}", markup, StringComparison.Ordinal);
+
+        // The guided-validation block moved to Diagnostics; none of its bindings may remain here.
+        Assert.DoesNotContain("IsTogglConfirmationVisible", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("LiveValidation", markup, StringComparison.Ordinal);
+
+        // Exactly one confirmation panel, where there used to be five.
+        Assert.Single(markup.Split("IsBatchConfirmationVisible").Skip(1));
+
+        // Button.Content is typed `object`, so a StringFormat on its binding is silently ignored and
+        // the raw count renders instead of the label. ContentStringFormat is the property WPF actually
+        // applies here; regression would leave these buttons showing "1" instead of a real label.
+        var buttons = elements.Where(element => element.Name.LocalName == "Button").ToArray();
+        var postSelected = buttons.Single(button => button.Attribute("Command")?.Value == "{Binding PostSelectedCommand}");
+        Assert.Equal("{Binding SelectedCount}", postSelected.Attribute("Content")?.Value);
+        Assert.Equal("Post selected ({0})", postSelected.Attribute("ContentStringFormat")?.Value);
+
+        var confirmPost = buttons.Single(button => button.Attribute("Command")?.Value == "{Binding ConfirmPostSelectedCommand}");
+        Assert.Equal("{Binding SelectedCount}", confirmPost.Attribute("Content")?.Value);
+        Assert.Equal("Post {0} task(s)", confirmPost.Attribute("ContentStringFormat")?.Value);
+
+        // No ContentControl anywhere in the page should carry the broken pattern.
+        Assert.DoesNotContain(elements, element => element.Attribute("Content")?.Value.Contains("StringFormat", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public async Task AFullPostCycleIsRecordedInOrder()
+    {
+        var log = new RecordingAuditLog();
+        var review = CreateReview(items: [Task30Minutes("CGM-1")], auditLog: log);
+        await review.RefreshAsync();
+
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        var review_entries = log.Entries.Where(entry => entry.Category == "Review").Select(entry => entry.Message).ToArray();
+        Assert.Contains(review_entries, message => message.StartsWith("Loaded", StringComparison.Ordinal));
+        Assert.Contains(review_entries, message => message.StartsWith("Post requested for 1 task(s): CGM-1", StringComparison.Ordinal));
+        Assert.Contains(review_entries, message => message.StartsWith("Post confirmed for 1 task(s)", StringComparison.Ordinal));
+        Assert.Contains(review_entries, message => message.StartsWith("Post finished: 1 succeeded, 0 failed", StringComparison.Ordinal));
+        Assert.True(Array.IndexOf(review_entries, review_entries.First(m => m.StartsWith("Post requested", StringComparison.Ordinal)))
+                 < Array.IndexOf(review_entries, review_entries.First(m => m.StartsWith("Post confirmed", StringComparison.Ordinal))));
+    }
+
+    [Fact]
+    public async Task CancellingTheConfirmationIsRecordedAndDeliversNothing()
+    {
+        var log = new RecordingAuditLog();
+        var review = CreateReview(items: [Task30Minutes("CGM-1")], auditLog: log, delivery: out var delivery);
+        await review.RefreshAsync();
+
+        review.PostSelectedCommand.Execute(null);
+        review.CancelPostSelectedCommand.Execute(null);
+
+        Assert.Contains(log.Entries, entry => entry.Category == "Review" && entry.Message.StartsWith("Post cancelled before delivery", StringComparison.Ordinal));
+        Assert.DoesNotContain(log.Entries, entry => entry.Category == "Delivery");
+        Assert.Equal(0, delivery.Calls);
+    }
+
+    [Fact]
+    public async Task NoAuditEntryCarriesASettingsValueOrSecret()
+    {
+        var log = new RecordingAuditLog();
+        var review = CreateReview(items: [Task30Minutes("CGM-1")], auditLog: log,
+            settings: new UserSettings { JiraBaseUrl = "https://jira.example.test", JiraUser = "secret.user@example.test" });
+        await review.RefreshAsync();
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        Assert.All(log.Entries, entry =>
+        {
+            Assert.DoesNotContain("secret.user@example.test", entry.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("jira.example.test", entry.Message, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public async Task PostSelected_WritesNothingUntilTheSecondConfirmation()
+    {
+        var review = CreateReview(items: [Task30Minutes("CGM-1")], delivery: out var delivery);
+        await review.RefreshAsync();
+
+        review.PostSelectedCommand.Execute(null);
+
+        Assert.True(review.IsBatchConfirmationVisible);
+        Assert.Equal(0, delivery.Calls);
+        Assert.Contains("1 task", review.BatchConfirmationSummary, StringComparison.Ordinal);
+
+        await review.ConfirmPostSelectedAsync();
+
+        Assert.Equal(1, delivery.Calls);
+        Assert.False(review.IsBatchConfirmationVisible);
+    }
+
+    [Fact]
+    public async Task PostSelected_DeliversOnlyTickedRowsInOrder()
+    {
+        var first = Task30Minutes("CGM-1");
+        var second = Task30Minutes("CGM-2");
+        var third = Task30Minutes("CGM-3");
+        var review = CreateReview(items: [first, second, third], delivery: out var delivery);
+        await review.RefreshAsync();
+        review.Tasks.Single(task => task.JiraIssueKey == "CGM-2").IsSelected = false;
+
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        Assert.Equal([first.Id, third.Id], delivery.DeliveredIds);
+    }
+
+    // One bad Jira key must not strand the rest of the day.
+    [Fact]
+    public async Task PostSelected_ContinuesAfterAFailureAndReportsBothCounts()
+    {
+        var failing = Task30Minutes("CGM-1");
+        var succeeding = Task30Minutes("CGM-2");
+        var review = CreateReview(items: [failing, succeeding], delivery: out var delivery);
+        delivery.FailFor(failing.Id, DeliveryFailureCode.TempoFailed, "User is invalid");
+        await review.RefreshAsync();
+
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        Assert.Equal(2, delivery.Calls);
+        Assert.Equal(DeliveryMark.Failed, review.Tasks.Single(task => task.Id == failing.Id).Tempo);
+        Assert.Equal("Tempo: User is invalid", review.Tasks.Single(task => task.Id == failing.Id).FailureText);
+        Assert.Equal(DeliveryMark.Delivered, review.Tasks.Single(task => task.Id == succeeding.Id).Tempo);
+        Assert.Contains("1 succeeded", review.BatchStatus!, StringComparison.Ordinal);
+        Assert.Contains("1 failed", review.BatchStatus!, StringComparison.Ordinal);
+    }
+
+    // TogglAutoSyncService mutates the plan every 5 minutes regardless of which page is visible, so a
+    // batch left open across a sync must deliver the CURRENT data, not whatever RefreshAsync captured.
+    [Fact]
+    public async Task PostSelected_DeliversTheCurrentPlanValueEvenWhenTheSnapshotChangedAfterRefresh()
+    {
+        var original = Task30Minutes("CGM-1");
+        var provider = new MutablePlanSnapshotProvider(DailyPlan.Create(original.Day, [original]));
         var delivery = new RecordingConfirmedDeliveryService();
-        var review = CreateReview(DailyPlan.Create(date, [first, second]), delivery);
+        var review = new ReviewViewModel(provider, delivery, new AttemptRepository(), new DailyDeliveryRepository(),
+            new RecordingSlackClientFactory(), new FixedSettingsStore(new UserSettings()));
+        await review.RefreshAsync();
 
-        review.OpenTaskConfirmation(first.Id);
-        Assert.Empty(delivery.DeliveredItemIds);
-        await review.ConfirmTaskAsync();
+        var updated = original with { Duration = TimeSpan.FromMinutes(90) };
+        provider.Plan = DailyPlan.Create(updated.Day, [updated]);
 
-        Assert.Equal([first.Id], delivery.DeliveredItemIds);
-        Assert.Equal(DeliveryAttemptStatus.Succeeded, review.LastTaskAttempt!.Status);
-        Assert.False(review.IsTaskConfirmationVisible);
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        Assert.Equal(TimeSpan.FromMinutes(90), delivery.DeliveredItems.Single().Duration);
     }
 
+    // A row whose item disappeared from the plan between refresh and confirmation (e.g. removed
+    // upstream) must still deliver, using the value captured at refresh as a fallback.
     [Fact]
-    public async Task Task_not_marked_for_toggl_is_not_confirmation_eligible()
+    public async Task PostSelected_FallsBackToTheCapturedItemWhenTheRowIsNoLongerInThePlan()
     {
-        var date = new DateOnly(2026, 8, 13);
-        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT") with { PostToToggl = false };
+        var vanished = Task30Minutes("CGM-1");
+        var provider = new MutablePlanSnapshotProvider(DailyPlan.Create(vanished.Day, [vanished]));
         var delivery = new RecordingConfirmedDeliveryService();
-        var review = CreateReview(DailyPlan.Create(date, [item]), delivery);
+        var review = new ReviewViewModel(provider, delivery, new AttemptRepository(), new DailyDeliveryRepository(),
+            new RecordingSlackClientFactory(), new FixedSettingsStore(new UserSettings()));
+        await review.RefreshAsync();
 
-        review.OpenTaskConfirmation(item.Id);
-        await review.ConfirmTaskAsync();
+        provider.Plan = DailyPlan.Create(vanished.Day, []);
 
-        Assert.False(review.IsTaskConfirmationVisible);
-        Assert.Empty(delivery.DeliveredItemIds);
-        Assert.Equal("Task is not marked for Toggl delivery.", review.TaskDeliveryError);
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        Assert.Equal(vanished.Id, delivery.DeliveredItems.Single().Id);
+        Assert.Equal(1, delivery.Calls);
     }
 
     [Fact]
-    public void Task_with_a_known_toggl_entry_is_confirmation_eligible_even_when_not_marked_for_toggl()
+    public async Task RefreshAsync_WithNoPlan_LogsANoPlanEntryInsteadOfAnEmptyDate()
     {
-        var date = new DateOnly(2026, 8, 13);
-        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT") with { PostToToggl = false, TogglEntryId = 42 };
-        var review = CreateReview(DailyPlan.Create(date, [item]));
+        var log = new RecordingAuditLog();
+        var review = new ReviewViewModel(auditLog: log);
 
-        review.OpenTaskConfirmation(item.Id);
+        await review.RefreshAsync();
 
-        Assert.True(review.IsTaskConfirmationVisible);
-        Assert.Null(review.TaskDeliveryError);
+        Assert.Contains(log.Entries, entry => entry.Category == "Review" && entry.Message == "Loaded (no plan): 0 task(s)");
     }
 
     [Fact]
-    public async Task Task_confirmation_projects_selected_details_and_the_safe_completed_result()
+    public async Task CancellingTheConfirmationDeliversNothing()
     {
-        var date = new DateOnly(2026, 8, 13);
-        var item = PlannedWorkItem.Create(date, "Planning", "CGM-42", "Review design", TimeSpan.FromMinutes(45), "GDK", "SUPPORT", false);
-        var review = CreateReview(DailyPlan.Create(date, [item]));
+        var review = CreateReview(items: [Task30Minutes("CGM-1")], delivery: out var delivery);
+        await review.RefreshAsync();
 
-        review.OpenTaskConfirmation(item.Id);
+        review.PostSelectedCommand.Execute(null);
+        review.CancelPostSelectedCommand.Execute(null);
 
-        Assert.Equal("CGM-42", review.SelectedTask!.JiraIssueKey);
-        Assert.Equal("Review design", review.SelectedTask.Comment);
-        Assert.Equal(TimeSpan.FromMinutes(45), review.SelectedTask.Duration);
-        Assert.Equal("GDK", review.SelectedTask.TogglProject);
-        Assert.Equal("SUPPORT", review.SelectedTask.TempoCategory);
-        Assert.False(review.SelectedTask.IsBillable);
-        Assert.Equal("Not delivered", review.TaskDeliveryStatus);
+        Assert.False(review.IsBatchConfirmationVisible);
+        Assert.Equal(0, delivery.Calls);
+    }
 
-        await review.ConfirmTaskAsync();
+    // Cancel stops before the NEXT task; it never interrupts one already in flight.
+    [Fact]
+    public async Task CancellingMidRunStopsBeforeTheNextTask()
+    {
+        var first = Task30Minutes("CGM-1");
+        var second = Task30Minutes("CGM-2");
+        var review = CreateReview(items: [first, second], delivery: out var delivery);
+        await review.RefreshAsync();
+        delivery.OnDelivered = _ => review.CancelBatchCommand.Execute(null);
 
-        Assert.Equal("Succeeded", review.TaskDeliveryStatus);
-        Assert.Equal(DeliveryAttemptStatus.Succeeded, review.LastTaskAttempt!.Status);
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        Assert.Equal(1, delivery.Calls);
+        Assert.Equal([first.Id], delivery.DeliveredIds);
+        // A cancel landing mid-delivery must not reach the in-flight call: it must have run to
+        // completion on a token that was never cancelled, even though the batch's own token was.
+        Assert.All(delivery.Tokens, token => Assert.False(token.IsCancellationRequested));
+        Assert.Contains("1 not attempted", review.BatchStatus!, StringComparison.Ordinal);
+    }
+
+    // A row a delivery call throws for must show the failure, not whatever it showed before.
+    [Fact]
+    public async Task PostSelected_AThrownDeliveryMarksTheRowFailedInsteadOfLeavingItStale()
+    {
+        var review = CreateReview(items: [Task30Minutes("CGM-1")], delivery: out var delivery);
+        await review.RefreshAsync();
+        delivery.OnDelivered = _ => throw new InvalidOperationException("boom");
+
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        var row = review.Tasks.Single();
+        Assert.NotNull(row.FailureText);
+        Assert.Contains("1 failed", review.BatchStatus!, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task Task_confirmation_closes_synchronously_and_invokes_delivery_once_while_in_flight()
+    public async Task PostSelectedIsUnavailableWithNothingTicked()
     {
-        var date = new DateOnly(2026, 8, 13);
-        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
-        var delivery = new DelayedConfirmedDeliveryService();
-        var review = CreateReview(DailyPlan.Create(date, [item]), delivery);
-        review.OpenTaskConfirmation(item.Id);
+        var review = CreateReview(items: [Task30Minutes("CGM-1")]);
+        await review.RefreshAsync();
 
-        var first = review.ConfirmTaskAsync();
-        var second = review.ConfirmTaskAsync();
+        review.Tasks[0].IsSelected = false;
 
-        Assert.False(review.IsTaskConfirmationVisible);
-        Assert.False(review.CanConfirmTask);
-        Assert.Equal(1, delivery.InvocationCount);
-        delivery.Complete(Succeeded(item));
-        await Task.WhenAll(first, second);
+        Assert.False(review.PostSelectedCommand.CanExecute(null));
     }
 
     [Fact]
@@ -106,12 +277,10 @@ public sealed class ReviewViewModelTests
         var review = CreateReview(DailyPlan.Create(date, [item]), delivery, attempts: new AttemptRepository(Succeeded(item)), slackFactory: slack);
 
         review.DryRunCommand.Execute(null);
-        review.OpenTaskConfirmation(item.Id);
-        review.CancelTaskConfirmation();
         await review.ComposeSlackPreviewAsync();
         review.CancelSlackConfirmation();
 
-        Assert.Empty(delivery.DeliveredItemIds);
+        Assert.Empty(delivery.DeliveredIds);
         Assert.Empty(slack.Client.PostedUpdates);
         Assert.Equal(0, slack.CreateCalls);
     }
@@ -126,8 +295,46 @@ public sealed class ReviewViewModelTests
 
         await review.RefreshAsync();
 
-        Assert.Equal([item.Id], review.Items.Select(value => value.Id));
-        Assert.Empty(delivery.DeliveredItemIds);
+        Assert.Equal([item.Id], review.Tasks.Select(value => value.Id));
+        Assert.Empty(delivery.DeliveredIds);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_BuildsOneRowPerTaskWithItsRecordedAttempt()
+    {
+        var delivered = PlannedWorkItem.Create(new DateOnly(2026, 9, 1), "A", "CGM-1", "Delivered", TimeSpan.FromMinutes(30));
+        var pending = PlannedWorkItem.Create(new DateOnly(2026, 9, 1), "B", "CGM-2", "Pending", TimeSpan.FromMinutes(45));
+        var review = CreateReview(
+            items: [delivered, pending],
+            attempts: new AttemptRepository(new DeliveryAttempt(delivered.Id, 101, 201,
+                DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported)));
+
+        await review.RefreshAsync();
+
+        Assert.Equal(2, review.Tasks.Count);
+        var deliveredRow = review.Tasks.Single(task => task.Id == delivered.Id);
+        Assert.Equal(DeliveryMark.Delivered, deliveredRow.Tempo);
+        Assert.False(deliveredRow.IsSelected);
+        var pendingRow = review.Tasks.Single(task => task.Id == pending.Id);
+        Assert.Equal(DeliveryMark.Pending, pendingRow.Tempo);
+        Assert.True(pendingRow.IsSelected);
+    }
+
+    [Fact]
+    public async Task SelectedCountAndDurationFollowTheTicks()
+    {
+        var first = PlannedWorkItem.Create(new DateOnly(2026, 9, 1), "A", "CGM-1", "One", TimeSpan.FromMinutes(30));
+        var second = PlannedWorkItem.Create(new DateOnly(2026, 9, 1), "B", "CGM-2", "Two", TimeSpan.FromMinutes(45));
+        var review = CreateReview(items: [first, second]);
+        await review.RefreshAsync();
+
+        Assert.Equal(2, review.SelectedCount);
+        Assert.Equal(TimeSpan.FromMinutes(75), review.SelectedDuration);
+
+        review.Tasks[0].IsSelected = false;
+
+        Assert.Equal(1, review.SelectedCount);
+        Assert.Equal(TimeSpan.FromMinutes(45), review.SelectedDuration);
     }
 
     [Fact]
@@ -154,12 +361,12 @@ public sealed class ReviewViewModelTests
         await review.ComposeSlackPreviewAsync();
         Assert.True(review.IsSlackConfirmationVisible);
         Assert.Empty(slack.Client.PostedUpdates);
-        Assert.Empty(delivery.DeliveredItemIds);
+        Assert.Empty(delivery.DeliveredIds);
 
         await review.ConfirmSlackAsync();
 
         Assert.Single(slack.Client.PostedUpdates);
-        Assert.Empty(delivery.DeliveredItemIds);
+        Assert.Empty(delivery.DeliveredIds);
         Assert.Equal(1, slack.CreateCalls);
     }
 
@@ -182,7 +389,7 @@ public sealed class ReviewViewModelTests
 
         Assert.Equal("Daily delivery", review.SlackPreview!.SlackTitle);
         Assert.Equal("Completed work", review.SlackPreview.SlackTaskHeading);
-        Assert.Equal("Thank you, team.\nGDK | CGM-1 Completed | *In Progress*", review.SlackPreview.SlackExtraLines);
+        Assert.Equal("Thank you, team.\nCGM-1 Completed | 🔄 🔷", review.SlackPreview.SlackExtraLines);
     }
 
     [Fact]
@@ -275,8 +482,8 @@ public sealed class ReviewViewModelTests
 
         await review.ComposeSlackPreviewAsync();
 
-        Assert.Contains("GDK | CGM-1 Completed | *In Progress*", review.SlackPreview!.SlackExtraLines);
-        Assert.Contains("GDK | CGM-2 Not completed | *In Progress* (not posted in Jira)", review.SlackPreview.SlackExtraLines);
+        Assert.Contains("CGM-1 Completed | 🔄 🔷", review.SlackPreview!.SlackExtraLines);
+        Assert.Contains("CGM-2 Not completed | 🔄 ⚪", review.SlackPreview.SlackExtraLines);
         Assert.Single(review.SlackBlockers);
     }
 
@@ -290,7 +497,7 @@ public sealed class ReviewViewModelTests
         await review.ComposeSlackPreviewAsync();
 
         Assert.NotNull(review.SlackPreview);
-        Assert.Contains("(not posted in Jira)", review.SlackPreview!.SlackExtraLines);
+        Assert.Contains("⚪", review.SlackPreview!.SlackExtraLines);
         Assert.True(review.CanConfirmSlack);
     }
 
@@ -314,7 +521,7 @@ public sealed class ReviewViewModelTests
         review.CopySlackPreviewCommand.Execute(null);
 
         Assert.Equal(1, clipboard.SetTextCalls);
-        Assert.Equal("Daily update\nCompleted work\nGDK | CGM-1 Completed | *In Progress*", clipboard.LastText);
+        Assert.Equal("Daily update\nCompleted work\nCGM-1 Completed | 🔄 🔷", clipboard.LastText);
     }
 
     [Theory]
@@ -362,7 +569,8 @@ public sealed class ReviewViewModelTests
         ISlackClientFactory? slackFactory = null,
         IDailySlackDeliveryRepository? dailyDeliveries = null,
         IUserSettingsStore? settings = null,
-        IClipboardService? clipboard = null) =>
+        IClipboardService? clipboard = null,
+        IAuditLog? auditLog = null) =>
         new(
             new FixedPlanSnapshotProvider(plan),
             delivery ?? new RecordingConfirmedDeliveryService(),
@@ -370,7 +578,37 @@ public sealed class ReviewViewModelTests
             dailyDeliveries ?? new DailyDeliveryRepository(),
             slackFactory ?? new RecordingSlackClientFactory(),
             settings ?? new FixedSettingsStore(new UserSettings()),
-            clipboard: clipboard);
+            clipboard: clipboard,
+            auditLog: auditLog);
+
+    private static ReviewViewModel CreateReview(
+        IReadOnlyList<PlannedWorkItem> items,
+        IConfirmedTaskDeliveryService? delivery = null,
+        IDeliveryAttemptRepository? attempts = null,
+        ISlackClientFactory? slackFactory = null,
+        IDailySlackDeliveryRepository? dailyDeliveries = null,
+        IUserSettingsStore? settings = null,
+        IClipboardService? clipboard = null,
+        IAuditLog? auditLog = null) =>
+        CreateReview(
+            DailyPlan.Create(items.Count > 0 ? items[0].Day : default, items),
+            delivery, attempts, slackFactory, dailyDeliveries, settings, clipboard, auditLog);
+
+    private static ReviewViewModel CreateReview(IReadOnlyList<PlannedWorkItem> items, out RecordingConfirmedDeliveryService delivery, IAuditLog? auditLog = null)
+    {
+        delivery = new RecordingConfirmedDeliveryService();
+        return CreateReview(items, delivery, auditLog: auditLog);
+    }
+
+    // Test 3 needs raw presentation values (JiraBaseUrl/JiraUser) it can assert never leak into the
+    // audit log; every other test goes through IUserSettingsStore like the app does.
+    private static ReviewViewModel CreateReview(IReadOnlyList<PlannedWorkItem> items, IAuditLog? auditLog, UserSettings settings) =>
+        CreateReview(items, settings: new FixedSettingsStore(settings), auditLog: auditLog);
+
+    private static PlannedWorkItem Task30Minutes(string jiraIssueKey) =>
+        PlannedWorkItem.Create(new DateOnly(2026, 9, 1), jiraIssueKey, jiraIssueKey, $"Work on {jiraIssueKey}",
+            TimeSpan.FromMinutes(30), "CGM", "DEVELOPMENT", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30))
+            with { PostToToggl = true };
 
     private static DeliveryAttempt Succeeded(PlannedWorkItem item) => new(item.Id, 101, 201, DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported);
 
@@ -379,26 +617,38 @@ public sealed class ReviewViewModelTests
         public DailyPlan GetSnapshot() => plan;
     }
 
-    private sealed class RecordingConfirmedDeliveryService : IConfirmedTaskDeliveryService
+    // Returns whatever `Plan` currently holds, so a test can mutate it between RefreshAsync and
+    // ConfirmPostSelectedAsync to prove the batch re-reads a fresh snapshot rather than the one
+    // captured at refresh time.
+    private sealed class MutablePlanSnapshotProvider(DailyPlan plan) : ILocalPlanSnapshotProvider
     {
-        public List<Guid> DeliveredItemIds { get; } = [];
-        public Task<DeliveryAttempt> DeliverConfirmedAsync(PlannedWorkItem item, CancellationToken cancellationToken = default)
-        {
-            DeliveredItemIds.Add(item.Id);
-            return Task.FromResult(Succeeded(item));
-        }
+        public DailyPlan Plan { get; set; } = plan;
+        public DailyPlan GetSnapshot() => Plan;
     }
 
-    private sealed class DelayedConfirmedDeliveryService : IConfirmedTaskDeliveryService
+    private sealed class RecordingConfirmedDeliveryService : IConfirmedTaskDeliveryService
     {
-        private readonly TaskCompletionSource<DeliveryAttempt> completion = new();
-        public int InvocationCount { get; private set; }
+        private readonly Dictionary<Guid, (DeliveryFailureCode Code, string Message)> failures = [];
+        public List<Guid> DeliveredIds { get; } = [];
+        public List<PlannedWorkItem> DeliveredItems { get; } = [];
+        public List<CancellationToken> Tokens { get; } = [];
+        public int Calls { get; private set; }
+        public Action<PlannedWorkItem>? OnDelivered { get; set; }
+
+        public void FailFor(Guid id, DeliveryFailureCode code, string message) => failures[id] = (code, message);
+
         public Task<DeliveryAttempt> DeliverConfirmedAsync(PlannedWorkItem item, CancellationToken cancellationToken = default)
         {
-            InvocationCount++;
-            return completion.Task;
+            Calls++;
+            DeliveredIds.Add(item.Id);
+            DeliveredItems.Add(item);
+            Tokens.Add(cancellationToken);
+            var result = failures.TryGetValue(item.Id, out var failure)
+                ? new DeliveryAttempt(item.Id, null, null, DeliveryAttemptStatus.Failed, failure.Code, SlackDeliveryState.NotSupported) { FailureDetail = failure.Message }
+                : Succeeded(item);
+            OnDelivered?.Invoke(item);
+            return Task.FromResult(result);
         }
-        public void Complete(DeliveryAttempt attempt) => completion.SetResult(attempt);
     }
 
     private sealed class FixedSettingsStore(UserSettings settings) : IUserSettingsStore
@@ -480,6 +730,12 @@ public sealed class ReviewViewModelTests
             await credentials.GetAsync(CredentialKeys.SlackWebhook, cancellationToken);
             return new RecordingSlackClient();
         }
+    }
+
+    private sealed class RecordingAuditLog : IAuditLog
+    {
+        public List<(AuditLevel Level, string Category, string Message)> Entries { get; } = [];
+        public void Write(AuditLevel level, string category, string message) => Entries.Add((level, category, message));
     }
 
     private sealed class InvalidSlackFactory : ISlackClientFactory

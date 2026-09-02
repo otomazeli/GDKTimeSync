@@ -1,0 +1,1 @@
+powershell -ExecutionPolicy ByPass -c ".\work.ps1"

@@ -53,7 +53,7 @@ public sealed class ShellViewModelTests
         await viewModel.NavigateAsync(NavigationPage.Review);
 
         Assert.Equal(NavigationPage.Review, viewModel.SelectedPage);
-        Assert.Equal([item.Id], review.Items.Select(value => value.Id));
+        Assert.Equal([item.Id], review.Tasks.Select(task => task.Item.Id));
         Assert.Equal(1, snapshot.Reads);
         Assert.Equal(0, credentials.GetCalls);
     }
@@ -82,13 +82,13 @@ public sealed class ShellViewModelTests
 
         Assert.Equal(1, trayCalls);
         Assert.Equal(NavigationPage.Review, shell.SelectedPage);
-        Assert.Equal([item.Id], review.Items.Select(value => value.Id));
+        Assert.Equal([item.Id], review.Tasks.Select(task => task.Item.Id));
         Assert.Equal(1, snapshot.Reads);
         Assert.Equal(0, credentials.Calls);
         Assert.Equal(0, settings.LoadCalls + settings.SaveCalls);
         Assert.Equal(0, clients.Calls);
         Assert.Equal(0, delivery.Calls);
-        Assert.Equal(0, attempts.Calls);
+        Assert.Equal(1, attempts.Calls); // RefreshAsync now loads recorded attempts to build each row's delivery marks.
         Assert.Equal(0, deliveries.Calls);
         Assert.Equal(0, slack.Calls);
     }

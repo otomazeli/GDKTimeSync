@@ -147,9 +147,9 @@ public sealed class PostAllCoordinator(
         {
             return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.JiraFailed);
+            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.JiraFailed, ex.Message);
         }
 
         if (string.IsNullOrWhiteSpace(jiraIssueId))
@@ -165,9 +165,9 @@ public sealed class PostAllCoordinator(
         {
             return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TempoFailed);
+            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TempoFailed, ex.Message);
         }
     }
 
@@ -191,9 +191,13 @@ public sealed class PostAllCoordinator(
         long? togglEntryId,
         long? tempoWorklogId,
         DeliveryAttemptStatus status,
-        DeliveryFailureCode? failureCode)
+        DeliveryFailureCode? failureCode,
+        string? failureDetail = null)
     {
-        var attempt = new DeliveryAttempt(itemId, togglEntryId, tempoWorklogId, status, failureCode, SlackDeliveryState.NotSupported);
+        var attempt = new DeliveryAttempt(itemId, togglEntryId, tempoWorklogId, status, failureCode, SlackDeliveryState.NotSupported)
+        {
+            FailureDetail = failureDetail
+        };
         try
         {
             await attempts.SaveAsync(attempt, CancellationToken.None);

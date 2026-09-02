@@ -381,6 +381,35 @@ public sealed class SqlitePlanRepositoryTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
+    [Fact]
+    public async Task ListHistoryAsync_JoinsEachAttemptToItsPlannedTaskNewestDayFirst()
+    {
+        var database = new SqliteDatabase(CreateDatabasePath());
+        var plans = new SqliteDailyPlanRepository(database);
+        var attempts = new SqliteDeliveryAttemptRepository(database);
+        var monday = PlannedWorkItem.Create(new DateOnly(2026, 8, 10), "Monday", "CGM-1", "Older work");
+        var tuesday = PlannedWorkItem.Create(new DateOnly(2026, 8, 11), "Tuesday", "CGM-2", "Newer work");
+        await plans.SaveAsync(DailyPlan.Create(new DateOnly(2026, 8, 10), [monday]));
+        await plans.SaveAsync(DailyPlan.Create(new DateOnly(2026, 8, 11), [tuesday]));
+        await attempts.SaveAsync(new DeliveryAttempt(monday.Id, 101, 201, DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported));
+        await attempts.SaveAsync(new DeliveryAttempt(tuesday.Id, 102, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TempoFailed, SlackDeliveryState.NotSupported));
+        var orphan = new DeliveryAttempt(Guid.NewGuid(), null, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled, SlackDeliveryState.NotSupported);
+        await attempts.SaveAsync(orphan);
+
+        var history = await attempts.ListHistoryAsync();
+
+        Assert.Equal(3, history.Count);
+        Assert.Equal(new DateOnly(2026, 8, 11), history[0].PlanDate);
+        Assert.Equal("CGM-2", history[0].JiraIssueKey);
+        Assert.Equal("Newer work", history[0].Description);
+        Assert.Equal(new DateOnly(2026, 8, 10), history[1].PlanDate);
+        Assert.Equal("CGM-1", history[1].JiraIssueKey);
+        var orphaned = history[2];
+        Assert.Equal(orphan.PlannedWorkItemId, orphaned.Attempt.PlannedWorkItemId);
+        Assert.Null(orphaned.PlanDate);
+        Assert.Equal("", orphaned.JiraIssueKey);
+    }
+
     private SqliteDailyPlanRepository CreatePlanRepository()
     {
         var database = new SqliteDatabase(CreateDatabasePath());

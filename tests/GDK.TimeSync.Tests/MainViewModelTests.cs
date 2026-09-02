@@ -57,6 +57,31 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_DiscardsAResultWhoseDateIsNoLongerSelected()
+    {
+        var dateA = new DateOnly(2026, 8, 24);
+        var dateB = new DateOnly(2026, 8, 25);
+        var today = new TodayViewModel(date: dateA);
+        var pulledForA = PlannedWorkItem.Create(dateA, "entry pulled for the 24th");
+        var gate = new TaskCompletionSource();
+        var syncService = new FakeTogglSyncService(new TogglSyncPullResult([pulledForA], [], 0, null), gate.Task);
+        var main = new MainViewModel(new FixedConfigurationStateService(isConfigured: true), syncService, today);
+
+        var inFlight = main.SyncNowAsync();
+        Assert.Equal(dateA, syncService.LastDate);
+
+        // The user moves on while A's pull is still out. B's own sync is dropped by the
+        // IsSynchronizing guard, so A's result is the only one that can land.
+        await today.SelectDateAsync(dateB);
+        gate.SetResult();
+        await inFlight;
+
+        Assert.Equal(dateB, today.Date);
+        Assert.DoesNotContain(today.Items, item => item.Name == "entry pulled for the 24th");
+        Assert.Contains("discarded", main.SyncStatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task SyncNowAsync_DoesNothingWithoutASyncServiceOrTodayViewModel()
     {
         var main = new MainViewModel(new FixedConfigurationStateService(isConfigured: true));
@@ -65,6 +90,49 @@ public sealed class MainViewModelTests
 
         Assert.Null(main.SyncStatusText);
         Assert.False(main.IsSynchronizing);
+    }
+
+    [Fact]
+    public async Task SelectingAnotherDate_PullsThatDateFromTogglWithoutWaitingForTheAutoSyncInterval()
+    {
+        var today = new TodayViewModel(date: new DateOnly(2026, 8, 31));
+        var syncService = new FakeTogglSyncService(TogglSyncPullResult.Empty());
+        _ = new MainViewModel(new FixedConfigurationStateService(isConfigured: true), syncService, today);
+
+        await today.SelectDateAsync(new DateOnly(2026, 9, 1));
+        await syncService.WaitForCallAsync();
+
+        Assert.Equal(1, syncService.CallCount);
+        Assert.Equal(new DateOnly(2026, 9, 1), syncService.LastDate);
+    }
+
+    [Fact]
+    public async Task GoToToday_PullsAgainEvenWhenTodayIsAlreadyTheSelectedDate()
+    {
+        var date = DateOnly.FromDateTime(DateTime.Today);
+        var today = new TodayViewModel(date: date);
+        var syncService = new FakeTogglSyncService(TogglSyncPullResult.Empty());
+        _ = new MainViewModel(new FixedConfigurationStateService(isConfigured: true), syncService, today);
+
+        today.GoToTodayCommand.Execute(null);
+        await syncService.WaitForCallAsync();
+
+        Assert.Equal(1, syncService.CallCount);
+        Assert.Equal(date, syncService.LastDate);
+    }
+
+    [Fact]
+    public async Task ShellExposesTheSyncResultSoTheWindowCanShowIt()
+    {
+        var today = new TodayViewModel(date: new DateOnly(2026, 8, 24));
+        var syncService = new FakeTogglSyncService(TogglSyncPullResult.Empty());
+        var main = new MainViewModel(new FixedConfigurationStateService(isConfigured: true), syncService, today);
+        var shell = new ShellViewModel(new FixedConfigurationStateService(isConfigured: true), today, main: main);
+
+        await main.SyncNowAsync();
+
+        Assert.Same(main, shell.Main);
+        Assert.Equal("Imported 0, updated 0, 0 needs review.", shell.Main!.SyncStatusText);
     }
 
     private sealed class FixedConfigurationStateService(bool isConfigured) : IConfigurationStateService
@@ -78,11 +146,21 @@ public sealed class MainViewModelTests
 
     private sealed class FakeTogglSyncService(TogglSyncPullResult result, Task? gate = null) : ITogglSyncService
     {
+        private readonly TaskCompletionSource called = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public int CallCount { get; private set; }
+        public DateOnly? LastDate { get; private set; }
+
+        // Date selection kicks the sync off without awaiting it, the same way the Sync now command
+        // does. Wait for the call rather than sleeping -- and give up rather than hang, so a
+        // regression fails the assertion below instead of stalling the test host.
+        public Task WaitForCallAsync() => Task.WhenAny(called.Task, Task.Delay(TimeSpan.FromSeconds(2)));
 
         public async Task<TogglSyncPullResult> PullAsync(DateOnly date, IReadOnlyList<PlannedWorkItem> localItems, CancellationToken cancellationToken = default)
         {
             CallCount++;
+            LastDate = date;
+            called.TrySetResult();
             if (gate is not null) await gate;
             return result;
         }

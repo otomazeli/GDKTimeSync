@@ -9,7 +9,9 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton(new SqliteDatabase(databasePath));
         services.AddSingleton<IDailyPlanRepository, SqliteDailyPlanRepository>();
-        services.AddSingleton<IDeliveryAttemptRepository, SqliteDeliveryAttemptRepository>();
+        services.AddSingleton<SqliteDeliveryAttemptRepository>();
+        services.AddSingleton<IDeliveryAttemptRepository>(provider => provider.GetRequiredService<SqliteDeliveryAttemptRepository>());
+        services.AddSingleton<IDeliveryHistoryRepository>(provider => provider.GetRequiredService<SqliteDeliveryAttemptRepository>());
         services.AddSingleton<IDailySlackDeliveryRepository, SqliteDailySlackDeliveryRepository>();
         services.AddSingleton<ITemplateRepository, SqliteTemplateRepository>();
         return services;

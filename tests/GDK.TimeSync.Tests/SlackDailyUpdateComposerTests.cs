@@ -8,32 +8,32 @@ public sealed class SlackDailyUpdateComposerTests
     private readonly SlackDailyUpdateComposer composer = new();
 
     [Fact]
-    public void Compose_UsesProjectIssueDescriptionAndBoldStatus()
+    public void Compose_UsesIssueDescriptionAndStatusIcon()
     {
-        var update = composer.Compose(new DateOnly(2026, 8, 13), [new SlackDailyCompletedItem("CGM", "CGMFRAVII-2767", "Knowledge transfer", WorkStatus.Done)]);
+        var update = composer.Compose(new DateOnly(2026, 8, 13), [new SlackDailyCompletedItem("CGMFRAVII-2767", "Knowledge transfer", WorkStatus.Done)]);
 
-        Assert.Equal("CGM | CGMFRAVII-2767 Knowledge transfer | *Done*", update!.SlackExtraLines);
+        Assert.Equal("CGMFRAVII-2767 Knowledge transfer | ✅ 🔷", update!.SlackExtraLines);
         Assert.Equal("", update.SlackTitle);
         Assert.Equal("", update.SlackTaskHeading);
         Assert.Equal("", update.SlackUser);
     }
 
     [Fact]
-    public void Compose_UsesTheSpecifiedDisplayNamesForEveryWorkStatus()
+    public void Compose_UsesTheSpecifiedIconForEveryWorkStatus()
     {
         var update = composer.Compose(new DateOnly(2026, 8, 13), [
-            new("CGM", "CGM-1", "Review", WorkStatus.CodeReview),
-            new("CGM", "CGM-2", "Analysis", WorkStatus.Analyzing),
-            new("CGM", "CGM-3", "Complete", WorkStatus.Done),
-            new("CGM", "CGM-4", "Build", WorkStatus.InProgress),
-            new("CGM", "CGM-5", "Blocked", WorkStatus.Waiting)]);
+            new("CGM-1", "Review", WorkStatus.CodeReview),
+            new("CGM-2", "Analysis", WorkStatus.Analyzing),
+            new("CGM-3", "Complete", WorkStatus.Done),
+            new("CGM-4", "Build", WorkStatus.InProgress),
+            new("CGM-5", "Blocked", WorkStatus.Waiting)]);
 
         Assert.Equal("""
-            CGM | CGM-1 Review | *Code review*
-            CGM | CGM-2 Analysis | *Analyzing*
-            CGM | CGM-3 Complete | *Done*
-            CGM | CGM-4 Build | *In Progress*
-            CGM | CGM-5 Blocked | *Waiting*
+            CGM-1 Review | 👀 🔷
+            CGM-2 Analysis | 🔍 🔷
+            CGM-3 Complete | ✅ 🔷
+            CGM-4 Build | 🔄 🔷
+            CGM-5 Blocked | ⏳ 🔷
             """.ReplaceLineEndings("\n"), update!.SlackExtraLines);
     }
 
@@ -42,7 +42,7 @@ public sealed class SlackDailyUpdateComposerTests
     {
         var update = composer.Compose(
             new DateOnly(2026, 8, 13),
-            [new("CGM", "CGM-1", "Build", WorkStatus.InProgress)],
+            [new("CGM-1", "Build", WorkStatus.InProgress)],
             new SlackDailyUpdateOptions("Daily update", "Completed work", ["", "  ", "Follow up tomorrow"], "planner"));
 
         Assert.Equal("Daily update", update!.SlackTitle);
@@ -50,20 +50,20 @@ public sealed class SlackDailyUpdateComposerTests
         Assert.Equal("planner", update.SlackUser);
         Assert.Equal("""
             Follow up tomorrow
-            CGM | CGM-1 Build | *In Progress*
+            CGM-1 Build | 🔄 🔷
             """.ReplaceLineEndings("\n"), update.SlackExtraLines);
     }
 
     [Fact]
-    public void Compose_MarksAnItemNotPostedToJiraWithoutOmittingItFromTheDigest()
+    public void Compose_MarksAnItemNotPostedToJiraWithItsOwnIconRatherThanAnAbsence()
     {
         var update = composer.Compose(new DateOnly(2026, 8, 13), [
-            new("CGM", "CGM-1", "Delivered", WorkStatus.Done, PostedToJira: true),
-            new("CGM", "CGM-2", "Not yet delivered", WorkStatus.InProgress, PostedToJira: false)]);
+            new("CGM-1", "Delivered", WorkStatus.Done, PostedToJira: true),
+            new("CGM-2", "Not yet delivered", WorkStatus.InProgress, PostedToJira: false)]);
 
         Assert.Equal("""
-            CGM | CGM-1 Delivered | *Done*
-            CGM | CGM-2 Not yet delivered | *In Progress* (not posted in Jira)
+            CGM-1 Delivered | ✅ 🔷
+            CGM-2 Not yet delivered | 🔄 ⚪
             """.ReplaceLineEndings("\n"), update!.SlackExtraLines);
     }
 
