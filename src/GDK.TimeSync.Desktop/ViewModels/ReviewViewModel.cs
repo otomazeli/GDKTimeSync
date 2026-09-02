@@ -225,16 +225,26 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
                 if (cancellation.IsCancellationRequested) break;
                 try
                 {
-                    var attempt = await deliveryService.DeliverConfirmedAsync(row.Item, cancellation.Token);
+                    // CancellationToken.None deliberately: PostAllCoordinator re-checks its token
+                    // mid-item, between the Toggl entry and the Tempo worklog. Handing it the
+                    // cancellable one would let a cancel tear a delivery in half and persist an
+                    // attempt with a Toggl entry and no worklog. A task already started always
+                    // finishes; the check above is what stops the NEXT one.
+                    var attempt = await deliveryService.DeliverConfirmedAsync(row.Item, CancellationToken.None);
                     row.ApplyAttempt(attempt);
                     if (attempt.Status == DeliveryAttemptStatus.Succeeded) succeeded++; else failed++;
                 }
-                catch
+                catch (Exception exception)
                 {
                     failed++;
+                    row.ApplyAttempt(new DeliveryAttempt(row.Item.Id, null, null, DeliveryAttemptStatus.Failed,
+                        DeliveryFailureCode.PersistenceFailed, SlackDeliveryState.NotSupported) { FailureDetail = exception.Message });
                 }
             }
-            BatchStatus = $"{succeeded} succeeded, {failed} failed.";
+            var notAttempted = chosen.Length - succeeded - failed;
+            BatchStatus = notAttempted > 0
+                ? $"{succeeded} succeeded, {failed} failed, {notAttempted} not attempted."
+                : $"{succeeded} succeeded, {failed} failed.";
         }
         finally
         {

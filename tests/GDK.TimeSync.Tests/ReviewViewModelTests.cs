@@ -90,6 +90,26 @@ public sealed class ReviewViewModelTests
 
         Assert.Equal(1, delivery.Calls);
         Assert.Equal([first.Id], delivery.DeliveredIds);
+        // A cancel landing mid-delivery must not reach the in-flight call: it must have run to
+        // completion on a token that was never cancelled, even though the batch's own token was.
+        Assert.All(delivery.Tokens, token => Assert.False(token.IsCancellationRequested));
+        Assert.Contains("1 not attempted", review.BatchStatus!, StringComparison.Ordinal);
+    }
+
+    // A row a delivery call throws for must show the failure, not whatever it showed before.
+    [Fact]
+    public async Task PostSelected_AThrownDeliveryMarksTheRowFailedInsteadOfLeavingItStale()
+    {
+        var review = CreateReview(items: [Task30Minutes("CGM-1")], delivery: out var delivery);
+        await review.RefreshAsync();
+        delivery.OnDelivered = _ => throw new InvalidOperationException("boom");
+
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        var row = review.Tasks.Single();
+        Assert.NotNull(row.FailureText);
+        Assert.Contains("1 failed", review.BatchStatus!, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -449,6 +469,7 @@ public sealed class ReviewViewModelTests
     {
         private readonly Dictionary<Guid, (DeliveryFailureCode Code, string Message)> failures = [];
         public List<Guid> DeliveredIds { get; } = [];
+        public List<CancellationToken> Tokens { get; } = [];
         public int Calls { get; private set; }
         public Action<PlannedWorkItem>? OnDelivered { get; set; }
 
@@ -458,6 +479,7 @@ public sealed class ReviewViewModelTests
         {
             Calls++;
             DeliveredIds.Add(item.Id);
+            Tokens.Add(cancellationToken);
             var result = failures.TryGetValue(item.Id, out var failure)
                 ? new DeliveryAttempt(item.Id, null, null, DeliveryAttemptStatus.Failed, failure.Code, SlackDeliveryState.NotSupported) { FailureDetail = failure.Message }
                 : Succeeded(item);
