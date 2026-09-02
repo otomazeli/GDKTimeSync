@@ -8,92 +8,99 @@ namespace GDK.TimeSync.Tests;
 public sealed class ReviewViewModelTests
 {
     [Fact]
-    public async Task Confirmed_task_delivers_only_the_selected_item()
+    public async Task PostSelected_WritesNothingUntilTheSecondConfirmation()
     {
-        var date = new DateOnly(2026, 8, 13);
-        var first = PlannedWorkItem.Create(date, "First", "CGM-1", "First work", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
-        var second = PlannedWorkItem.Create(date, "Second", "CGM-2", "Second work", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
-        var delivery = new RecordingConfirmedDeliveryService();
-        var review = CreateReview(DailyPlan.Create(date, [first, second]), delivery);
+        var review = CreateReview(items: [Task30Minutes("CGM-1")], delivery: out var delivery);
+        await review.RefreshAsync();
 
-        review.OpenTaskConfirmation(first.Id);
-        Assert.Empty(delivery.DeliveredItemIds);
-        await review.ConfirmTaskAsync();
+        review.PostSelectedCommand.Execute(null);
 
-        Assert.Equal([first.Id], delivery.DeliveredItemIds);
-        Assert.Equal(DeliveryAttemptStatus.Succeeded, review.LastTaskAttempt!.Status);
-        Assert.False(review.IsTaskConfirmationVisible);
+        Assert.True(review.IsBatchConfirmationVisible);
+        Assert.Equal(0, delivery.Calls);
+        Assert.Contains("1 task", review.BatchConfirmationSummary, StringComparison.Ordinal);
+
+        await review.ConfirmPostSelectedAsync();
+
+        Assert.Equal(1, delivery.Calls);
+        Assert.False(review.IsBatchConfirmationVisible);
     }
 
     [Fact]
-    public async Task Task_not_marked_for_toggl_is_not_confirmation_eligible()
+    public async Task PostSelected_DeliversOnlyTickedRowsInOrder()
     {
-        var date = new DateOnly(2026, 8, 13);
-        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT") with { PostToToggl = false };
-        var delivery = new RecordingConfirmedDeliveryService();
-        var review = CreateReview(DailyPlan.Create(date, [item]), delivery);
+        var first = Task30Minutes("CGM-1");
+        var second = Task30Minutes("CGM-2");
+        var third = Task30Minutes("CGM-3");
+        var review = CreateReview(items: [first, second, third], delivery: out var delivery);
+        await review.RefreshAsync();
+        review.Tasks.Single(task => task.JiraIssueKey == "CGM-2").IsSelected = false;
 
-        review.OpenTaskConfirmation(item.Id);
-        await review.ConfirmTaskAsync();
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
 
-        Assert.False(review.IsTaskConfirmationVisible);
-        Assert.Empty(delivery.DeliveredItemIds);
-        Assert.Equal("Task is not marked for Toggl delivery.", review.TaskDeliveryError);
+        Assert.Equal([first.Id, third.Id], delivery.DeliveredIds);
+    }
+
+    // One bad Jira key must not strand the rest of the day.
+    [Fact]
+    public async Task PostSelected_ContinuesAfterAFailureAndReportsBothCounts()
+    {
+        var failing = Task30Minutes("CGM-1");
+        var succeeding = Task30Minutes("CGM-2");
+        var review = CreateReview(items: [failing, succeeding], delivery: out var delivery);
+        delivery.FailFor(failing.Id, DeliveryFailureCode.TempoFailed, "User is invalid");
+        await review.RefreshAsync();
+
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        Assert.Equal(2, delivery.Calls);
+        Assert.Equal(DeliveryMark.Failed, review.Tasks.Single(task => task.Id == failing.Id).Tempo);
+        Assert.Equal("Tempo: User is invalid", review.Tasks.Single(task => task.Id == failing.Id).FailureText);
+        Assert.Equal(DeliveryMark.Delivered, review.Tasks.Single(task => task.Id == succeeding.Id).Tempo);
+        Assert.Contains("1 succeeded", review.BatchStatus!, StringComparison.Ordinal);
+        Assert.Contains("1 failed", review.BatchStatus!, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Task_with_a_known_toggl_entry_is_confirmation_eligible_even_when_not_marked_for_toggl()
+    public async Task CancellingTheConfirmationDeliversNothing()
     {
-        var date = new DateOnly(2026, 8, 13);
-        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT") with { PostToToggl = false, TogglEntryId = 42 };
-        var review = CreateReview(DailyPlan.Create(date, [item]));
+        var review = CreateReview(items: [Task30Minutes("CGM-1")], delivery: out var delivery);
+        await review.RefreshAsync();
 
-        review.OpenTaskConfirmation(item.Id);
+        review.PostSelectedCommand.Execute(null);
+        review.CancelPostSelectedCommand.Execute(null);
 
-        Assert.True(review.IsTaskConfirmationVisible);
-        Assert.Null(review.TaskDeliveryError);
+        Assert.False(review.IsBatchConfirmationVisible);
+        Assert.Equal(0, delivery.Calls);
+    }
+
+    // Cancel stops before the NEXT task; it never interrupts one already in flight.
+    [Fact]
+    public async Task CancellingMidRunStopsBeforeTheNextTask()
+    {
+        var first = Task30Minutes("CGM-1");
+        var second = Task30Minutes("CGM-2");
+        var review = CreateReview(items: [first, second], delivery: out var delivery);
+        await review.RefreshAsync();
+        delivery.OnDelivered = _ => review.CancelBatchCommand.Execute(null);
+
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        Assert.Equal(1, delivery.Calls);
+        Assert.Equal([first.Id], delivery.DeliveredIds);
     }
 
     [Fact]
-    public async Task Task_confirmation_projects_selected_details_and_the_safe_completed_result()
+    public async Task PostSelectedIsUnavailableWithNothingTicked()
     {
-        var date = new DateOnly(2026, 8, 13);
-        var item = PlannedWorkItem.Create(date, "Planning", "CGM-42", "Review design", TimeSpan.FromMinutes(45), "GDK", "SUPPORT", false);
-        var review = CreateReview(DailyPlan.Create(date, [item]));
+        var review = CreateReview(items: [Task30Minutes("CGM-1")]);
+        await review.RefreshAsync();
 
-        review.OpenTaskConfirmation(item.Id);
+        review.Tasks[0].IsSelected = false;
 
-        Assert.Equal("CGM-42", review.SelectedTask!.JiraIssueKey);
-        Assert.Equal("Review design", review.SelectedTask.Comment);
-        Assert.Equal(TimeSpan.FromMinutes(45), review.SelectedTask.Duration);
-        Assert.Equal("GDK", review.SelectedTask.TogglProject);
-        Assert.Equal("SUPPORT", review.SelectedTask.TempoCategory);
-        Assert.False(review.SelectedTask.IsBillable);
-        Assert.Equal("Not delivered", review.TaskDeliveryStatus);
-
-        await review.ConfirmTaskAsync();
-
-        Assert.Equal("Succeeded", review.TaskDeliveryStatus);
-        Assert.Equal(DeliveryAttemptStatus.Succeeded, review.LastTaskAttempt!.Status);
-    }
-
-    [Fact]
-    public async Task Task_confirmation_closes_synchronously_and_invokes_delivery_once_while_in_flight()
-    {
-        var date = new DateOnly(2026, 8, 13);
-        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
-        var delivery = new DelayedConfirmedDeliveryService();
-        var review = CreateReview(DailyPlan.Create(date, [item]), delivery);
-        review.OpenTaskConfirmation(item.Id);
-
-        var first = review.ConfirmTaskAsync();
-        var second = review.ConfirmTaskAsync();
-
-        Assert.False(review.IsTaskConfirmationVisible);
-        Assert.False(review.CanConfirmTask);
-        Assert.Equal(1, delivery.InvocationCount);
-        delivery.Complete(Succeeded(item));
-        await Task.WhenAll(first, second);
+        Assert.False(review.PostSelectedCommand.CanExecute(null));
     }
 
     [Fact]
@@ -106,12 +113,10 @@ public sealed class ReviewViewModelTests
         var review = CreateReview(DailyPlan.Create(date, [item]), delivery, attempts: new AttemptRepository(Succeeded(item)), slackFactory: slack);
 
         review.DryRunCommand.Execute(null);
-        review.OpenTaskConfirmation(item.Id);
-        review.CancelTaskConfirmation();
         await review.ComposeSlackPreviewAsync();
         review.CancelSlackConfirmation();
 
-        Assert.Empty(delivery.DeliveredItemIds);
+        Assert.Empty(delivery.DeliveredIds);
         Assert.Empty(slack.Client.PostedUpdates);
         Assert.Equal(0, slack.CreateCalls);
     }
@@ -127,7 +132,7 @@ public sealed class ReviewViewModelTests
         await review.RefreshAsync();
 
         Assert.Equal([item.Id], review.Tasks.Select(value => value.Id));
-        Assert.Empty(delivery.DeliveredItemIds);
+        Assert.Empty(delivery.DeliveredIds);
     }
 
     [Fact]
@@ -192,12 +197,12 @@ public sealed class ReviewViewModelTests
         await review.ComposeSlackPreviewAsync();
         Assert.True(review.IsSlackConfirmationVisible);
         Assert.Empty(slack.Client.PostedUpdates);
-        Assert.Empty(delivery.DeliveredItemIds);
+        Assert.Empty(delivery.DeliveredIds);
 
         await review.ConfirmSlackAsync();
 
         Assert.Single(slack.Client.PostedUpdates);
-        Assert.Empty(delivery.DeliveredItemIds);
+        Assert.Empty(delivery.DeliveredIds);
         Assert.Equal(1, slack.CreateCalls);
     }
 
@@ -422,6 +427,17 @@ public sealed class ReviewViewModelTests
             DailyPlan.Create(items.Count > 0 ? items[0].Day : default, items),
             delivery, attempts, slackFactory, dailyDeliveries, settings, clipboard);
 
+    private static ReviewViewModel CreateReview(IReadOnlyList<PlannedWorkItem> items, out RecordingConfirmedDeliveryService delivery)
+    {
+        delivery = new RecordingConfirmedDeliveryService();
+        return CreateReview(items, delivery);
+    }
+
+    private static PlannedWorkItem Task30Minutes(string jiraIssueKey) =>
+        PlannedWorkItem.Create(new DateOnly(2026, 9, 1), jiraIssueKey, jiraIssueKey, $"Work on {jiraIssueKey}",
+            TimeSpan.FromMinutes(30), "CGM", "DEVELOPMENT", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30))
+            with { PostToToggl = true };
+
     private static DeliveryAttempt Succeeded(PlannedWorkItem item) => new(item.Id, 101, 201, DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported);
 
     private sealed class FixedPlanSnapshotProvider(DailyPlan plan) : ILocalPlanSnapshotProvider
@@ -431,24 +447,23 @@ public sealed class ReviewViewModelTests
 
     private sealed class RecordingConfirmedDeliveryService : IConfirmedTaskDeliveryService
     {
-        public List<Guid> DeliveredItemIds { get; } = [];
-        public Task<DeliveryAttempt> DeliverConfirmedAsync(PlannedWorkItem item, CancellationToken cancellationToken = default)
-        {
-            DeliveredItemIds.Add(item.Id);
-            return Task.FromResult(Succeeded(item));
-        }
-    }
+        private readonly Dictionary<Guid, (DeliveryFailureCode Code, string Message)> failures = [];
+        public List<Guid> DeliveredIds { get; } = [];
+        public int Calls { get; private set; }
+        public Action<PlannedWorkItem>? OnDelivered { get; set; }
 
-    private sealed class DelayedConfirmedDeliveryService : IConfirmedTaskDeliveryService
-    {
-        private readonly TaskCompletionSource<DeliveryAttempt> completion = new();
-        public int InvocationCount { get; private set; }
+        public void FailFor(Guid id, DeliveryFailureCode code, string message) => failures[id] = (code, message);
+
         public Task<DeliveryAttempt> DeliverConfirmedAsync(PlannedWorkItem item, CancellationToken cancellationToken = default)
         {
-            InvocationCount++;
-            return completion.Task;
+            Calls++;
+            DeliveredIds.Add(item.Id);
+            var result = failures.TryGetValue(item.Id, out var failure)
+                ? new DeliveryAttempt(item.Id, null, null, DeliveryAttemptStatus.Failed, failure.Code, SlackDeliveryState.NotSupported) { FailureDetail = failure.Message }
+                : Succeeded(item);
+            OnDelivered?.Invoke(item);
+            return Task.FromResult(result);
         }
-        public void Complete(DeliveryAttempt attempt) => completion.SetResult(attempt);
     }
 
     private sealed class FixedSettingsStore(UserSettings settings) : IUserSettingsStore

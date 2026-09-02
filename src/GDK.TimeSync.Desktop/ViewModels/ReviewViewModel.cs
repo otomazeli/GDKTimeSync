@@ -18,16 +18,15 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     private readonly IClipboardService? clipboard;
     private readonly IAuditLog? auditLog;
     private string dryRunSummary = "Run Dry Run to validate the current local plan.";
-    private PlannedWorkItem? selectedTask;
-    private DeliveryAttempt? lastTaskAttempt;
     private SlackDailyUpdate? slackPreview;
-    private string? taskDeliveryError;
     private string? slackDeliveryError;
-    private bool isTaskConfirmationVisible;
     private bool isSlackConfirmationVisible;
     private bool canConfirmSlack;
-    private bool isTaskDeliveryInFlight;
     private DateOnly? planDate;
+    private CancellationTokenSource? batchCancellation;
+    private bool isBatchConfirmationVisible;
+    private bool isBatchInFlight;
+    private string? batchStatus;
 
     public ReviewViewModel(
         ILocalPlanSnapshotProvider? planProvider = null,
@@ -52,13 +51,10 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         LiveValidation = new LiveValidationViewModel(planProvider, diagnosticsService, validationService);
         DryRunCommand = new RelayCommand(_ => RunDryRun());
         RefreshCommand = new RelayCommand(_ => _ = RefreshAsync());
-        OpenTaskConfirmationCommand = new RelayCommand(value =>
-        {
-            if (value is PlannedWorkItem item)
-                OpenTaskConfirmation(item.Id);
-        });
-        ConfirmTaskCommand = new RelayCommand(_ => _ = ConfirmTaskAsync(), () => CanConfirmTask);
-        CancelTaskConfirmationCommand = new RelayCommand(_ => CancelTaskConfirmation(), () => IsTaskConfirmationVisible);
+        PostSelectedCommand = new RelayCommand(_ => OpenBatchConfirmation(), () => SelectedCount > 0 && !IsBatchInFlight);
+        ConfirmPostSelectedCommand = new RelayCommand(_ => _ = ConfirmPostSelectedAsync());
+        CancelPostSelectedCommand = new RelayCommand(_ => CancelPostSelected(), () => IsBatchConfirmationVisible);
+        CancelBatchCommand = new RelayCommand(_ => CancelBatch(), () => IsBatchInFlight);
         ComposeSlackPreviewCommand = new RelayCommand(_ => _ = ComposeSlackPreviewAsync());
         ConfirmSlackCommand = new RelayCommand(_ => _ = ConfirmSlackAsync(), () => CanConfirmSlack);
         CancelSlackConfirmationCommand = new RelayCommand(_ => CancelSlackConfirmation(), () => IsSlackConfirmationVisible);
@@ -69,9 +65,10 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
     public RelayCommand DryRunCommand { get; }
     public RelayCommand RefreshCommand { get; }
-    public RelayCommand OpenTaskConfirmationCommand { get; }
-    public RelayCommand ConfirmTaskCommand { get; }
-    public RelayCommand CancelTaskConfirmationCommand { get; }
+    public RelayCommand PostSelectedCommand { get; }
+    public RelayCommand ConfirmPostSelectedCommand { get; }
+    public RelayCommand CancelPostSelectedCommand { get; }
+    public RelayCommand CancelBatchCommand { get; }
     public RelayCommand ComposeSlackPreviewCommand { get; }
     public RelayCommand ConfirmSlackCommand { get; }
     public RelayCommand CancelSlackConfirmationCommand { get; }
@@ -82,8 +79,6 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     public ObservableCollection<string> SlackBlockers { get; } = [];
     public string DryRunSummary { get => dryRunSummary; private set => SetField(ref dryRunSummary, value); }
     public DateOnly? PlanDate { get => planDate; private set => SetField(ref planDate, value); }
-    public PlannedWorkItem? SelectedTask { get => selectedTask; private set => SetField(ref selectedTask, value); }
-    public DeliveryAttempt? LastTaskAttempt { get => lastTaskAttempt; private set => SetField(ref lastTaskAttempt, value); }
     public SlackDailyUpdate? SlackPreview
     {
         get => slackPreview;
@@ -98,32 +93,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     public string SlackPreviewText => SlackPreview is null
         ? ""
         : string.Join("\n", new[] { SlackPreview.SlackTitle, SlackPreview.SlackTaskHeading, SlackPreview.SlackExtraLines }.Where(part => !string.IsNullOrWhiteSpace(part)));
-    public string? TaskDeliveryError { get => taskDeliveryError; private set => SetField(ref taskDeliveryError, value); }
     public string? SlackDeliveryError { get => slackDeliveryError; private set => SetField(ref slackDeliveryError, value); }
-    public bool IsTaskDeliveryInFlight
-    {
-        get => isTaskDeliveryInFlight;
-        private set
-        {
-            if (isTaskDeliveryInFlight == value) return;
-            SetField(ref isTaskDeliveryInFlight, value);
-            ConfirmTaskCommand.NotifyCanExecuteChanged();
-        }
-    }
-    public bool CanConfirmTask => IsTaskConfirmationVisible && !IsTaskDeliveryInFlight;
-    public string TaskDeliveryStatus => LastTaskAttempt?.Status.ToString() ?? "Not delivered";
-    public bool IsTaskConfirmationVisible
-    {
-        get => isTaskConfirmationVisible;
-        private set
-        {
-            if (isTaskConfirmationVisible == value) return;
-            SetField(ref isTaskConfirmationVisible, value);
-            ConfirmTaskCommand.NotifyCanExecuteChanged();
-            CancelTaskConfirmationCommand.NotifyCanExecuteChanged();
-            OnPropertyChanged(nameof(CanConfirmTask));
-        }
-    }
     public bool IsSlackConfirmationVisible
     {
         get => isSlackConfirmationVisible;
@@ -148,6 +118,34 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     public int SelectedCount => Tasks.Count(task => task.IsSelected);
     public TimeSpan SelectedDuration => Tasks.Where(task => task.IsSelected).Aggregate(TimeSpan.Zero, (total, task) => total + task.Duration);
     public string DaySummary => $"{Tasks.Count} task(s) · {SelectedDuration:h\\:mm} selected";
+
+    public bool IsBatchConfirmationVisible
+    {
+        get => isBatchConfirmationVisible;
+        private set
+        {
+            if (isBatchConfirmationVisible == value) return;
+            SetField(ref isBatchConfirmationVisible, value);
+            ConfirmPostSelectedCommand.NotifyCanExecuteChanged();
+            CancelPostSelectedCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    public bool IsBatchInFlight
+    {
+        get => isBatchInFlight;
+        private set
+        {
+            if (isBatchInFlight == value) return;
+            SetField(ref isBatchInFlight, value);
+            PostSelectedCommand.NotifyCanExecuteChanged();
+            CancelBatchCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    public string? BatchStatus { get => batchStatus; private set => SetField(ref batchStatus, value); }
+    public string BatchConfirmationSummary =>
+        $"{SelectedCount} task(s) → Toggl, Jira, Tempo · {SelectedDuration:h\\:mm} total";
 
     public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
@@ -196,58 +194,57 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SelectedCount));
         OnPropertyChanged(nameof(SelectedDuration));
         OnPropertyChanged(nameof(DaySummary));
-        // Task 4 adds `PostSelectedCommand.NotifyCanExecuteChanged();` here once that command exists.
-        // Do NOT add it in this task -- the command is not declared yet and the file will not compile.
+        PostSelectedCommand.NotifyCanExecuteChanged();
     }
 
-    public void OpenTaskConfirmation(Guid itemId)
+    private void OpenBatchConfirmation()
     {
-        var item = planProvider?.GetSnapshot().Items.SingleOrDefault(value => value.Id == itemId);
-        if (item is null) return;
-        if (!item.PostToToggl && item.TogglEntryId is null)
-        {
-            TaskDeliveryError = "Task is not marked for Toggl delivery.";
-            IsTaskConfirmationVisible = false;
-            SelectedTask = null;
-            return;
-        }
-        SelectedTask = item;
-        if (LastTaskAttempt?.PlannedWorkItemId != item.Id)
-            LastTaskAttempt = null;
-        TaskDeliveryError = null;
-        IsTaskConfirmationVisible = true;
+        if (SelectedCount == 0) return;
+        BatchStatus = null;
+        IsBatchConfirmationVisible = true;
     }
 
-    public void CancelTaskConfirmation()
-    {
-        IsTaskConfirmationVisible = false;
-        SelectedTask = null;
-    }
+    public void CancelPostSelected() => IsBatchConfirmationVisible = false;
 
-    public async Task ConfirmTaskAsync(CancellationToken cancellationToken = default)
+    public async Task ConfirmPostSelectedAsync(CancellationToken cancellationToken = default)
     {
-        if (!CanConfirmTask || SelectedTask is not { } item || deliveryService is null) return;
+        if (!IsBatchConfirmationVisible || deliveryService is null || IsBatchInFlight) return;
 
-        IsTaskDeliveryInFlight = true;
-        CancelTaskConfirmation();
+        IsBatchConfirmationVisible = false;
+        IsBatchInFlight = true;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        batchCancellation = cancellation;
+        var succeeded = 0;
+        var failed = 0;
+        var chosen = Tasks.Where(task => task.IsSelected).ToArray();
         try
         {
-            LastTaskAttempt = await deliveryService.DeliverConfirmedAsync(item, cancellationToken);
-            TaskDeliveryError = null;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            TaskDeliveryError = "Task delivery was cancelled.";
-        }
-        catch
-        {
-            TaskDeliveryError = "Task delivery could not be completed.";
+            foreach (var row in chosen)
+            {
+                // Checked before each task, never during one: a cancel must not tear a delivery in half.
+                if (cancellation.IsCancellationRequested) break;
+                try
+                {
+                    var attempt = await deliveryService.DeliverConfirmedAsync(row.Item, cancellation.Token);
+                    row.ApplyAttempt(attempt);
+                    if (attempt.Status == DeliveryAttemptStatus.Succeeded) succeeded++; else failed++;
+                }
+                catch
+                {
+                    failed++;
+                }
+            }
+            BatchStatus = $"{succeeded} succeeded, {failed} failed.";
         }
         finally
         {
-            IsTaskDeliveryInFlight = false;
+            batchCancellation = null;
+            IsBatchInFlight = false;
+            NotifySelectionChanged();
         }
     }
+
+    public void CancelBatch() => batchCancellation?.Cancel();
 
     public async Task ComposeSlackPreviewAsync(CancellationToken cancellationToken = default)
     {
@@ -434,8 +431,6 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         if (EqualityComparer<T>.Default.Equals(field, value)) return;
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        if (propertyName == nameof(LastTaskAttempt))
-            OnPropertyChanged(nameof(TaskDeliveryStatus));
     }
 
     private void OnPropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
