@@ -30,6 +30,21 @@ public sealed class ReviewViewModelTests
 
         // Exactly one confirmation panel, where there used to be five.
         Assert.Single(markup.Split("IsBatchConfirmationVisible").Skip(1));
+
+        // Button.Content is typed `object`, so a StringFormat on its binding is silently ignored and
+        // the raw count renders instead of the label. ContentStringFormat is the property WPF actually
+        // applies here; regression would leave these buttons showing "1" instead of a real label.
+        var buttons = elements.Where(element => element.Name.LocalName == "Button").ToArray();
+        var postSelected = buttons.Single(button => button.Attribute("Command")?.Value == "{Binding PostSelectedCommand}");
+        Assert.Equal("{Binding SelectedCount}", postSelected.Attribute("Content")?.Value);
+        Assert.Equal("Post selected ({0})", postSelected.Attribute("ContentStringFormat")?.Value);
+
+        var confirmPost = buttons.Single(button => button.Attribute("Command")?.Value == "{Binding ConfirmPostSelectedCommand}");
+        Assert.Equal("{Binding SelectedCount}", confirmPost.Attribute("Content")?.Value);
+        Assert.Equal("Post {0} task(s)", confirmPost.Attribute("ContentStringFormat")?.Value);
+
+        // No ContentControl anywhere in the page should carry the broken pattern.
+        Assert.DoesNotContain(elements, element => element.Attribute("Content")?.Value.Contains("StringFormat", StringComparison.Ordinal) == true);
     }
 
     [Fact]
