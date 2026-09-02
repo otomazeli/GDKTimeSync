@@ -8,6 +8,57 @@ namespace GDK.TimeSync.Tests;
 public sealed class ReviewViewModelTests
 {
     [Fact]
+    public async Task AFullPostCycleIsRecordedInOrder()
+    {
+        var log = new RecordingAuditLog();
+        var review = CreateReview(items: [Task30Minutes("CGM-1")], auditLog: log);
+        await review.RefreshAsync();
+
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        var review_entries = log.Entries.Where(entry => entry.Category == "Review").Select(entry => entry.Message).ToArray();
+        Assert.Contains(review_entries, message => message.StartsWith("Loaded", StringComparison.Ordinal));
+        Assert.Contains(review_entries, message => message.StartsWith("Post requested for 1 task(s): CGM-1", StringComparison.Ordinal));
+        Assert.Contains(review_entries, message => message.StartsWith("Post confirmed for 1 task(s)", StringComparison.Ordinal));
+        Assert.Contains(review_entries, message => message.StartsWith("Post finished: 1 succeeded, 0 failed", StringComparison.Ordinal));
+        Assert.True(Array.IndexOf(review_entries, review_entries.First(m => m.StartsWith("Post requested", StringComparison.Ordinal)))
+                 < Array.IndexOf(review_entries, review_entries.First(m => m.StartsWith("Post confirmed", StringComparison.Ordinal))));
+    }
+
+    [Fact]
+    public async Task CancellingTheConfirmationIsRecordedAndDeliversNothing()
+    {
+        var log = new RecordingAuditLog();
+        var review = CreateReview(items: [Task30Minutes("CGM-1")], auditLog: log, delivery: out var delivery);
+        await review.RefreshAsync();
+
+        review.PostSelectedCommand.Execute(null);
+        review.CancelPostSelectedCommand.Execute(null);
+
+        Assert.Contains(log.Entries, entry => entry.Category == "Review" && entry.Message.StartsWith("Post cancelled before delivery", StringComparison.Ordinal));
+        Assert.DoesNotContain(log.Entries, entry => entry.Category == "Delivery");
+        Assert.Equal(0, delivery.Calls);
+    }
+
+    [Fact]
+    public async Task NoAuditEntryCarriesASettingsValueOrSecret()
+    {
+        var log = new RecordingAuditLog();
+        var review = CreateReview(items: [Task30Minutes("CGM-1")], auditLog: log,
+            settings: new UserSettings { JiraBaseUrl = "https://jira.example.test", JiraUser = "secret.user@example.test" });
+        await review.RefreshAsync();
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        Assert.All(log.Entries, entry =>
+        {
+            Assert.DoesNotContain("secret.user@example.test", entry.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("jira.example.test", entry.Message, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public async Task PostSelected_WritesNothingUntilTheSecondConfirmation()
     {
         var review = CreateReview(items: [Task30Minutes("CGM-1")], delivery: out var delivery);
@@ -425,7 +476,8 @@ public sealed class ReviewViewModelTests
         ISlackClientFactory? slackFactory = null,
         IDailySlackDeliveryRepository? dailyDeliveries = null,
         IUserSettingsStore? settings = null,
-        IClipboardService? clipboard = null) =>
+        IClipboardService? clipboard = null,
+        IAuditLog? auditLog = null) =>
         new(
             new FixedPlanSnapshotProvider(plan),
             delivery ?? new RecordingConfirmedDeliveryService(),
@@ -433,7 +485,8 @@ public sealed class ReviewViewModelTests
             dailyDeliveries ?? new DailyDeliveryRepository(),
             slackFactory ?? new RecordingSlackClientFactory(),
             settings ?? new FixedSettingsStore(new UserSettings()),
-            clipboard: clipboard);
+            clipboard: clipboard,
+            auditLog: auditLog);
 
     private static ReviewViewModel CreateReview(
         IReadOnlyList<PlannedWorkItem> items,
@@ -442,16 +495,22 @@ public sealed class ReviewViewModelTests
         ISlackClientFactory? slackFactory = null,
         IDailySlackDeliveryRepository? dailyDeliveries = null,
         IUserSettingsStore? settings = null,
-        IClipboardService? clipboard = null) =>
+        IClipboardService? clipboard = null,
+        IAuditLog? auditLog = null) =>
         CreateReview(
             DailyPlan.Create(items.Count > 0 ? items[0].Day : default, items),
-            delivery, attempts, slackFactory, dailyDeliveries, settings, clipboard);
+            delivery, attempts, slackFactory, dailyDeliveries, settings, clipboard, auditLog);
 
-    private static ReviewViewModel CreateReview(IReadOnlyList<PlannedWorkItem> items, out RecordingConfirmedDeliveryService delivery)
+    private static ReviewViewModel CreateReview(IReadOnlyList<PlannedWorkItem> items, out RecordingConfirmedDeliveryService delivery, IAuditLog? auditLog = null)
     {
         delivery = new RecordingConfirmedDeliveryService();
-        return CreateReview(items, delivery);
+        return CreateReview(items, delivery, auditLog: auditLog);
     }
+
+    // Test 3 needs raw presentation values (JiraBaseUrl/JiraUser) it can assert never leak into the
+    // audit log; every other test goes through IUserSettingsStore like the app does.
+    private static ReviewViewModel CreateReview(IReadOnlyList<PlannedWorkItem> items, IAuditLog? auditLog, UserSettings settings) =>
+        CreateReview(items, settings: new FixedSettingsStore(settings), auditLog: auditLog);
 
     private static PlannedWorkItem Task30Minutes(string jiraIssueKey) =>
         PlannedWorkItem.Create(new DateOnly(2026, 9, 1), jiraIssueKey, jiraIssueKey, $"Work on {jiraIssueKey}",
@@ -567,6 +626,12 @@ public sealed class ReviewViewModelTests
             await credentials.GetAsync(CredentialKeys.SlackWebhook, cancellationToken);
             return new RecordingSlackClient();
         }
+    }
+
+    private sealed class RecordingAuditLog : IAuditLog
+    {
+        public List<(AuditLevel Level, string Category, string Message)> Entries { get; } = [];
+        public void Write(AuditLevel level, string category, string message) => Entries.Add((level, category, message));
     }
 
     private sealed class InvalidSlackFactory : ISlackClientFactory

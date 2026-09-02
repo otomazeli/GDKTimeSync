@@ -156,7 +156,12 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
         var plan = planProvider?.GetSnapshot();
         PlanDate = plan?.Date;
-        if (plan is null) { NotifySelectionChanged(); return; }
+        if (plan is null)
+        {
+            NotifySelectionChanged();
+            auditLog?.Write(AuditLevel.Info, "Review", $"Loaded {PlanDate}: {Tasks.Count} task(s), 0 already delivered");
+            return;
+        }
 
         var recorded = new Dictionary<Guid, DeliveryAttempt>();
         if (attempts is not null)
@@ -182,6 +187,8 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
         LiveValidation.LoadItems(Tasks.Select(task => task.Item).ToArray());
         NotifySelectionChanged();
+        var alreadyDelivered = Tasks.Count(task => recorded.GetValueOrDefault(task.Id)?.Status == DeliveryAttemptStatus.Succeeded);
+        auditLog?.Write(AuditLevel.Info, "Review", $"Loaded {PlanDate}: {Tasks.Count} task(s), {alreadyDelivered} already delivered");
     }
 
     private void OnTaskChanged(object? sender, PropertyChangedEventArgs e)
@@ -202,9 +209,15 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         if (SelectedCount == 0) return;
         BatchStatus = null;
         IsBatchConfirmationVisible = true;
+        var keys = string.Join(", ", Tasks.Where(task => task.IsSelected).Select(task => task.JiraIssueKey));
+        auditLog?.Write(AuditLevel.Info, "Review", $"Post requested for {SelectedCount} task(s): {keys}, {SelectedDuration:h\\:mm}");
     }
 
-    public void CancelPostSelected() => IsBatchConfirmationVisible = false;
+    public void CancelPostSelected()
+    {
+        auditLog?.Write(AuditLevel.Info, "Review", $"Post cancelled before delivery ({SelectedCount} task(s))");
+        IsBatchConfirmationVisible = false;
+    }
 
     public async Task ConfirmPostSelectedAsync(CancellationToken cancellationToken = default)
     {
@@ -217,12 +230,17 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         var succeeded = 0;
         var failed = 0;
         var chosen = Tasks.Where(task => task.IsSelected).ToArray();
+        auditLog?.Write(AuditLevel.Info, "Review", $"Post confirmed for {chosen.Length} task(s)");
         try
         {
             foreach (var row in chosen)
             {
                 // Checked before each task, never during one: a cancel must not tear a delivery in half.
-                if (cancellation.IsCancellationRequested) break;
+                if (cancellation.IsCancellationRequested)
+                {
+                    auditLog?.Write(AuditLevel.Warning, "Review", $"Post cancelled after {succeeded + failed} of {chosen.Length}");
+                    break;
+                }
                 try
                 {
                     // CancellationToken.None deliberately: PostAllCoordinator re-checks its token
@@ -245,6 +263,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
             BatchStatus = notAttempted > 0
                 ? $"{succeeded} succeeded, {failed} failed, {notAttempted} not attempted."
                 : $"{succeeded} succeeded, {failed} failed.";
+            auditLog?.Write(failed > 0 ? AuditLevel.Warning : AuditLevel.Info, "Review", $"Post finished: {succeeded} succeeded, {failed} failed");
         }
         finally
         {
@@ -323,6 +342,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
     public void CancelSlackConfirmation()
     {
+        auditLog?.Write(AuditLevel.Info, "Slack", $"Slack send cancelled for {PlanDate}");
         IsSlackConfirmationVisible = false;
         CanConfirmSlack = false;
     }
@@ -419,6 +439,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         {
             DryRunBlockers.Add("No local plan is available to review.");
             DryRunSummary = "Dry Run found 1 blocker.";
+            auditLog?.Write(AuditLevel.Warning, "Review", $"Dry run {PlanDate}: {DryRunSummary}");
             return;
         }
 
@@ -434,6 +455,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
         var duration = TimeSpan.FromTicks(plan.Items.Sum(item => item.Duration.Ticks));
         DryRunSummary = $"{plan.Items.Count} planned item(s), {duration.TotalMinutes:0} planned minute(s). Dry Run does not deliver tasks or Slack.";
+        auditLog?.Write(DryRunBlockers.Count > 0 ? AuditLevel.Warning : AuditLevel.Info, "Review", $"Dry run {PlanDate}: {DryRunSummary}");
     }
 
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
