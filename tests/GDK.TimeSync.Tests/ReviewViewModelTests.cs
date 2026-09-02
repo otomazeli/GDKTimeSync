@@ -22,6 +22,7 @@ public sealed class ReviewViewModelTests
         Assert.Contains("CancelBatchCommand", markup, StringComparison.Ordinal);
         Assert.Contains("BatchConfirmationSummary", markup, StringComparison.Ordinal);
         Assert.Contains("FailureText", markup, StringComparison.Ordinal);
+        Assert.Contains("{Binding DryRunBlockers}", markup, StringComparison.Ordinal);
 
         // The guided-validation block moved to Diagnostics; none of its bindings may remain here.
         Assert.DoesNotContain("IsTogglConfirmationVisible", markup, StringComparison.Ordinal);
