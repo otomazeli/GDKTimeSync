@@ -153,7 +153,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         if (plan is null)
         {
             NotifySelectionChanged();
-            auditLog?.Write(AuditLevel.Info, "Review", $"Loaded {PlanDate}: {Tasks.Count} task(s), 0 already delivered");
+            auditLog?.Write(AuditLevel.Info, "Review", $"Loaded (no plan): {Tasks.Count} task(s)");
             return;
         }
 
@@ -226,6 +226,12 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         auditLog?.Write(AuditLevel.Info, "Review", $"Post confirmed for {chosen.Length} task(s)");
         try
         {
+            // Snapshotted once, not per row: TogglAutoSyncService can mutate the plan every 5 minutes
+            // regardless of which page is visible, so a row captured at RefreshAsync time can be stale
+            // by the time this batch delivers it. Re-reading once here (rather than per iteration, which
+            // would be wasted work and could shift mid-batch) keeps every row's data as fresh as possible
+            // without changing the plan out from under the batch while it runs.
+            var plan = planProvider?.GetSnapshot();
             foreach (var row in chosen)
             {
                 // Checked before each task, never during one: a cancel must not tear a delivery in half.
@@ -236,12 +242,15 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
                 }
                 try
                 {
+                    // Resolve against the fresh snapshot by id; fall back to the captured item if the
+                    // row has vanished from the plan (e.g. removed since RefreshAsync).
+                    var item = plan?.Items.FirstOrDefault(candidate => candidate.Id == row.Id) ?? row.Item;
                     // CancellationToken.None deliberately: PostAllCoordinator re-checks its token
                     // mid-item, between the Toggl entry and the Tempo worklog. Handing it the
                     // cancellable one would let a cancel tear a delivery in half and persist an
                     // attempt with a Toggl entry and no worklog. A task already started always
                     // finishes; the check above is what stops the NEXT one.
-                    var attempt = await deliveryService.DeliverConfirmedAsync(row.Item, CancellationToken.None);
+                    var attempt = await deliveryService.DeliverConfirmedAsync(item, CancellationToken.None);
                     row.ApplyAttempt(attempt);
                     if (attempt.Status == DeliveryAttemptStatus.Succeeded) succeeded++; else failed++;
                 }

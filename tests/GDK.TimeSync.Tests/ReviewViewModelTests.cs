@@ -153,6 +153,59 @@ public sealed class ReviewViewModelTests
         Assert.Contains("1 failed", review.BatchStatus!, StringComparison.Ordinal);
     }
 
+    // TogglAutoSyncService mutates the plan every 5 minutes regardless of which page is visible, so a
+    // batch left open across a sync must deliver the CURRENT data, not whatever RefreshAsync captured.
+    [Fact]
+    public async Task PostSelected_DeliversTheCurrentPlanValueEvenWhenTheSnapshotChangedAfterRefresh()
+    {
+        var original = Task30Minutes("CGM-1");
+        var provider = new MutablePlanSnapshotProvider(DailyPlan.Create(original.Day, [original]));
+        var delivery = new RecordingConfirmedDeliveryService();
+        var review = new ReviewViewModel(provider, delivery, new AttemptRepository(), new DailyDeliveryRepository(),
+            new RecordingSlackClientFactory(), new FixedSettingsStore(new UserSettings()));
+        await review.RefreshAsync();
+
+        var updated = original with { Duration = TimeSpan.FromMinutes(90) };
+        provider.Plan = DailyPlan.Create(updated.Day, [updated]);
+
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        Assert.Equal(TimeSpan.FromMinutes(90), delivery.DeliveredItems.Single().Duration);
+    }
+
+    // A row whose item disappeared from the plan between refresh and confirmation (e.g. removed
+    // upstream) must still deliver, using the value captured at refresh as a fallback.
+    [Fact]
+    public async Task PostSelected_FallsBackToTheCapturedItemWhenTheRowIsNoLongerInThePlan()
+    {
+        var vanished = Task30Minutes("CGM-1");
+        var provider = new MutablePlanSnapshotProvider(DailyPlan.Create(vanished.Day, [vanished]));
+        var delivery = new RecordingConfirmedDeliveryService();
+        var review = new ReviewViewModel(provider, delivery, new AttemptRepository(), new DailyDeliveryRepository(),
+            new RecordingSlackClientFactory(), new FixedSettingsStore(new UserSettings()));
+        await review.RefreshAsync();
+
+        provider.Plan = DailyPlan.Create(vanished.Day, []);
+
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        Assert.Equal(vanished.Id, delivery.DeliveredItems.Single().Id);
+        Assert.Equal(1, delivery.Calls);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_WithNoPlan_LogsANoPlanEntryInsteadOfAnEmptyDate()
+    {
+        var log = new RecordingAuditLog();
+        var review = new ReviewViewModel(auditLog: log);
+
+        await review.RefreshAsync();
+
+        Assert.Contains(log.Entries, entry => entry.Category == "Review" && entry.Message == "Loaded (no plan): 0 task(s)");
+    }
+
     [Fact]
     public async Task CancellingTheConfirmationDeliversNothing()
     {
@@ -564,10 +617,20 @@ public sealed class ReviewViewModelTests
         public DailyPlan GetSnapshot() => plan;
     }
 
+    // Returns whatever `Plan` currently holds, so a test can mutate it between RefreshAsync and
+    // ConfirmPostSelectedAsync to prove the batch re-reads a fresh snapshot rather than the one
+    // captured at refresh time.
+    private sealed class MutablePlanSnapshotProvider(DailyPlan plan) : ILocalPlanSnapshotProvider
+    {
+        public DailyPlan Plan { get; set; } = plan;
+        public DailyPlan GetSnapshot() => Plan;
+    }
+
     private sealed class RecordingConfirmedDeliveryService : IConfirmedTaskDeliveryService
     {
         private readonly Dictionary<Guid, (DeliveryFailureCode Code, string Message)> failures = [];
         public List<Guid> DeliveredIds { get; } = [];
+        public List<PlannedWorkItem> DeliveredItems { get; } = [];
         public List<CancellationToken> Tokens { get; } = [];
         public int Calls { get; private set; }
         public Action<PlannedWorkItem>? OnDelivered { get; set; }
@@ -578,6 +641,7 @@ public sealed class ReviewViewModelTests
         {
             Calls++;
             DeliveredIds.Add(item.Id);
+            DeliveredItems.Add(item);
             Tokens.Add(cancellationToken);
             var result = failures.TryGetValue(item.Id, out var failure)
                 ? new DeliveryAttempt(item.Id, null, null, DeliveryAttemptStatus.Failed, failure.Code, SlackDeliveryState.NotSupported) { FailureDetail = failure.Message }
