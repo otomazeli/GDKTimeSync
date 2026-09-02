@@ -19,6 +19,8 @@
             <StackPanel Orientation="Horizontal">
                 <Button Width="110" Command="{Binding AddItemCommand}">Add item</Button>
                 <Button Margin="8,0,0,0" Command="{Binding RefreshProjectsCommand}">Refresh Toggl projects</Button>
+                <Button Width="90" Margin="8,0,0,0" Command="{Binding SaveCommand}" Content="Save" />
+                <TextBlock Margin="12,0,0,0" VerticalAlignment="Center" Text="{Binding SaveStatus}" Foreground="DimGray" FontSize="11" />
                 <Button Margin="8,0,0,0" Command="{Binding OpenAiConsentCommand}" Content="Draft AI description"
                         Visibility="{Binding IsAiEnabled, Converter={StaticResource BooleanToVisibilityConverter}}" />
             </StackPanel>

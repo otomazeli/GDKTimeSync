@@ -963,6 +963,62 @@ public sealed class TodayViewModelTests
         public Task SaveAsync(DailyPlan value, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
+    // ---- Issue #7: a Save button, and something that says whether a save has landed ----
+
+    [Fact]
+    public async Task EditingARowMarksThePlanUnsavedUntilTheSaveLands()
+    {
+        var date = new DateOnly(2026, 9, 3);
+        var today = new TodayViewModel(new StubPlanRepository(DailyPlan.Create(date, [])), date);
+        await today.InitializeAsync();
+        Assert.False(today.HasUnsavedChanges);
+
+        today.Items[0].Description = "edited";
+
+        Assert.True(today.HasUnsavedChanges);
+        Assert.True(today.SaveCommand.CanExecute(null));
+
+        await today.FlushAsync();
+
+        Assert.False(today.HasUnsavedChanges);
+        Assert.NotNull(today.LastSavedAt);
+    }
+
+    [Fact]
+    public async Task SaveCommandIsUnavailableWithNothingOutstanding()
+    {
+        var date = new DateOnly(2026, 9, 3);
+        var today = new TodayViewModel(new StubPlanRepository(DailyPlan.Create(date, [])), date);
+        await today.InitializeAsync();
+
+        Assert.False(today.SaveCommand.CanExecute(null));
+    }
+
+    // A failed save must leave the plan marked unsaved: reporting "Saved" over a write that did not
+    // happen is worse than showing nothing at all.
+    [Fact]
+    public async Task AFailedSaveLeavesThePlanMarkedUnsavedAndReportsTheError()
+    {
+        var date = new DateOnly(2026, 9, 3);
+        var today = new TodayViewModel(new ThrowingPlanRepository(DailyPlan.Create(date, [])), date);
+        await today.InitializeAsync();
+
+        today.Items[0].Description = "edited";
+        await today.FlushAsync();
+
+        Assert.True(today.HasUnsavedChanges);
+        Assert.Null(today.LastSavedAt);
+        Assert.Equal("Could not save today's plan.", today.PersistenceError);
+    }
+
+    private sealed class ThrowingPlanRepository(DailyPlan plan) : IDailyPlanRepository
+    {
+        public Task<DailyPlan?> GetAsync(DateOnly date, CancellationToken cancellationToken = default) =>
+            Task.FromResult<DailyPlan?>(date == plan.Date ? plan : null);
+        public Task SaveAsync(DailyPlan value, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("disk is unavailable");
+    }
+
     private sealed class FixedSettingsStore(UserSettings settings) : IUserSettingsStore
     {
         public UserSettings Load() => settings;

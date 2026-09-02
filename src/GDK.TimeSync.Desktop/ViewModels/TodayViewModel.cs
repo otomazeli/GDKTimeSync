@@ -34,6 +34,8 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     private readonly IssueKeyValidator? issueKeyValidator;
     private string? projectLoadError;
     private string? jiraLookupError;
+    private bool hasUnsavedChanges;
+    private DateTimeOffset? lastSavedAt;
 
     public TodayViewModel(IDailyPlanRepository? repository = null, DateOnly? date = null, IAiConsentService? aiConsentService = null, IAssistedTextGenerator? assistedTextGenerator = null, IIntegrationClientFactory? integrationClients = null, IUserSettingsStore? settingsStore = null, IAuditLog? auditLog = null, IJiraIssueLookup? jiraLookup = null, IssueKeyValidator? issueKeyValidator = null)
     {
@@ -56,6 +58,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
         ApplyAiSuggestionCommand = new RelayCommand(_ => ApplyAiSuggestion());
         RefreshProjectsCommand = new RelayCommand(_ => _ = LoadProjectsAsync());
         GoToTodayCommand = new RelayCommand(_ => _ = SelectDateAsync(DateOnly.FromDateTime(DateTime.Today)));
+        SaveCommand = new RelayCommand(() => _ = FlushAsync(), () => HasUnsavedChanges);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -93,11 +96,36 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     public RelayCommand ApplyAiSuggestionCommand { get; }
     public RelayCommand RefreshProjectsCommand { get; }
     public RelayCommand GoToTodayCommand { get; }
+    public RelayCommand SaveCommand { get; }
     public double PlannedSeconds => Items.Sum(item => item.Duration.TotalSeconds);
     public IReadOnlyList<WorkStatusOption> WorkStatuses => WorkStatusOption.All;
     public string? PersistenceError { get => persistenceError; private set => SetField(ref persistenceError, value); }
     public string? ProjectLoadError { get => projectLoadError; private set => SetField(ref projectLoadError, value); }
     public string? JiraLookupError { get => jiraLookupError; private set => SetField(ref jiraLookupError, value); }
+
+    // Today autosaves, but a working autosave and a broken one looked identical from the outside.
+    // These two say which it is; SaveCommand just forces the pending write early.
+    public bool HasUnsavedChanges
+    {
+        get => hasUnsavedChanges;
+        private set
+        {
+            if (hasUnsavedChanges == value) return;
+            SetField(ref hasUnsavedChanges, value);
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SaveStatus)));
+            SaveCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    public DateTimeOffset? LastSavedAt
+    {
+        get => lastSavedAt;
+        private set { SetField(ref lastSavedAt, value); PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SaveStatus))); }
+    }
+
+    public string SaveStatus => HasUnsavedChanges
+        ? "● Unsaved changes"
+        : LastSavedAt is { } saved ? $"Saved {saved.LocalDateTime:HH:mm}" : "";
     public PlannedWorkItemViewModel? SelectedItem { get => selectedItem; set => SetField(ref selectedItem, value); }
     public DescriptionSuggestionRequest? PendingAiRequest { get => pendingAiRequest; private set => SetField(ref pendingAiRequest, value); }
     public string? SuggestedDescription { get => suggestedDescription; private set => SetSuggestedDescription(value); }
@@ -491,6 +519,10 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             saveRequested = true;
             pendingSave ??= PersistRequestedPlansAsync();
         }
+
+        HasUnsavedChanges = true;
+        {
+        }
     }
 
     private async Task PersistRequestedPlansAsync()
@@ -519,6 +551,12 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
                 await repository!.SaveAsync(plan);
                 knownVersion++;
                 PersistenceError = null;
+                LastSavedAt = DateTimeOffset.Now;
+                lock (persistenceLock)
+                {
+                    // Only clear the marker if nothing arrived while this write was in flight.
+                    if (!saveRequested) HasUnsavedChanges = false;
+                }
             }
             catch (PlanConcurrencyException)
             {
