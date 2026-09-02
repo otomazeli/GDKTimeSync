@@ -928,7 +928,7 @@ public void Review_view_is_a_grid_with_one_batch_confirmation_and_no_guided_vali
 
         <StackPanel DockPanel.Dock="Bottom">
             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                <Button Width="170" Command="{Binding PostSelectedCommand}" Content="{Binding SelectedCount, StringFormat=Post selected ({0})}" />
+                <Button Width="170" Command="{Binding PostSelectedCommand}" Content="{Binding SelectedCount}" ContentStringFormat="Post selected ({0})" />
                 <Button Width="100" Margin="8,0,0,0" Command="{Binding DryRunCommand}" Content="Dry Run" />
                 <Button Width="100" Margin="8,0,0,0" Command="{Binding RefreshCommand}" Content="Refresh" />
                 <Button Width="120" Margin="8,0,0,0" Command="{Binding CancelBatchCommand}" Content="Cancel run">
@@ -956,7 +956,7 @@ public void Review_view_is_a_grid_with_one_batch_confirmation_and_no_guided_vali
                     <TextBlock Text="Confirm delivery" FontWeight="SemiBold" />
                     <TextBlock Margin="0,4,0,0" Text="{Binding BatchConfirmationSummary}" TextWrapping="Wrap" />
                     <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                        <Button Command="{Binding ConfirmPostSelectedCommand}" Content="{Binding SelectedCount, StringFormat=Post {0} task(s)}" />
+                        <Button Command="{Binding ConfirmPostSelectedCommand}" Content="{Binding SelectedCount}" ContentStringFormat="Post {0} task(s)" />
                         <Button Margin="8,0,0,0" Command="{Binding CancelPostSelectedCommand}" Content="Cancel" />
                     </StackPanel>
                 </StackPanel>
