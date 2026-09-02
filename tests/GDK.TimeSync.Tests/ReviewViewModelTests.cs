@@ -126,8 +126,46 @@ public sealed class ReviewViewModelTests
 
         await review.RefreshAsync();
 
-        Assert.Equal([item.Id], review.Items.Select(value => value.Id));
+        Assert.Equal([item.Id], review.Tasks.Select(value => value.Id));
         Assert.Empty(delivery.DeliveredItemIds);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_BuildsOneRowPerTaskWithItsRecordedAttempt()
+    {
+        var delivered = PlannedWorkItem.Create(new DateOnly(2026, 9, 1), "A", "CGM-1", "Delivered", TimeSpan.FromMinutes(30));
+        var pending = PlannedWorkItem.Create(new DateOnly(2026, 9, 1), "B", "CGM-2", "Pending", TimeSpan.FromMinutes(45));
+        var review = CreateReview(
+            items: [delivered, pending],
+            attempts: new AttemptRepository(new DeliveryAttempt(delivered.Id, 101, 201,
+                DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported)));
+
+        await review.RefreshAsync();
+
+        Assert.Equal(2, review.Tasks.Count);
+        var deliveredRow = review.Tasks.Single(task => task.Id == delivered.Id);
+        Assert.Equal(DeliveryMark.Delivered, deliveredRow.Tempo);
+        Assert.False(deliveredRow.IsSelected);
+        var pendingRow = review.Tasks.Single(task => task.Id == pending.Id);
+        Assert.Equal(DeliveryMark.Pending, pendingRow.Tempo);
+        Assert.True(pendingRow.IsSelected);
+    }
+
+    [Fact]
+    public async Task SelectedCountAndDurationFollowTheTicks()
+    {
+        var first = PlannedWorkItem.Create(new DateOnly(2026, 9, 1), "A", "CGM-1", "One", TimeSpan.FromMinutes(30));
+        var second = PlannedWorkItem.Create(new DateOnly(2026, 9, 1), "B", "CGM-2", "Two", TimeSpan.FromMinutes(45));
+        var review = CreateReview(items: [first, second]);
+        await review.RefreshAsync();
+
+        Assert.Equal(2, review.SelectedCount);
+        Assert.Equal(TimeSpan.FromMinutes(75), review.SelectedDuration);
+
+        review.Tasks[0].IsSelected = false;
+
+        Assert.Equal(1, review.SelectedCount);
+        Assert.Equal(TimeSpan.FromMinutes(45), review.SelectedDuration);
     }
 
     [Fact]
@@ -371,6 +409,18 @@ public sealed class ReviewViewModelTests
             slackFactory ?? new RecordingSlackClientFactory(),
             settings ?? new FixedSettingsStore(new UserSettings()),
             clipboard: clipboard);
+
+    private static ReviewViewModel CreateReview(
+        IReadOnlyList<PlannedWorkItem> items,
+        IConfirmedTaskDeliveryService? delivery = null,
+        IDeliveryAttemptRepository? attempts = null,
+        ISlackClientFactory? slackFactory = null,
+        IDailySlackDeliveryRepository? dailyDeliveries = null,
+        IUserSettingsStore? settings = null,
+        IClipboardService? clipboard = null) =>
+        CreateReview(
+            DailyPlan.Create(items.Count > 0 ? items[0].Day : default, items),
+            delivery, attempts, slackFactory, dailyDeliveries, settings, clipboard);
 
     private static DeliveryAttempt Succeeded(PlannedWorkItem item) => new(item.Id, 101, 201, DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported);
 

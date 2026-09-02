@@ -77,7 +77,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     public RelayCommand CancelSlackConfirmationCommand { get; }
     public RelayCommand CopySlackPreviewCommand { get; }
     public LiveValidationViewModel LiveValidation { get; }
-    public ObservableCollection<PlannedWorkItem> Items { get; } = [];
+    public ObservableCollection<ReviewTaskViewModel> Tasks { get; } = [];
     public ObservableCollection<string> DryRunBlockers { get; } = [];
     public ObservableCollection<string> SlackBlockers { get; } = [];
     public string DryRunSummary { get => dryRunSummary; private set => SetField(ref dryRunSummary, value); }
@@ -145,17 +145,59 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         }
     }
 
-    public Task RefreshAsync(CancellationToken cancellationToken = default)
+    public int SelectedCount => Tasks.Count(task => task.IsSelected);
+    public TimeSpan SelectedDuration => Tasks.Where(task => task.IsSelected).Aggregate(TimeSpan.Zero, (total, task) => total + task.Duration);
+    public string DaySummary => $"{Tasks.Count} task(s) · {SelectedDuration:h\\:mm} selected";
+
+    public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
-        if (LiveValidation.IsInFlight) return Task.CompletedTask;
-        Items.Clear();
+        if (LiveValidation.IsInFlight) return;
+
+        foreach (var existing in Tasks) existing.PropertyChanged -= OnTaskChanged;
+        Tasks.Clear();
+
         var plan = planProvider?.GetSnapshot();
         PlanDate = plan?.Date;
-        if (plan is not null)
-            foreach (var item in plan.Items)
-                Items.Add(item);
-        LiveValidation.LoadItems(Items);
-        return Task.CompletedTask;
+        if (plan is null) { NotifySelectionChanged(); return; }
+
+        var recorded = new Dictionary<Guid, DeliveryAttempt>();
+        if (attempts is not null)
+        {
+            try
+            {
+                foreach (var attempt in await attempts.ListAsync(cancellationToken))
+                    recorded[attempt.PlannedWorkItemId] = attempt;
+            }
+            catch
+            {
+                // A missing delivery history must not stop the day being reviewed; rows simply show
+                // as pending, which is what they were before this page knew about attempts at all.
+            }
+        }
+
+        foreach (var item in plan.Items)
+        {
+            var row = new ReviewTaskViewModel(item, recorded.GetValueOrDefault(item.Id));
+            row.PropertyChanged += OnTaskChanged;
+            Tasks.Add(row);
+        }
+
+        LiveValidation.LoadItems(Tasks.Select(task => task.Item).ToArray());
+        NotifySelectionChanged();
+    }
+
+    private void OnTaskChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ReviewTaskViewModel.IsSelected)) NotifySelectionChanged();
+    }
+
+    private void NotifySelectionChanged()
+    {
+        OnPropertyChanged(nameof(SelectedCount));
+        OnPropertyChanged(nameof(SelectedDuration));
+        OnPropertyChanged(nameof(DaySummary));
+        // Task 4 adds `PostSelectedCommand.NotifyCanExecuteChanged();` here once that command exists.
+        // Do NOT add it in this task -- the command is not declared yet and the file will not compile.
     }
 
     public void OpenTaskConfirmation(Guid itemId)
