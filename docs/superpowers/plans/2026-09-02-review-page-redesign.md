@@ -964,6 +964,15 @@ public void Review_view_is_a_grid_with_one_batch_confirmation_and_no_guided_vali
 
             <TextBlock Margin="0,10,0,0" Text="{Binding BatchStatus}" Foreground="DimGray" TextWrapping="Wrap" />
             <TextBlock Margin="0,4,0,0" Text="{Binding DryRunSummary}" Foreground="DimGray" TextWrapping="Wrap" />
+            <!-- DryRunSummary is only ever a count. These are the reasons, and they are the whole point
+                 of running Dry Run before posting anything. -->
+            <ItemsControl Margin="0,4,0,0" ItemsSource="{Binding DryRunBlockers}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" Foreground="Firebrick" FontSize="11" TextWrapping="Wrap" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
 
             <Expander Margin="0,16,0,0" Header="Daily Slack update">
                 <!-- Move the existing Slack markup in here verbatim: compose button, blockers list,
