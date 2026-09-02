@@ -702,7 +702,12 @@ Run: `dotnet test GDK.TimeSync.slnx --filter "FullyQualifiedName~ReviewViewModel
                 if (cancellation.IsCancellationRequested) break;
                 try
                 {
-                    var attempt = await deliveryService.DeliverConfirmedAsync(row.Item, cancellation.Token);
+                    // CancellationToken.None deliberately: PostAllCoordinator re-checks its token
+                    // mid-item, between the Toggl entry and the Tempo worklog. Handing it the
+                    // cancellable one would let a cancel tear a delivery in half and persist an
+                    // attempt with a Toggl entry and no worklog. A task already started always
+                    // finishes; the check above is what stops the NEXT one.
+                    var attempt = await deliveryService.DeliverConfirmedAsync(row.Item, CancellationToken.None);
                     row.ApplyAttempt(attempt);
                     if (attempt.Status == DeliveryAttemptStatus.Succeeded) succeeded++; else failed++;
                 }
