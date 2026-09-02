@@ -1019,6 +1019,47 @@ public sealed class TodayViewModelTests
             throw new InvalidOperationException("disk is unavailable");
     }
 
+    // ---- Issue #8: Add item applied the project default but not the Tempo category default ----
+
+    [Fact]
+    public async Task AddItemCommand_AppliesBothConfiguredDefaults()
+    {
+        var today = CreateLookupViewModel(out _);
+        await today.LoadProjectsAsync();
+
+        today.AddItemCommand.Execute(null);
+
+        var added = today.SelectedItem!;
+        Assert.Equal("CGM", added.TogglProject);
+        Assert.Equal(77, added.TogglProjectId);
+        Assert.Equal("DEVELOPMENT", added.TempoCategory);
+    }
+
+    // Matches what the Jira lookup path already does when the setting is blank.
+    [Fact]
+    public void AddItemCommand_FallsBackToDevelopmentWhenNoTempoCategoryIsConfigured()
+    {
+        var today = new TodayViewModel(
+            settingsStore: new FixedSettingsStore(new UserSettings { DefaultTempoWorkCategory = "" }));
+
+        today.AddItemCommand.Execute(null);
+
+        Assert.Equal("DEVELOPMENT", today.SelectedItem!.TempoCategory);
+    }
+
+    [Fact]
+    public void Today_quick_edit_panel_lets_the_tempo_category_be_edited_outside_the_grid()
+    {
+        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GDK.TimeSync.Desktop", "Views", "TodayView.xaml"));
+        var elements = XDocument.Load(path).Descendants().ToArray();
+
+        Assert.Contains(elements, element =>
+            element.Name.LocalName == "TextBox" &&
+            element.Attribute("Text")?.Value.Contains("SelectedItem.TempoCategory", StringComparison.Ordinal) == true);
+        Assert.Contains(elements, element =>
+            element.Name.LocalName == "TextBlock" && element.Attribute("Text")?.Value == "Tempo category");
+    }
+
     private sealed class FixedSettingsStore(UserSettings settings) : IUserSettingsStore
     {
         public UserSettings Load() => settings;

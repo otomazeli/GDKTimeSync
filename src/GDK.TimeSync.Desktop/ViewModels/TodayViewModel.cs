@@ -295,6 +295,9 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     {
         var item = new PlannedWorkItemViewModel();
         ApplyDefaultTogglProject(item);
+        // The Toggl import path and the Jira lookup path both apply this default already; a manually
+        // added row was the only way to end up with a blank category, which Tempo requires.
+        item.TempoCategory = DefaultTempoCategory();
         Items.Add(item);
         SelectedItem = item;
     }

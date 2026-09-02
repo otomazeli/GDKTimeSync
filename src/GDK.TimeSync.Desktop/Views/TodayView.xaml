@@ -50,7 +50,7 @@
             <StackPanel>
                 <TextBlock Text="What are you working on?" FontWeight="SemiBold" />
                 <Grid Margin="0,8,0,0">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="2*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="2*" /><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions>
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="10" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="10" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Jira key" Foreground="#FF4B5563" FontSize="11" Margin="0,0,0,2" />
@@ -63,13 +63,15 @@
                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Task name" Foreground="#FF4B5563" FontSize="11" Margin="0,0,0,2" />
                     <TextBlock Grid.Row="3" Grid.Column="1" Margin="8,0,0,2" Text="From" Foreground="#FF4B5563" FontSize="11" />
                     <TextBlock Grid.Row="3" Grid.Column="2" Margin="8,0,0,2" Text="To" Foreground="#FF4B5563" FontSize="11" />
+                    <TextBlock Grid.Row="3" Grid.Column="3" Margin="8,0,0,2" Text="Tempo category" Foreground="#FF4B5563" FontSize="11" />
                     <TextBox Grid.Row="4" Grid.Column="0" Text="{Binding SelectedItem.Name, UpdateSourceTrigger=PropertyChanged}" ToolTip="Task name" />
                     <TextBox Grid.Row="4" Grid.Column="1" Margin="8,0,0,0" Text="{Binding SelectedItem.Start, UpdateSourceTrigger=PropertyChanged}" ToolTip="Start time, e.g. 08:15" />
                     <TextBox Grid.Row="4" Grid.Column="2" Margin="8,0,0,0" Text="{Binding SelectedItem.End, UpdateSourceTrigger=PropertyChanged}" ToolTip="End time, e.g. 08:45" />
-                    <TextBlock Grid.Row="5" Grid.ColumnSpan="3" Margin="0,3,0,0" Text="Duration is calculated automatically from the times." Foreground="DimGray" FontSize="11" />
+                    <TextBox Grid.Row="4" Grid.Column="3" Margin="8,0,0,0" Text="{Binding SelectedItem.TempoCategory, UpdateSourceTrigger=PropertyChanged}" ToolTip="Tempo work category, e.g. DEVELOPMENT" />
+                    <TextBlock Grid.Row="5" Grid.ColumnSpan="4" Margin="0,3,0,0" Text="Duration is calculated automatically from the times." Foreground="DimGray" FontSize="11" />
 
-                    <TextBlock Grid.Row="6" Grid.ColumnSpan="3" Text="{Binding JiraLookupError}" Foreground="Firebrick" FontSize="11" TextWrapping="Wrap" />
-                    <StackPanel Grid.Row="7" Grid.ColumnSpan="3" Orientation="Horizontal">
+                    <TextBlock Grid.Row="6" Grid.ColumnSpan="4" Text="{Binding JiraLookupError}" Foreground="Firebrick" FontSize="11" TextWrapping="Wrap" />
+                    <StackPanel Grid.Row="7" Grid.ColumnSpan="4" Orientation="Horizontal">
                         <CheckBox Content="Billable" IsChecked="{Binding SelectedItem.IsBillable, UpdateSourceTrigger=PropertyChanged}" />
                         <CheckBox Margin="16,0,0,0" Content="Push to Toggl" IsChecked="{Binding SelectedItem.PostToToggl, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Margin="16,0,0,0" Text="{Binding SelectedItem.Duration, StringFormat=Hours worked: {0:g}}" Foreground="DimGray" VerticalAlignment="Center" />
