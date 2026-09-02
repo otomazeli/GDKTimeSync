@@ -34,7 +34,15 @@ public sealed record DeliveryAttempt(
     SlackDeliveryState SlackState,
     DateTimeOffset? TogglWriteRecordedAtUtc = null,
     DateTimeOffset? TempoWriteRecordedAtUtc = null,
-    DateTimeOffset? ReconciliationRecordedAtUtc = null);
+    DateTimeOffset? ReconciliationRecordedAtUtc = null)
+{
+    // The service's own explanation of a failure -- "User is invalid", the field Tempo rejected.
+    // Deliberately NOT persisted: SqliteDeliveryAttemptRepository reads and writes named columns, so
+    // this is dropped on save and absent on load. It answers "why did this just fail?" while the user
+    // is still looking at the row; a row rehydrated on a later launch falls back to FailureCode and
+    // the audit log, which does keep the detail.
+    public string? FailureDetail { get; init; }
+}
 
 public sealed record DeliveryAttemptClaim(DeliveryAttempt Attempt, bool IsAcquired);
 

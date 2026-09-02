@@ -383,12 +383,45 @@ public sealed class PostAllCoordinatorTests
         Assert.Equal(0, tempo.CreateCount);
     }
 
+    [Fact]
+    public async Task PostAsync_CarriesTheServiceMessageOnATempoFailure()
+    {
+        var item = PlannedWorkItem.Create(new DateOnly(2026, 9, 1), "Work", "CGM-1", "Comment",
+            TimeSpan.FromMinutes(30), "CGM", "DEVELOPMENT", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var coordinator = CreateCoordinator(tempoFailure: new InvalidOperationException("User is invalid"));
+
+        var result = await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]));
+
+        var attempt = result.Attempts.Single();
+        Assert.Equal(DeliveryFailureCode.TempoFailed, attempt.FailureCode);
+        Assert.Equal("User is invalid", attempt.FailureDetail);
+    }
+
+    [Fact]
+    public async Task PostAsync_LeavesFailureDetailNullOnSuccess()
+    {
+        var item = PlannedWorkItem.Create(new DateOnly(2026, 9, 1), "Work", "CGM-1", "Comment",
+            TimeSpan.FromMinutes(30), "CGM", "DEVELOPMENT", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
+        var coordinator = CreateCoordinator();
+
+        var result = await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]));
+
+        Assert.Null(result.Attempts.Single().FailureDetail);
+    }
+
     private static PlannedWorkItem CreateItem() => PlannedWorkItem.Create(
         new DateOnly(2026, 8, 10),
         name: "Daily work",
         jiraIssueKey: "CGM-42",
         comment: "Daily work",
         duration: TimeSpan.FromMinutes(30));
+
+    private static PostAllCoordinator CreateCoordinator(Exception? tempoFailure = null) =>
+        new(
+            new RecordingTogglClient([]),
+            new RecordingJiraClient([]),
+            new RecordingTempoClient([]) { Failure = tempoFailure },
+            new InMemoryDeliveryAttemptRepository());
 
     private sealed class InMemoryDeliveryAttemptRepository : IDeliveryAttemptRepository
     {
@@ -493,11 +526,14 @@ public sealed class PostAllCoordinatorTests
     {
         public int CreateCount { get; private set; }
         public bool FailNextCreate { get; set; }
+        public Exception? Failure { get; init; }
 
         public Task<long> CreateAsync(PlannedWorkItem item, string jiraIssueId, CancellationToken cancellationToken = default)
         {
             CreateCount++;
             events.Add("tempo");
+            if (Failure is not null)
+                throw Failure;
             if (FailNextCreate)
             {
                 FailNextCreate = false;
