@@ -1,14 +1,16 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
+using GDK.TimeSync.Toggl;
 
 namespace GDK.TimeSync.Desktop.ViewModels;
 
 public sealed record ReminderModeOption(EndOfDayReminderMode Value, string Label);
 
-public sealed class SettingsViewModel(ICredentialStore credentials, IUserSettingsStore settings, IConfigurationStateService configurationState, IAuditLog? auditLog = null) : INotifyPropertyChanged
+public sealed class SettingsViewModel(ICredentialStore credentials, IUserSettingsStore settings, IConfigurationStateService configurationState, IAuditLog? auditLog = null, IIntegrationClientFactory? integrationClients = null) : INotifyPropertyChanged
 {
     private bool isTogglTokenConfigured;
     private bool isJiraPatConfigured;
@@ -17,6 +19,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
     private string jiraBaseUrl = string.Empty;
     private string jiraUser = string.Empty;
     private long? togglWorkspaceId;
+    private long? defaultTogglProjectId;
     private string reviewReminderTime = "16:00";
     private EndOfDayReminderMode endOfDayReminderMode = EndOfDayReminderMode.Both;
     private string defaultTempoWorkCategory = "DEVELOPMENT";
@@ -91,6 +94,55 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         set => SetField(ref defaultTempoWorkCategory, value);
     }
 
+    // Populated from Toggl so the default cannot be a name that matches nothing. Empty when the
+    // workspace or token is not configured yet -- which is a normal state for this window, since it
+    // is where those get entered.
+    public ObservableCollection<TogglProject> AvailableProjects { get; } = [];
+    public string? ProjectLoadError { get; private set; }
+
+    public long? DefaultTogglProjectId
+    {
+        get => defaultTogglProjectId;
+        set
+        {
+            if (defaultTogglProjectId == value) return;
+            SetField(ref defaultTogglProjectId, value);
+            // Keep the readable half in step with the chosen id.
+            var chosen = AvailableProjects.FirstOrDefault(project => project.Id == value);
+            if (chosen is not null) DefaultTogglProject = chosen.Name;
+        }
+    }
+
+    public async Task LoadProjectsAsync(CancellationToken cancellationToken = default)
+    {
+        ProjectLoadError = null;
+        if (integrationClients is null) return;
+
+        try
+        {
+            var workspaceId = settings.Load().TogglWorkspaceId;
+            if (workspaceId is not > 0)
+            {
+                ProjectLoadError = "Enter a Toggl workspace ID and save, then reopen to pick a project.";
+                return;
+            }
+
+            using var toggl = await integrationClients.CreateTogglAsync(cancellationToken);
+            AvailableProjects.Clear();
+            foreach (var project in await toggl.GetProjectsAsync(workspaceId.Value, cancellationToken))
+                AvailableProjects.Add(project);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // Unreachable Toggl must not stop the rest of settings being edited or saved.
+            ProjectLoadError = "Could not load Toggl projects. The stored default is kept.";
+        }
+    }
+
     public string DefaultTogglProject
     {
         get => defaultTogglProject;
@@ -142,6 +194,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             EndOfDayReminderMode = EndOfDayReminderMode,
             DefaultTempoWorkCategory = DefaultTempoWorkCategory,
             DefaultTogglProject = DefaultTogglProject,
+            DefaultTogglProjectId = DefaultTogglProjectId,
             AiEnabled = AiEnabled,
             AutoSyncEnabled = AutoSyncEnabled,
             SyncIntervalMinutes = SyncIntervalMinutes,
@@ -160,6 +213,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             EndOfDayReminderMode = EndOfDayReminderMode,
             DefaultTempoWorkCategory = DefaultTempoWorkCategory,
             DefaultTogglProject = DefaultTogglProject,
+            DefaultTogglProjectId = DefaultTogglProjectId,
             AiEnabled = AiEnabled,
             AutoSyncEnabled = AutoSyncEnabled,
             SyncIntervalMinutes = SyncIntervalMinutes,
@@ -191,6 +245,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
             EndOfDayReminderMode = EndOfDayReminderModes.Normalize(proposedSettings.EndOfDayReminderMode),
             DefaultTempoWorkCategory = proposedSettings.DefaultTempoWorkCategory.Trim(),
             DefaultTogglProject = proposedSettings.DefaultTogglProject.Trim(),
+            DefaultTogglProjectId = proposedSettings.DefaultTogglProjectId,
             SlackTitle = NormalizeSlackText(proposedSettings.SlackTitle),
             SlackTaskHeading = NormalizeSlackText(proposedSettings.SlackTaskHeading),
             SlackExtraLines = proposedSettings.SlackExtraLines.Select(NormalizeSlackText).Where(line => line.Length > 0).ToArray()
@@ -250,6 +305,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         EndOfDayReminderMode = EndOfDayReminderModes.Normalize(currentSettings.EndOfDayReminderMode);
         DefaultTempoWorkCategory = currentSettings.DefaultTempoWorkCategory;
         DefaultTogglProject = currentSettings.DefaultTogglProject;
+        DefaultTogglProjectId = currentSettings.DefaultTogglProjectId;
         AiEnabled = currentSettings.AiEnabled;
         AutoSyncEnabled = currentSettings.AutoSyncEnabled;
         SyncIntervalMinutes = currentSettings.SyncIntervalMinutes;
@@ -285,6 +341,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         if (previous.EndOfDayReminderMode != updated.EndOfDayReminderMode) changed.Add(nameof(UserSettings.EndOfDayReminderMode));
         if (previous.DefaultTempoWorkCategory != updated.DefaultTempoWorkCategory) changed.Add(nameof(UserSettings.DefaultTempoWorkCategory));
         if (previous.DefaultTogglProject != updated.DefaultTogglProject) changed.Add(nameof(UserSettings.DefaultTogglProject));
+        if (previous.DefaultTogglProjectId != updated.DefaultTogglProjectId) changed.Add(nameof(UserSettings.DefaultTogglProjectId));
         if (previous.AiEnabled != updated.AiEnabled) changed.Add(nameof(UserSettings.AiEnabled));
         if (previous.AutoSyncEnabled != updated.AutoSyncEnabled) changed.Add(nameof(UserSettings.AutoSyncEnabled));
         if (previous.SyncIntervalMinutes != updated.SyncIntervalMinutes) changed.Add(nameof(UserSettings.SyncIntervalMinutes));

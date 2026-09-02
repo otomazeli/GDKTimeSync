@@ -1060,6 +1060,49 @@ public sealed class TodayViewModelTests
             element.Name.LocalName == "TextBlock" && element.Attribute("Text")?.Value == "Tempo category");
     }
 
+    // ---- Issue #9: the default Toggl project is now chosen from a list, and carries its id ----
+
+    [Fact]
+    public void ApplyingTheDefaultUsesTheStoredIdWithoutMatchingOnName()
+    {
+        var today = new TodayViewModel(settingsStore: new FixedSettingsStore(new UserSettings
+        {
+            DefaultTogglProjectId = 77,
+            DefaultTogglProject = "a stale name that no longer matches"
+        }));
+
+        today.AddItemCommand.Execute(null);
+
+        Assert.Equal(77, today.SelectedItem!.TogglProjectId);
+        Assert.Equal("a stale name that no longer matches", today.SelectedItem.TogglProject);
+    }
+
+    // Settings written before the id existed carry only a name; they must keep working.
+    [Fact]
+    public async Task ApplyingTheDefaultStillMatchesOnNameWhenNoIdIsStored()
+    {
+        var today = new TodayViewModel(
+            integrationClients: new ProjectFactory(),
+            settingsStore: new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, DefaultTogglProject = "CGM" }));
+        await today.LoadProjectsAsync();
+
+        today.AddItemCommand.Execute(null);
+
+        Assert.Equal(77, today.SelectedItem!.TogglProjectId);
+        Assert.Equal("CGM", today.SelectedItem.TogglProject);
+    }
+
+    [Fact]
+    public void NoDefaultConfiguredLeavesTheProjectAlone()
+    {
+        var today = new TodayViewModel(settingsStore: new FixedSettingsStore(new UserSettings()));
+
+        today.AddItemCommand.Execute(null);
+
+        Assert.Equal("", today.SelectedItem!.TogglProject);
+        Assert.Null(today.SelectedItem.TogglProjectId);
+    }
+
     private sealed class FixedSettingsStore(UserSettings settings) : IUserSettingsStore
     {
         public UserSettings Load() => settings;

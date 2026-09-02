@@ -21,6 +21,21 @@ public partial class SettingsWindow : Window
         await viewModel.LoadAsync();
         PopulateControls();
         UpdateCredentialControls();
+        // After the rest of the form: this is a network call and must not hold the dialog closed.
+        await viewModel.LoadProjectsAsync();
+        PopulateProjectPicker();
+    }
+
+    private void PopulateProjectPicker()
+    {
+        DefaultTogglProjectComboBox.ItemsSource = viewModel.AvailableProjects;
+        DefaultTogglProjectComboBox.SelectedValue = viewModel.DefaultTogglProjectId;
+        DefaultTogglProjectError.Text = viewModel.ProjectLoadError ?? "";
+        DefaultTogglProjectError.Visibility = viewModel.ProjectLoadError is null ? Visibility.Collapsed : Visibility.Visible;
+        // With no list to choose from, say what is stored rather than showing an empty dropdown.
+        DefaultTogglProjectComboBox.IsEnabled = viewModel.AvailableProjects.Count > 0;
+        if (viewModel.AvailableProjects.Count == 0 && !string.IsNullOrWhiteSpace(viewModel.DefaultTogglProject))
+            DefaultTogglProjectError.Text = $"{viewModel.ProjectLoadError} Currently: {viewModel.DefaultTogglProject}";
     }
 
     private void PopulateControls()
@@ -32,7 +47,7 @@ public partial class SettingsWindow : Window
         EndOfDayReminderModeComboBox.ItemsSource = viewModel.ReminderModeOptions;
         EndOfDayReminderModeComboBox.SelectedValue = viewModel.EndOfDayReminderMode;
         DefaultTempoWorkCategoryTextBox.Text = viewModel.DefaultTempoWorkCategory;
-        DefaultTogglProjectTextBox.Text = viewModel.DefaultTogglProject;
+
         AiEnabledCheckBox.IsChecked = viewModel.AiEnabled;
         AutoSyncEnabledCheckBox.IsChecked = viewModel.AutoSyncEnabled;
         SyncIntervalMinutesTextBox.Text = viewModel.SyncIntervalMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -59,7 +74,9 @@ public partial class SettingsWindow : Window
                 ReviewReminderTime = ReviewReminderTimeTextBox.Text.Trim(),
                 EndOfDayReminderMode = EndOfDayReminderModeComboBox.SelectedValue is EndOfDayReminderMode mode ? mode : EndOfDayReminderMode.Both,
                 DefaultTempoWorkCategory = DefaultTempoWorkCategoryTextBox.Text.Trim(),
-                DefaultTogglProject = DefaultTogglProjectTextBox.Text.Trim(),
+                DefaultTogglProjectId = DefaultTogglProjectComboBox.SelectedValue as long?,
+                DefaultTogglProject = (DefaultTogglProjectComboBox.SelectedItem as GDK.TimeSync.Toggl.TogglProject)?.Name
+                    ?? viewModel.DefaultTogglProject,
                 AiEnabled = AiEnabledCheckBox.IsChecked == true,
                 AutoSyncEnabled = AutoSyncEnabledCheckBox.IsChecked == true,
                 SyncIntervalMinutes = syncIntervalMinutes,

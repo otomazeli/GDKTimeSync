@@ -307,15 +307,17 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     {
         if (!string.IsNullOrWhiteSpace(item.TogglProject)) return;
 
-        var name = settingsStore?.Load().DefaultTogglProject;
-        if (string.IsNullOrWhiteSpace(name)) return;
+        var settings = settingsStore?.Load();
+        var name = settings?.DefaultTogglProject;
+        if (string.IsNullOrWhiteSpace(name) && settings?.DefaultTogglProjectId is null) return;
 
-        item.TogglProject = name;
-        // Delivery posts by id, not name. If the default names a project this workspace does not have
-        // (renamed, deleted, or dropped for having no readable name), the name still shows in the grid
-        // and the id stays null -- the same state an unmatched project has always had here.
-        item.TogglProjectId = TogglProjects.FirstOrDefault(project =>
-            string.Equals(project.Name, name, StringComparison.OrdinalIgnoreCase))?.Id;
+        item.TogglProject = name ?? "";
+        // The id is what delivery posts, so prefer it and skip matching entirely. Settings written
+        // before the id existed carry only a name; those still resolve against the loaded list, and
+        // a name that matches nothing leaves the id null -- the state an unmatched project always had.
+        item.TogglProjectId = settings?.DefaultTogglProjectId
+            ?? TogglProjects.FirstOrDefault(project =>
+                   string.Equals(project.Name, name, StringComparison.OrdinalIgnoreCase))?.Id;
     }
 
     // Fired when the user leaves the Jira key field. Only ever fills a row the user has just started:

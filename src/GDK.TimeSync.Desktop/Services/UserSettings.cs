@@ -11,10 +11,11 @@ public sealed record UserSettings
     public string DefaultTempoWorkCategory { get; init; } = "DEVELOPMENT";
 
     // Jira cannot tell us which Toggl project a piece of work belongs to, so a new row falls back to
-    // this. Stored as the project *name*: it is what the user picks in the dropdown and it survives a
-    // project being recreated in Toggl. Today resolves it to a TogglProjectId against the loaded
-    // project list when it applies it, because delivery to Toggl needs the id, not the name.
-    public string DefaultTogglProject { get; init; } = "CompuGroup Delphi developments (BR) (FIX)";
+    // this. Both halves are stored: the id is what delivery posts and needs no matching, the name
+    // keeps settings.json readable and is the fallback for settings written before the id existed.
+    // No default value -- the Settings picker is where a real one gets chosen.
+    public string DefaultTogglProject { get; init; } = "";
+    public long? DefaultTogglProjectId { get; init; }
     public bool AiEnabled { get; init; }
     public bool AutoSyncEnabled { get; init; } = true;
     public int SyncIntervalMinutes { get; init; } = 5;
