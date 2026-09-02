@@ -34,7 +34,7 @@ step runs, so a row always tells you exactly how far a task got.
 | Status | Meaning |
 | --- | --- |
 | Succeeded | Fully delivered: Toggl entry and Tempo worklog both exist. Nothing to do. |
-| Failed | Delivery stopped at the step named by the failure reason (below). **The app does not automatically retry a failed item** -- clicking "Post task" again on it returns the same stored result without contacting Toggl, Jira, or Tempo again. |
+| Failed | Delivery stopped at the step named by the failure reason (below). **The app does not automatically retry a failed item** -- ticking it on Review and posting it again returns the same stored result without contacting Toggl, Jira, or Tempo again. |
 | Cancelled | You cancelled, or closed the app, while a delivery was in flight. Treat it like Failed for recovery purposes; check whether the Toggl entry ID is set before retrying (see below). |
 | Reconciliation required | The app could not safely persist what actually happened -- see [Reconciliation required](#reconciliation-required) below. |
 
@@ -58,9 +58,16 @@ the stored token expired. A History failure reason such as "Tempo delivery faile
 *where* delivery stopped; the matching Diagnostics entry usually tells you *why*, without needing
 to reproduce anything.
 
-With that in hand, fix the underlying problem: re-check credentials and connectivity on the Review
-page's guided Toggl/Jira/Tempo checks if Diagnostics points at a connection or authentication
-failure, and check the task's Jira issue key on Today if it points at a rejected payload.
+With that in hand, fix the underlying problem: re-check credentials and connectivity with the
+guided Toggl/Jira/Tempo checks on the **Diagnostics** page if the log points at a connection or
+authentication failure, and check the task's Jira issue key on Today if it points at a rejected
+payload.
+
+Review itself also shows a failed row's reason inline, underneath the row -- but only until the
+app restarts. The real service message (for example "Tempo: User is invalid") lives on a
+transient, non-persisted field, so it is visible for a row that failed in the current session; a
+row loaded from the database on a later launch shows only the generic coded reason ("Tempo
+delivery failed."), and Diagnostics is then the only place the specific detail survives.
 
 Then look at the History row's **Toggl entry ID**:
 
@@ -72,7 +79,7 @@ Then look at the History row's **Toggl entry ID**:
   DELETE FROM delivery_attempts WHERE planned_work_item_id = '<the task's GUID>';
   ```
 
-  Reopen GDK TimeSync and click "Post task" again for that item.
+  Reopen GDK TimeSync, tick that row on Review, and click "Post selected" again.
 
 - **Set** (any other failure reason, or a cancellation after Toggl ran) -- a Toggl time entry
   already exists for this task. Deleting the row and retrying through the app would create a
@@ -130,9 +137,9 @@ To recover:
 
 ## Idempotency guarantees you can rely on
 
-- Confirming "Post task" twice on the same item, including two near-simultaneous clicks, results
-  in exactly one delivery attempt -- the second call is turned away with "Reconciliation
-  required" rather than posting twice, because the app claims the item before writing to Toggl.
+- Posting the same item twice, including as part of two near-simultaneous batches, results in
+  exactly one delivery attempt -- the second call is turned away with "Reconciliation required"
+  rather than posting twice, because the app claims the item before writing to Toggl.
 - A task whose Toggl entry is already known (imported from Toggl, or previously linked) is never
   reposted to Toggl -- delivery reuses the known entry ID and goes straight to Jira/Tempo.
 - Sending the daily Slack update is similarly claimed per calendar date before the Slack API is

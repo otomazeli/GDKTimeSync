@@ -30,10 +30,10 @@ The app has six pages, reachable from the sidebar:
   delivered; see [Recovery and reconciliation](operations/recovery-and-reconciliation.md).
 - **Settings** -- shows non-secret configuration and whether each credential is configured (see
   below); "Edit settings and credentials" opens the settings window.
-- **Review** -- the end-of-day screen: Dry Run, guided per-integration checks, per-task
-  confirmation, and the daily Slack update. This is where everything gets delivered.
-- **Diagnostics** -- today's audit log, read from inside the app; see [Diagnostics](#diagnostics)
-  below.
+- **Review** -- the end-of-day screen: a worklist grid, Dry Run, batch delivery, and the daily
+  Slack update. This is where everything gets delivered.
+- **Diagnostics** -- today's audit log, read from inside the app, plus the guided per-integration
+  checks (Toggl / Jira / Tempo) formerly on Review; see [Diagnostics](#diagnostics) below.
 
 ## Connection setup and secure credential entry
 
@@ -78,24 +78,30 @@ or change the interval with **Automatically pull new Toggl entries** and **Auto-
    item has a Jira issue key, a positive duration, and a valid start/end range) and see a summary
    of planned minutes. Dry Run never contacts Toggl, Jira, Tempo, or Slack and never records
    anything.
-3. **Optional: guided integration validation** -- select a planned item under "Guided integration
-   validation" and explicitly run "Create Toggl entry", "Validate Jira", and "Create and verify
-   Tempo" to confirm each integration is working before delivering real work.
-4. **Confirm each task** -- click **Post task** on a planned item, review the confirmation panel
-   (Jira key, comment, duration, Toggl project, Tempo category, billable flag), then **Post task**
-   again to confirm, or **Cancel**. Confirming delivers that one item through Toggl, then Jira
-   validation, then Tempo, in that order, and records the result. Nothing is delivered until you
-   click the second, explicit confirmation.
-5. **Send the daily Slack update** -- once tasks are posted, click **Compose daily Slack update**
-   to build a preview from everything delivered that day (any task not yet posted to Jira/Tempo is
-   still included, marked "not posted in Jira"). Review the preview, then click **Send daily Slack
-   update** to post it, **Copy message** to copy the text instead, or **Cancel**. A daily Slack
-   update can be sent at most once per day; sending again is blocked once one exists for that
-   date.
+3. **Optional: guided integration validation** -- if you want to confirm an integration is working
+   before delivering real work, go to **Diagnostics** and run "Create Toggl entry", "Validate
+   Jira", or "Create and verify Tempo" against a planned item there.
+4. **Tick the tasks and post them** -- Review shows the day as one grid: a tick box, Jira key,
+   description, duration, and a dot per destination (Toggl / Jira / Tempo -- grey pending, green
+   delivered, red failed) for each row. A row already fully delivered is unticked and cannot be
+   selected again. Tick the rows you want to deliver and click **Post selected (N)**; one
+   confirmation names the count, the total duration, and the destinations. Click **Post N task(s)**
+   to confirm, or **Cancel** -- nothing is delivered until that second, explicit click. Once
+   confirmed, delivery runs one task at a time, in order, through Toggl, then Jira validation, then
+   Tempo, updating each row's dots as its result comes back. A failure on one row does not stop the
+   rest of the batch; a failed row shows its reason underneath it (see
+   [Diagnostics](#diagnostics) if the reason shown is the generic "delivery failed" kind rather
+   than the specific one, which happens after you restart the app). **Cancel run** stops the batch
+   before its next task starts -- a task already being delivered always finishes.
+5. **Send the daily Slack update** -- once tasks are posted, expand **Daily Slack update** and
+   click **Compose daily Slack update** to build a preview from everything delivered that day (any
+   task not yet posted to Jira/Tempo is still included, marked "not posted in Jira"). Review the
+   preview, then click **Send daily Slack update** to post it, **Copy message** to copy the text
+   instead, or **Cancel**. A daily Slack update can be sent at most once per day; sending again is
+   blocked once one exists for that date.
 
-There is no "post everything at once" button by design -- each task is confirmed individually, and
-the daily Slack update is a separate, final confirmation. This keeps every delivery to an external
-system an explicit, reviewable action.
+Posting is still an explicit, reviewable action: nothing reaches Toggl, Jira, Tempo, or Slack
+without the confirmation click for that batch or that Slack update.
 
 ## Reminders
 
