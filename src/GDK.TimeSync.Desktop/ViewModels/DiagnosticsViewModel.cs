@@ -13,10 +13,16 @@ public sealed class DiagnosticsViewModel : INotifyPropertyChanged
     private readonly IClipboardService? clipboard;
     private string statusText = "";
 
-    public DiagnosticsViewModel(AuditLogReader reader, IClipboardService? clipboard = null)
+    public DiagnosticsViewModel(
+        AuditLogReader reader,
+        IClipboardService? clipboard = null,
+        ILocalPlanSnapshotProvider? planProvider = null,
+        IIntegrationDiagnosticsService? diagnosticsService = null,
+        ILiveIntegrationValidationService? validationService = null)
     {
         this.reader = reader;
         this.clipboard = clipboard;
+        LiveValidation = new LiveValidationViewModel(planProvider, diagnosticsService, validationService);
         RefreshCommand = new RelayCommand(_ => _ = RefreshAsync());
         CopyAllCommand = new RelayCommand(_ => clipboard?.SetText(string.Join(Environment.NewLine, Entries)));
         OpenFolderCommand = new RelayCommand(_ => OpenFolder());
@@ -28,6 +34,7 @@ public sealed class DiagnosticsViewModel : INotifyPropertyChanged
     public RelayCommand RefreshCommand { get; }
     public RelayCommand CopyAllCommand { get; }
     public RelayCommand OpenFolderCommand { get; }
+    public LiveValidationViewModel LiveValidation { get; }
     public string LogFilePath => reader.CurrentFilePath;
 
     public string StatusText
@@ -41,7 +48,7 @@ public sealed class DiagnosticsViewModel : INotifyPropertyChanged
         }
     }
 
-    public Task RefreshAsync()
+    public async Task RefreshAsync()
     {
         Entries.Clear();
         foreach (var entry in reader.ReadRecentEntries(MaxEntries))
@@ -49,7 +56,7 @@ public sealed class DiagnosticsViewModel : INotifyPropertyChanged
         StatusText = Entries.Count == 0
             ? "No entries recorded today."
             : $"Showing the most recent {Entries.Count} entries from {reader.CurrentFilePath}";
-        return Task.CompletedTask;
+        await LiveValidation.RefreshAsync();
     }
 
     private void OpenFolder()

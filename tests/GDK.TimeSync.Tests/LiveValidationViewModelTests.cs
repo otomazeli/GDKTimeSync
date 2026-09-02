@@ -56,15 +56,15 @@ public sealed class LiveValidationViewModelTests
         var factory = new NoAccessIntegrationClientFactory();
         var settings = new TrackingSettingsStore();
         var attempts = new TrackingAttemptRepository();
-        var review = new ReviewViewModel(
-            new FixedPlanSnapshotProvider(DailyPlan.Create(item.Day, [item])),
+        var diagnostics = new DiagnosticsViewModel(new AuditLogReader(Path.GetTempPath()),
+            planProvider: new FixedPlanSnapshotProvider(DailyPlan.Create(item.Day, [item])),
             diagnosticsService: new SafetyProbe(),
             validationService: new LiveIntegrationValidationService(factory, settings, attempts));
 
-        await review.RefreshAsync();
-        await review.LiveValidation.SelectItemAsync(item.Id);
-        review.LiveValidation.OpenTogglConfirmation();
-        review.LiveValidation.CancelTogglConfirmation();
+        await diagnostics.RefreshAsync();
+        await diagnostics.LiveValidation.SelectItemAsync(item.Id);
+        diagnostics.LiveValidation.OpenTogglConfirmation();
+        diagnostics.LiveValidation.CancelTogglConfirmation();
 
         Assert.Equal(0, factory.Calls + settings.SaveCalls + attempts.WriteCalls);
         Assert.Equal(1, settings.LoadCalls);
@@ -139,16 +139,17 @@ public sealed class LiveValidationViewModelTests
         var second = CreateItem() with { Id = Guid.NewGuid(), JiraIssueKey = "GDK-43" };
         var safety = new SafetyProbe { PendingToggl = new TaskCompletionSource<LiveValidationResult>() };
         var snapshot = new MutablePlanSnapshotProvider(DailyPlan.Create(first.Day, [first, second]));
-        var review = new ReviewViewModel(snapshot, diagnosticsService: safety, validationService: safety);
-        await review.RefreshAsync();
-        await review.LiveValidation.SelectItemAsync(first.Id);
-        review.LiveValidation.OpenTogglConfirmation();
+        var diagnostics = new DiagnosticsViewModel(new AuditLogReader(Path.GetTempPath()),
+            planProvider: snapshot, diagnosticsService: safety, validationService: safety);
+        await diagnostics.RefreshAsync();
+        await diagnostics.LiveValidation.SelectItemAsync(first.Id);
+        diagnostics.LiveValidation.OpenTogglConfirmation();
 
-        var confirmation = review.LiveValidation.ConfirmTogglAsync();
+        var confirmation = diagnostics.LiveValidation.ConfirmTogglAsync();
         snapshot.Plan = DailyPlan.Create(first.Day, [second]);
-        await review.RefreshAsync();
+        await diagnostics.RefreshAsync();
 
-        Assert.Equal(first, review.LiveValidation.SelectedItem);
+        Assert.Equal(first, diagnostics.LiveValidation.SelectedItem);
         safety.PendingToggl.SetResult(Result(LiveValidationStep.Toggl, first, DeliveryAttemptStatus.InProgress, togglId: 44));
         await confirmation;
     }
@@ -176,7 +177,7 @@ public sealed class LiveValidationViewModelTests
     [Fact]
     public void Review_view_confirmation_panels_show_required_safe_metadata_and_visible_operation_cancellation()
     {
-        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GDK.TimeSync.Desktop", "Views", "ReviewView.xaml"));
+        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "GDK.TimeSync.Desktop", "Views", "DiagnosticsView.xaml"));
         var bindings = XDocument.Load(path).Descendants().Attributes().Select(attribute => attribute.Value).ToArray();
 
         Assert.Contains(bindings, value => value.Contains("IsTogglConfirmationVisible", StringComparison.Ordinal));

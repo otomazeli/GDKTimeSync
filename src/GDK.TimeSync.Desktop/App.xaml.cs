@@ -104,7 +104,12 @@ public partial class App : System.Windows.Application
         RegisterReviewServices(services);
         services.AddSingleton<HistoryViewModel>();
         services.AddSingleton(_ => new AuditLogReader(LogDirectory));
-        services.AddSingleton<DiagnosticsViewModel>();
+        services.AddSingleton<DiagnosticsViewModel>(provider => new DiagnosticsViewModel(
+            provider.GetRequiredService<AuditLogReader>(),
+            provider.GetRequiredService<IClipboardService>(),
+            provider.GetRequiredService<TodayViewModel>(),
+            provider.GetRequiredService<IIntegrationDiagnosticsService>(),
+            provider.GetRequiredService<ILiveIntegrationValidationService>()));
         services.AddSingleton<ShellViewModel>();
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<MainWindow>();
@@ -119,8 +124,6 @@ public partial class App : System.Windows.Application
             provider.GetRequiredService<IDailySlackDeliveryRepository>(),
             provider.GetRequiredService<ISlackClientFactory>(),
             provider.GetRequiredService<IUserSettingsStore>(),
-            provider.GetRequiredService<IIntegrationDiagnosticsService>(),
-            provider.GetRequiredService<ILiveIntegrationValidationService>(),
             provider.GetRequiredService<IClipboardService>(),
             provider.GetRequiredService<IAuditLog>()));
 

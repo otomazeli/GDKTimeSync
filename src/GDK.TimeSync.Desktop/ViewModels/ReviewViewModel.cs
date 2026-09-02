@@ -35,8 +35,6 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         IDailySlackDeliveryRepository? dailyDeliveries = null,
         ISlackClientFactory? slackClientFactory = null,
         IUserSettingsStore? settings = null,
-        IIntegrationDiagnosticsService? diagnosticsService = null,
-        ILiveIntegrationValidationService? validationService = null,
         IClipboardService? clipboard = null,
         IAuditLog? auditLog = null)
     {
@@ -48,7 +46,6 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         this.settings = settings;
         this.clipboard = clipboard;
         this.auditLog = auditLog;
-        LiveValidation = new LiveValidationViewModel(planProvider, diagnosticsService, validationService);
         DryRunCommand = new RelayCommand(_ => RunDryRun());
         RefreshCommand = new RelayCommand(_ => _ = RefreshAsync());
         PostSelectedCommand = new RelayCommand(_ => OpenBatchConfirmation(), () => SelectedCount > 0 && !IsBatchInFlight);
@@ -73,7 +70,6 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     public RelayCommand ConfirmSlackCommand { get; }
     public RelayCommand CancelSlackConfirmationCommand { get; }
     public RelayCommand CopySlackPreviewCommand { get; }
-    public LiveValidationViewModel LiveValidation { get; }
     public ObservableCollection<ReviewTaskViewModel> Tasks { get; } = [];
     public ObservableCollection<string> DryRunBlockers { get; } = [];
     public ObservableCollection<string> SlackBlockers { get; } = [];
@@ -149,8 +145,6 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
     public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
-        if (LiveValidation.IsInFlight) return;
-
         foreach (var existing in Tasks) existing.PropertyChanged -= OnTaskChanged;
         Tasks.Clear();
 
@@ -185,7 +179,6 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
             Tasks.Add(row);
         }
 
-        LiveValidation.LoadItems(Tasks.Select(task => task.Item).ToArray());
         NotifySelectionChanged();
         var alreadyDelivered = Tasks.Count(task => recorded.GetValueOrDefault(task.Id)?.Status == DeliveryAttemptStatus.Succeeded);
         auditLog?.Write(AuditLevel.Info, "Review", $"Loaded {PlanDate}: {Tasks.Count} task(s), {alreadyDelivered} already delivered");
