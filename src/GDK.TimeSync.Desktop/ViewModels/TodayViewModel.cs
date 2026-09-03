@@ -17,6 +17,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     private bool saveRequested;
     private bool isInitialized;
     private bool isLoadingItems;
+    private bool repairedOnLoad;
     private DateOnly currentDate;
     private int knownVersion;
     private string? persistenceError;
@@ -177,6 +178,7 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
     private async Task LoadItemsForCurrentDateAsync(CancellationToken cancellationToken)
     {
         isLoadingItems = true;
+        repairedOnLoad = false;
         try
         {
             if (repository is null)
@@ -197,7 +199,11 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
             // Resolve display names here rather than only after a project load: rows are rebuilt on
             // every date change and on initialize, and the project list is now loaded first, so this
             // is the point where both are guaranteed to exist.
-            ApplyProjectNames();
+            // A repair recovers an id the old binding wiped from the database. That is a real change
+            // to the stored plan, so it has to be written back -- otherwise every launch repairs the
+            // same rows in memory and the database keeps its nulls. The write is requested after the
+            // load window closes, since saves are suppressed while it is open.
+            repairedOnLoad |= ApplyProjectNames();
             PersistenceError = null;
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
@@ -209,6 +215,13 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
         finally
         {
             isLoadingItems = false;
+            // Queued directly rather than through SaveAfterUserAction: the very first load runs
+            // inside InitializeAsync, before isInitialized is set, and that gate would drop it.
+            if (repairedOnLoad)
+            {
+                repairedOnLoad = false;
+                if (repository is not null) QueueSave();
+            }
         }
     }
 
@@ -484,7 +497,14 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
                 item.PropertyChanged -= OnItemPropertyChanged;
         if (e.NewItems is not null)
             foreach (PlannedWorkItemViewModel item in e.NewItems)
+            {
+                // Options first: handing the row its list is setup, not an edit, and going through
+                // the change handler would mark a freshly loaded plan unsaved.
+                // Rows are added during a load, when saves are suppressed, so a repair here is
+                // recorded for the load to write out once its window closes.
+                repairedOnLoad |= ApplyProjectName(item);
                 item.PropertyChanged += OnItemPropertyChanged;
+            }
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PlannedSeconds)));
         SaveAfterUserAction();
     }
@@ -494,21 +514,28 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
         if (e.PropertyName == nameof(PlannedWorkItemViewModel.Duration))
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PlannedSeconds)));
         if (e.PropertyName == nameof(PlannedWorkItemViewModel.TogglProjectId))
-            ApplyProjectName((PlannedWorkItemViewModel)sender!);
+            _ = ApplyProjectName((PlannedWorkItemViewModel)sender!);
         SaveAfterUserAction();
     }
 
-    private void ApplyProjectNames()
+    private bool ApplyProjectNames()
     {
-        foreach (var item in Items) ApplyProjectName(item);
+        var repaired = false;
+        foreach (var item in Items) repaired |= ApplyProjectName(item);
+        return repaired;
     }
 
-    private void ApplyProjectName(PlannedWorkItemViewModel item)
+    private bool ApplyProjectName(PlannedWorkItemViewModel item)
     {
-        if (item.TogglProjectId is not { } id) return;
+        // Hands the row the live project list, which also repairs an id wiped by the old
+        // SelectedValue binding by matching the name that survived it.
+        var repaired = item.SetTogglProjectOptions(TogglProjects);
+
+        if (item.TogglProjectId is not { } id) return repaired;
         var project = TogglProjects.FirstOrDefault(value => value.Id == id);
         if (project is not null && !string.Equals(item.TogglProject, project.Name, StringComparison.Ordinal))
             item.TogglProject = project.Name;
+        return repaired;
     }
 
     private void SaveAfterUserAction()

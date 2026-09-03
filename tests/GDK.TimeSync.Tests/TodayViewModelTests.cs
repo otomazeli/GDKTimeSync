@@ -969,7 +969,11 @@ public sealed class TodayViewModelTests
     public async Task EditingARowMarksThePlanUnsavedUntilTheSaveLands()
     {
         var date = new DateOnly(2026, 9, 3);
-        var today = new TodayViewModel(new StubPlanRepository(DailyPlan.Create(date, [])), date);
+        // The save is held open on purpose: autosave runs on the thread pool, so against a
+        // repository that returns immediately it can clear the dirty marker between these two
+        // assertions and fail the test for a reason that has nothing to do with the behaviour.
+        var repository = new GatedPlanRepository(DailyPlan.Create(date, []));
+        var today = new TodayViewModel(repository, date);
         await today.InitializeAsync();
         Assert.False(today.HasUnsavedChanges);
 
@@ -978,6 +982,7 @@ public sealed class TodayViewModelTests
         Assert.True(today.HasUnsavedChanges);
         Assert.True(today.SaveCommand.CanExecute(null));
 
+        repository.ReleaseSaves();
         await today.FlushAsync();
 
         Assert.False(today.HasUnsavedChanges);
@@ -1107,6 +1112,54 @@ public sealed class TodayViewModelTests
     {
         public UserSettings Load() => settings;
         public void Save(UserSettings value) { }
+    }
+
+    // The whole load path, not just the row: a plan whose ids were wiped by the old SelectedValue
+    // binding must come back with them, and the repair must reach the database rather than being
+    // redone on every launch.
+    [Fact]
+    public async Task InitializeAsync_RestoresAndPersistsAnIdThatWasWipedFromAStoredRow()
+    {
+        var date = new DateOnly(2026, 9, 3);
+        var wiped = PlannedWorkItem.Create(date, "Work", "CGM-1", "Comment", TimeSpan.FromMinutes(30))
+            with { TogglProject = "CGM", TogglProjectId = null };
+        var repository = new RetainingPlanRepository(DailyPlan.Create(date, [wiped]));
+        var today = new TodayViewModel(
+            repository, date,
+            integrationClients: new ProjectFactory(),
+            settingsStore: new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42 }));
+
+        await today.InitializeAsync();
+
+        Assert.Equal(77L, Assert.Single(today.Items).TogglProjectId);
+
+        await today.FlushAsync();
+        var saved = await repository.GetAsync(date);
+        Assert.Equal(77L, Assert.Single(saved!.Items).TogglProjectId);
+    }
+
+    private sealed class GatedPlanRepository(DailyPlan plan) : IDailyPlanRepository
+    {
+        private readonly TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void ReleaseSaves() => gate.TrySetResult();
+
+        public Task<DailyPlan?> GetAsync(DateOnly date, CancellationToken cancellationToken = default) =>
+            Task.FromResult<DailyPlan?>(date == plan.Date ? plan : null);
+
+        public Task SaveAsync(DailyPlan value, CancellationToken cancellationToken = default) => gate.Task;
+    }
+
+    private sealed class RetainingPlanRepository(DailyPlan plan) : IDailyPlanRepository
+    {
+        public Task<DailyPlan?> GetAsync(DateOnly date, CancellationToken cancellationToken = default) =>
+            Task.FromResult<DailyPlan?>(date == plan.Date ? plan : null);
+
+        public Task SaveAsync(DailyPlan value, CancellationToken cancellationToken = default)
+        {
+            plan = value;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class ProjectFactory : IIntegrationClientFactory

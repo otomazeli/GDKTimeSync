@@ -58,7 +58,7 @@
                     <TextBlock Grid.Row="0" Grid.Column="2" Margin="8,0,0,2" Text="Toggl project" Foreground="#FF4B5563" FontSize="11" />
                     <TextBox x:Name="JiraKeyTextBox" Grid.Row="1" Grid.Column="0" LostFocus="OnJiraKeyLostFocus" Text="{Binding SelectedItem.JiraIssueKey, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jira issue key, e.g. CGMFRAVII-8428" />
                     <TextBox Grid.Row="1" Grid.Column="1" Margin="8,0,0,0" Text="{Binding SelectedItem.Description, UpdateSourceTrigger=PropertyChanged}" ToolTip="Worklog description" />
-                    <ComboBox Grid.Row="1" Grid.Column="2" Margin="8,0,0,0" ItemsSource="{Binding TogglProjects}" DisplayMemberPath="Name" SelectedValuePath="Id" SelectedValue="{Binding SelectedItem.TogglProjectId, UpdateSourceTrigger=PropertyChanged}" />
+                    <ComboBox Grid.Row="1" Grid.Column="2" Margin="8,0,0,0" ItemsSource="{Binding SelectedItem.TogglProjectOptions}" DisplayMemberPath="Name" SelectedItem="{Binding SelectedItem.SelectedTogglProject, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Task name" Foreground="#FF4B5563" FontSize="11" Margin="0,0,0,2" />
                     <TextBlock Grid.Row="3" Grid.Column="1" Margin="8,0,0,2" Text="From" Foreground="#FF4B5563" FontSize="11" />
@@ -115,7 +115,7 @@
                 <DataGridTemplateColumn Header="Toggl project" Width="160">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <ComboBox ItemsSource="{Binding DataContext.TogglProjects, RelativeSource={RelativeSource AncestorType=UserControl}}" DisplayMemberPath="Name" SelectedValuePath="Id" SelectedValue="{Binding TogglProjectId, UpdateSourceTrigger=PropertyChanged}" />
+                            <ComboBox ItemsSource="{Binding TogglProjectOptions}" DisplayMemberPath="Name" SelectedItem="{Binding SelectedTogglProject, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
