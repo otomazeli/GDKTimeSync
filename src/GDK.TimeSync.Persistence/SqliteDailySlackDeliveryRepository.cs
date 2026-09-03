@@ -25,14 +25,24 @@ public sealed class SqliteDailySlackDeliveryRepository(SqliteDatabase database) 
         ValidateFingerprint(contentFingerprint);
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
+        // The conflict clause mirrors DailySlackDelivery.CanBeRetried: a day whose post was rejected
+        // by Slack can be claimed again, because nothing reached the channel. Every other stored
+        // state -- Sent, or a reconciliation whose outcome is unknown -- still refuses the claim.
         command.CommandText = """
             INSERT INTO daily_slack_deliveries(delivery_date, content_fingerprint, state, failure_code)
             VALUES ($date, $fingerprint, $state, NULL)
-            ON CONFLICT(delivery_date) DO NOTHING
+            ON CONFLICT(delivery_date) DO UPDATE SET
+                content_fingerprint = excluded.content_fingerprint,
+                state = excluded.state,
+                failure_code = NULL
+            WHERE daily_slack_deliveries.state = $retryableState
+              AND daily_slack_deliveries.failure_code = $retryableFailure
             """;
         command.Parameters.AddWithValue("$date", date.ToString("yyyy-MM-dd"));
         command.Parameters.AddWithValue("$fingerprint", contentFingerprint);
         command.Parameters.AddWithValue("$state", (int)DailySlackDeliveryState.InProgress);
+        command.Parameters.AddWithValue("$retryableState", (int)DailySlackDeliveryState.ReconciliationRequired);
+        command.Parameters.AddWithValue("$retryableFailure", (int)DailySlackFailureCode.UnsuccessfulResponse);
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 

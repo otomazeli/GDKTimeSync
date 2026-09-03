@@ -318,7 +318,9 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
                 return;
             }
 
-            if (await dailyDeliveries.GetAsync(plan.Date, cancellationToken) is not null)
+            // A day Slack rejected can be composed and sent again -- nothing reached the channel.
+            // Anything else already stored stays closed.
+            if (await dailyDeliveries.GetAsync(plan.Date, cancellationToken) is { CanBeRetried: false })
             {
                 SlackBlockers.Add("A daily Slack delivery already exists and cannot be sent again.");
                 return;

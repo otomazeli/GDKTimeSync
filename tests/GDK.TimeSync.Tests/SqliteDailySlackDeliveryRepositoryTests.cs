@@ -8,6 +8,49 @@ public sealed class SqliteDailySlackDeliveryRepositoryTests : IAsyncLifetime
 {
     private readonly List<string> databasePaths = [];
 
+    // The claim is taken before the post, so a rejected post used to leave the day locked with
+    // nothing sent -- a real 404 from Slack made a whole day's update unsendable. Slack answering
+    // with a failure is proof nothing reached the channel, so that day reopens.
+    [Fact]
+    public async Task TryClaimAsync_ReopensADayWhosePostSlackRejected()
+    {
+        var repository = CreateRepository();
+        var date = new DateOnly(2026, 9, 3);
+        Assert.True(await repository.TryClaimAsync(date, Fingerprint));
+        await repository.SaveAsync(new DailySlackDelivery(date, Fingerprint,
+            DailySlackDeliveryState.ReconciliationRequired, DailySlackFailureCode.UnsuccessfulResponse));
+
+        Assert.True(await repository.TryClaimAsync(date, Fingerprint));
+    }
+
+    // Everything else is "we do not know whether it arrived", and a second send would double-post.
+    [Theory]
+    [InlineData(DailySlackFailureCode.Transport)]
+    [InlineData(DailySlackFailureCode.Cancelled)]
+    [InlineData(DailySlackFailureCode.InvalidResponse)]
+    [InlineData(DailySlackFailureCode.PersistenceFailed)]
+    public async Task TryClaimAsync_KeepsADayClosedWhenTheOutcomeIsUnknown(DailySlackFailureCode failureCode)
+    {
+        var repository = CreateRepository();
+        var date = new DateOnly(2026, 9, 3);
+        Assert.True(await repository.TryClaimAsync(date, Fingerprint));
+        await repository.SaveAsync(new DailySlackDelivery(date, Fingerprint,
+            DailySlackDeliveryState.ReconciliationRequired, failureCode));
+
+        Assert.False(await repository.TryClaimAsync(date, Fingerprint));
+    }
+
+    [Fact]
+    public async Task TryClaimAsync_KeepsASentDayClosed()
+    {
+        var repository = CreateRepository();
+        var date = new DateOnly(2026, 9, 3);
+        Assert.True(await repository.TryClaimAsync(date, Fingerprint));
+        await repository.SaveAsync(new DailySlackDelivery(date, Fingerprint, DailySlackDeliveryState.Sent, null));
+
+        Assert.False(await repository.TryClaimAsync(date, Fingerprint));
+    }
+
     [Fact]
     public async Task TryClaimAsync_RejectsSecondSendForSameDateAndFingerprint()
     {

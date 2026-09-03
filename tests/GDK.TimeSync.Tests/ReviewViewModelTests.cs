@@ -579,6 +579,46 @@ public sealed class ReviewViewModelTests
         Assert.Equal(1, attempts.ListCalls - afterRefresh);
     }
 
+    // A day Slack rejected must be composable again: nothing reached the channel, and refusing on
+    // any stored row made a 404 cost the whole day's update.
+    [Fact]
+    public async Task ComposeReopensADayWhosePostSlackRejected()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var review = CreateReview(
+            DailyPlan.Create(date, [item]),
+            attempts: new AttemptRepository(Succeeded(item)),
+            dailyDeliveries: new DailyDeliveryRepository(new DailySlackDelivery(date, new string('a', 64),
+                DailySlackDeliveryState.ReconciliationRequired, DailySlackFailureCode.UnsuccessfulResponse)));
+        await review.RefreshAsync();
+
+        await review.ComposeSlackPreviewAsync();
+
+        Assert.NotNull(review.SlackPreview);
+        Assert.DoesNotContain(review.SlackBlockers, blocker => blocker.Contains("already exists", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(DailySlackDeliveryState.Sent, null)]
+    [InlineData(DailySlackDeliveryState.ReconciliationRequired, DailySlackFailureCode.Transport)]
+    [InlineData(DailySlackDeliveryState.ReconciliationRequired, DailySlackFailureCode.Cancelled)]
+    public async Task ComposeKeepsADayClosedWhenASendMayHaveArrived(DailySlackDeliveryState state, DailySlackFailureCode? failureCode)
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var review = CreateReview(
+            DailyPlan.Create(date, [item]),
+            attempts: new AttemptRepository(Succeeded(item)),
+            dailyDeliveries: new DailyDeliveryRepository(new DailySlackDelivery(date, new string('a', 64), state, failureCode)));
+        await review.RefreshAsync();
+
+        await review.ComposeSlackPreviewAsync();
+
+        Assert.Null(review.SlackPreview);
+        Assert.Contains(review.SlackBlockers, blocker => blocker.Contains("already exists", StringComparison.Ordinal));
+    }
+
     // ---- Issue #12: the ticks decide what goes into the Slack update ----
     //
     // The same ticks still drive Post selected, so a delivered row has to stay tickable -- Slack is
