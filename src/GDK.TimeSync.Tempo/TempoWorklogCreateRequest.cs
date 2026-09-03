@@ -5,4 +5,5 @@ public sealed record TempoWorklogCreateRequest(
     string OriginTaskId,
     DateTime Started,
     int TimeSpentSeconds,
-    string Comment);
+    string Comment,
+    string WorkCategory = "");

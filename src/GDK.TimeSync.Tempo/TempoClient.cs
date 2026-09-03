@@ -94,7 +94,7 @@ public sealed class TempoClient : ITempoClient
     public Task<TempoWorklog> CreateWorklogAsync(TempoWorklogCreateRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return CreateWorklogAsync(new TempoWorklogRequest(request.Worker, request.OriginTaskId, request.Started, request.TimeSpentSeconds, request.Comment), cancellationToken);
+        return CreateWorklogAsync(new TempoWorklogRequest(request.Worker, request.OriginTaskId, request.Started, request.TimeSpentSeconds, request.Comment, request.WorkCategory), cancellationToken);
     }
 
     public void Dispose() => httpClient.Dispose();
@@ -108,14 +108,42 @@ public sealed class TempoClient : ITempoClient
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(request.TimeSpentSeconds);
     }
 
-    private static object CreatePayload(TempoWorklogRequest request) => new
+    // The Tempo work-category attribute, in the shape uTempoClient.pas sends -- captured from Tempo's
+    // own UI and known to work against this instance.
+    private const string WorkCategoryKey = "_WorkCategory_";
+    private const string WorkCategoryName = "Work-Category";
+
+    // ponytail: the attribute id is fixed at 4 to match the working reference client. ITempoClient
+    // exposes GetWorkAttributesAsync if another Tempo instance ever numbers it differently.
+    private const int WorkCategoryAttributeId = 4;
+
+    private static object CreatePayload(TempoWorklogRequest request)
     {
-        worker = request.Worker,
-        originTaskId = request.OriginTaskId,
-        started = request.Started.ToString("yyyy-MM-dd'T'HH:mm:ss.fff", CultureInfo.InvariantCulture),
-        timeSpentSeconds = request.TimeSpentSeconds,
-        comment = request.Comment
-    };
+        var payload = new Dictionary<string, object?>
+        {
+            ["worker"] = request.Worker,
+            ["originTaskId"] = request.OriginTaskId,
+            ["started"] = request.Started.ToString("yyyy-MM-dd'T'HH:mm:ss.fff", CultureInfo.InvariantCulture),
+            ["timeSpentSeconds"] = request.TimeSpentSeconds,
+            ["comment"] = request.Comment
+        };
+
+        // Omitted rather than sent blank: an empty attribute writes an empty category over the row.
+        if (!string.IsNullOrWhiteSpace(request.WorkCategory))
+        {
+            payload["attributes"] = new Dictionary<string, object>
+            {
+                [WorkCategoryKey] = new
+                {
+                    name = WorkCategoryName,
+                    workAttributeId = WorkCategoryAttributeId,
+                    value = request.WorkCategory.Trim().ToUpperInvariant()
+                }
+            };
+        }
+
+        return payload;
+    }
 
     private static async Task<TempoWorklog> ReadRequiredJsonAsync(HttpResponseMessage response, CancellationToken cancellationToken) =>
         await ReadJsonAsync<TempoWorklog>(response, cancellationToken)

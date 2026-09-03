@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using GDK.TimeSync.Tempo;
 
 namespace GDK.TimeSync.Tests;
@@ -116,6 +117,88 @@ public sealed class TempoClientTests
         Assert.Contains("\"originTaskId\":\"12345\"", body);
         Assert.Contains("\"timeSpentSeconds\":1800", body);
         Assert.Contains("\"started\":\"2026-08-07T08:15:00.000\"", body);
+    }
+
+    // Issue #13: every worklog we posted landed in Tempo with no work category, because the payload
+    // had no `attributes` object at all. The shape below is the one the Delphi reference client
+    // (uTempoClient.pas) sends, which was captured from Tempo's own UI and is known to work.
+    [Fact]
+    public async Task CreateWorklogAsync_sends_the_work_category_as_a_tempo_work_attribute()
+    {
+        string? body = null;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return JsonResponse(WorklogJson);
+        });
+        using var httpClient = CreateHttpClient(handler);
+        using ITempoClient client = CreateClient(httpClient);
+
+        await client.CreateWorklogAsync(ValidRequest() with { WorkCategory = "DEVELOPMENT" });
+
+        using var payload = JsonDocument.Parse(body!);
+        var category = payload.RootElement.GetProperty("attributes").GetProperty("_WorkCategory_");
+        Assert.Equal("Work-Category", category.GetProperty("name").GetString());
+        Assert.Equal(4, category.GetProperty("workAttributeId").GetInt32());
+        Assert.Equal("DEVELOPMENT", category.GetProperty("value").GetString());
+    }
+
+    [Fact]
+    public async Task CreateWorklogAsync_normalises_the_work_category_to_trimmed_upper_case()
+    {
+        string? body = null;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return JsonResponse(WorklogJson);
+        });
+        using var httpClient = CreateHttpClient(handler);
+        using ITempoClient client = CreateClient(httpClient);
+
+        await client.CreateWorklogAsync(ValidRequest() with { WorkCategory = "  development  " });
+
+        using var payload = JsonDocument.Parse(body!);
+        Assert.Equal("DEVELOPMENT",
+            payload.RootElement.GetProperty("attributes").GetProperty("_WorkCategory_").GetProperty("value").GetString());
+    }
+
+    // Sending an empty attribute is worse than sending none: it writes a blank category over
+    // whatever Tempo would otherwise infer. A plan written before the category existed has none.
+    [Fact]
+    public async Task CreateWorklogAsync_omits_the_attributes_object_when_no_category_is_set()
+    {
+        string? body = null;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return JsonResponse(WorklogJson);
+        });
+        using var httpClient = CreateHttpClient(handler);
+        using ITempoClient client = CreateClient(httpClient);
+
+        await client.CreateWorklogAsync(ValidRequest() with { WorkCategory = "   " });
+
+        using var payload = JsonDocument.Parse(body!);
+        Assert.False(payload.RootElement.TryGetProperty("attributes", out _));
+    }
+
+    [Fact]
+    public async Task UpdateWorklogAsync_sends_the_work_category_too()
+    {
+        string? body = null;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return JsonResponse(WorklogJson);
+        });
+        using var httpClient = CreateHttpClient(handler);
+        using ITempoClient client = CreateClient(httpClient);
+
+        await client.UpdateWorklogAsync(5, ValidRequest() with { WorkCategory = "MEETING" });
+
+        using var payload = JsonDocument.Parse(body!);
+        Assert.Equal("MEETING",
+            payload.RootElement.GetProperty("attributes").GetProperty("_WorkCategory_").GetProperty("value").GetString());
     }
 
     [Fact]
@@ -295,6 +378,8 @@ public sealed class TempoClientTests
 
     private static TempoWorklogRequest ValidRequest() =>
         new("odimar", "12345", new DateTime(2026, 8, 7, 8, 15, 0), 1_800, "Knowledge Transfer");
+
+    private const string WorklogJson = """{"tempoWorklogId":1,"worker":"odimar","originTaskId":"12345","started":"2026-08-07T08:15:00.000","timeSpentSeconds":1800,"comment":"Knowledge Transfer"}""";
 
     private static HttpResponseMessage JsonResponse(string json) =>
         new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
