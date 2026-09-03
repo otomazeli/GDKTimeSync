@@ -7,6 +7,44 @@ namespace GDK.TimeSync.Tests;
 
 public sealed class SlackClientTests
 {
+
+    // Status emoji reach Slack through this payload. They are outside the BMP, so they serialise as
+    // surrogate-pair escapes rather than raw bytes -- valid JSON that Slack decodes back. This test
+    // exists because a console mangled them once and it was not obvious which side was at fault.
+    [Fact]
+    public async Task PostAsync_carries_status_emoji_through_to_the_request_body()
+    {
+        string? body = null;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        var client = new SlackClient(new HttpClient(handler) { BaseAddress = new Uri("https://hooks.slack.example.test/triggers/a/b/c") });
+
+        await client.PostAsync(new SlackDailyUpdate(new DateOnly(2026, 9, 3), "t", "h", "CGM-1 Work | 🔄 ⚪", "u"));
+
+        using var payload = JsonDocument.Parse(body!);
+        Assert.Equal("CGM-1 Work | 🔄 ⚪", payload.RootElement.GetProperty("SlackExtraLines").GetString());
+    }
+
+
+    // The webhook path is the credential and the whole address: posting to a relative "" must land on
+    // exactly the stored trigger URL. A stray trailing slash here would make Slack answer 404, which
+    // is indistinguishable from a deleted trigger once the failure body is redacted.
+    [Fact]
+    public async Task PostAsync_posts_to_the_webhook_url_exactly_as_stored()
+    {
+        const string webhook = "https://hooks.slack.example.test/triggers/T03KQC8QV/11891630366823/36c74d05a493cc007642cf541459bdc8";
+        HttpRequestMessage? seen = null;
+        var handler = new StubHttpMessageHandler(request => { seen = request; return new HttpResponseMessage(HttpStatusCode.OK); });
+        var client = new SlackClient(new HttpClient(handler) { BaseAddress = new Uri(webhook) });
+
+        await client.PostAsync(new SlackDailyUpdate(new DateOnly(2026, 9, 3), "t", "h", "lines", "u"));
+
+        Assert.Equal(webhook, seen!.RequestUri!.AbsoluteUri);
+    }
+
     [Fact]
     public async Task PostAsync_SendsTheWorkflowBuilderDataVariables()
     {

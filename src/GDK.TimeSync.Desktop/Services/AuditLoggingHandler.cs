@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Net.Http;
 using GDK.TimeSync.Core;
 
@@ -24,7 +25,7 @@ public sealed class AuditLoggingHandler(IAuditLog auditLog, string clientName, b
             if (response.IsSuccessStatusCode)
                 auditLog.Write(AuditLevel.Info, clientName, line);
             else
-                auditLog.Write(AuditLevel.Error, clientName, $"{line}{Environment.NewLine}response: {(redactUri ? "(redacted)" : await ReadBodyAsync(response, cancellationToken))}");
+                auditLog.Write(AuditLevel.Error, clientName, $"{line}{Environment.NewLine}response: {await DescribeFailureAsync(response, cancellationToken)}");
             return response;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -41,6 +42,39 @@ public sealed class AuditLoggingHandler(IAuditLog auditLog, string clientName, b
     // echoes the requested URL back inside the body, which would put the credential in the log.
     private string DescribeUri(Uri? uri) =>
         redactUri ? "<slack webhook>" : uri?.AbsolutePath ?? "(no uri)";
+
+    // For the redacted client the whole body stays suppressed, with one exception: Slack's own error
+    // JSON. `{"ok":false,"error":"webhook_not_found"}` names the fault and structurally cannot carry
+    // the webhook URL, because only that one known field is read -- a proxy block page echoing the
+    // URL is not JSON with an `error` string, so it never survives this filter. Getting
+    // "webhook_not_found" instead of "(redacted)" is the difference between knowing the trigger is
+    // gone and having to go and find out.
+    private async Task<string> DescribeFailureAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        var body = await ReadBodyAsync(response, cancellationToken);
+        if (!redactUri) return body;
+        return ExtractErrorCode(body) is { } code ? $"error: {code}" : "(redacted)";
+    }
+
+    private static string? ExtractErrorCode(string body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return null;
+            if (!document.RootElement.TryGetProperty("error", out var error) || error.ValueKind != JsonValueKind.String) return null;
+
+            var code = error.GetString();
+            // An error *code* is a short token. Anything longer is prose that could quote the request.
+            return code is { Length: > 0 and <= MaxErrorCodeCharacters } ? code : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private const int MaxErrorCodeCharacters = 64;
 
     private static async Task<string> ReadBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
