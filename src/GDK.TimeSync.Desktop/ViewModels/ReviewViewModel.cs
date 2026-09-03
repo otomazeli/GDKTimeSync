@@ -48,7 +48,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         this.auditLog = auditLog;
         DryRunCommand = new RelayCommand(_ => RunDryRun());
         RefreshCommand = new RelayCommand(_ => _ = RefreshAsync());
-        PostSelectedCommand = new RelayCommand(_ => OpenBatchConfirmation(), () => SelectedCount > 0 && !IsBatchInFlight);
+        PostSelectedCommand = new RelayCommand(_ => OpenBatchConfirmation(), () => PostableCount > 0 && !IsBatchInFlight);
         ConfirmPostSelectedCommand = new RelayCommand(_ => _ = ConfirmPostSelectedAsync());
         CancelPostSelectedCommand = new RelayCommand(_ => CancelPostSelected(), () => IsBatchConfirmationVisible);
         CancelBatchCommand = new RelayCommand(_ => CancelBatch(), () => IsBatchInFlight);
@@ -113,6 +113,12 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
     public int SelectedCount => Tasks.Count(task => task.IsSelected);
     public TimeSpan SelectedDuration => Tasks.Where(task => task.IsSelected).Aggregate(TimeSpan.Zero, (total, task) => total + task.Duration);
+
+    // A tick means "in scope for the review". Delivery needs the narrower set, because the tick also
+    // decides what goes into the Slack update and so survives a successful post.
+    public IEnumerable<ReviewTaskViewModel> PostableTasks => Tasks.Where(task => task.IsSelected && task.CanPost);
+    public int PostableCount => PostableTasks.Count();
+    public TimeSpan PostableDuration => PostableTasks.Aggregate(TimeSpan.Zero, (total, task) => total + task.Duration);
     public string DaySummary => $"{Tasks.Count} task(s) · {SelectedDuration:h\\:mm} selected";
 
     public bool IsBatchConfirmationVisible
@@ -140,8 +146,17 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     }
 
     public string? BatchStatus { get => batchStatus; private set => SetField(ref batchStatus, value); }
-    public string BatchConfirmationSummary =>
-        $"{SelectedCount} task(s) → Toggl, Jira, Tempo · {SelectedDuration:h\\:mm} total";
+    public string BatchConfirmationSummary
+    {
+        get
+        {
+            var summary = $"{PostableCount} task(s) → Toggl, Jira, Tempo · {PostableDuration:h\\:mm} total";
+            // The tick count and the delivery count can now differ, so say so rather than letting the
+            // button's number imply that every ticked row is about to be posted.
+            var skipped = SelectedCount - PostableCount;
+            return skipped > 0 ? $"{summary} ({skipped} already posted, skipped)" : summary;
+        }
+    }
 
     public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
@@ -186,24 +201,28 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
     private void OnTaskChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ReviewTaskViewModel.IsSelected)) NotifySelectionChanged();
+        if (e.PropertyName is nameof(ReviewTaskViewModel.IsSelected) or nameof(ReviewTaskViewModel.CanPost))
+            NotifySelectionChanged();
     }
 
     private void NotifySelectionChanged()
     {
         OnPropertyChanged(nameof(SelectedCount));
         OnPropertyChanged(nameof(SelectedDuration));
+        OnPropertyChanged(nameof(PostableCount));
+        OnPropertyChanged(nameof(PostableDuration));
         OnPropertyChanged(nameof(DaySummary));
+        OnPropertyChanged(nameof(BatchConfirmationSummary));
         PostSelectedCommand.NotifyCanExecuteChanged();
     }
 
     private void OpenBatchConfirmation()
     {
-        if (SelectedCount == 0) return;
+        if (PostableCount == 0) return;
         BatchStatus = null;
         IsBatchConfirmationVisible = true;
-        var keys = string.Join(", ", Tasks.Where(task => task.IsSelected).Select(task => task.JiraIssueKey));
-        auditLog?.Write(AuditLevel.Info, "Review", $"Post requested for {SelectedCount} task(s): {keys}, {SelectedDuration:h\\:mm}");
+        var keys = string.Join(", ", PostableTasks.Select(task => task.JiraIssueKey));
+        auditLog?.Write(AuditLevel.Info, "Review", $"Post requested for {PostableCount} task(s): {keys}, {PostableDuration:h\\:mm}");
     }
 
     public void CancelPostSelected()
@@ -222,7 +241,7 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         batchCancellation = cancellation;
         var succeeded = 0;
         var failed = 0;
-        var chosen = Tasks.Where(task => task.IsSelected).ToArray();
+        var chosen = PostableTasks.ToArray();
         auditLog?.Write(AuditLevel.Info, "Review", $"Post confirmed for {chosen.Length} task(s)");
         try
         {
@@ -305,11 +324,22 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
                 return;
             }
 
+            // Issue #12: the grid's ticks decide what goes into the channel, so a developer can keep
+            // work out of the Slack update without keeping it out of Toggl, Jira and Tempo. Walked in
+            // grid order, and resolved against the plan snapshot so each line carries fresh data.
+            var chosen = Tasks.Where(task => task.IsSelected).ToArray();
+            if (chosen.Length == 0)
+            {
+                SlackBlockers.Add("No tasks are ticked for the Slack update.");
+                return;
+            }
+
             var attemptsByItemId = (await attempts.ListAsync(cancellationToken)).ToDictionary(attempt => attempt.PlannedWorkItemId);
             var completed = new List<SlackDailyCompletedItem>();
             var notPostedCount = 0;
-            foreach (var item in plan.Items)
+            foreach (var row in chosen)
             {
+                var item = plan.Items.FirstOrDefault(candidate => candidate.Id == row.Id) ?? row.Item;
                 var postedToJira = attemptsByItemId.GetValueOrDefault(item.Id) is { Status: DeliveryAttemptStatus.Succeeded, TempoWorklogId: not null };
                 if (!postedToJira)
                     notPostedCount++;

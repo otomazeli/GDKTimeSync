@@ -17,7 +17,7 @@ public sealed class ReviewTaskViewModel : INotifyPropertyChanged
         ArgumentNullException.ThrowIfNull(item);
         Item = item;
         this.attempt = attempt;
-        isSelected = CanSelect;
+        isSelected = true;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -28,20 +28,24 @@ public sealed class ReviewTaskViewModel : INotifyPropertyChanged
     public string Description => Item.Comment;
     public TimeSpan Duration => Item.Duration;
 
-    // Mirrors the guard the old per-task confirmation applied: an item neither marked for Toggl nor
-    // already linked to an entry cannot be delivered, and a delivered one must not be posted twice.
-    public bool CanSelect =>
+    // Whether this row can be *delivered*: an item neither marked for Toggl nor already linked to an
+    // entry cannot be, and a delivered one must not be posted twice. This used to gate the checkbox,
+    // but the tick now also decides what goes into the Slack update, which is composed after posting
+    // -- gating it here would make the delivered work impossible to report. ReviewViewModel applies
+    // this guard when it builds the batch instead.
+    public bool CanPost =>
         (Item.PostToToggl || Item.TogglEntryId is not null) &&
         attempt?.Status is not DeliveryAttemptStatus.Succeeded;
 
+    // "In scope for today's review" -- both for delivery and for the Slack update. Ticked by
+    // default so composing without touching anything reports the whole day.
     public bool IsSelected
     {
         get => isSelected;
         set
         {
-            var allowed = value && CanSelect;
-            if (isSelected == allowed) return;
-            isSelected = allowed;
+            if (isSelected == value) return;
+            isSelected = value;
             OnPropertyChanged();
         }
     }
@@ -83,8 +87,7 @@ public sealed class ReviewTaskViewModel : INotifyPropertyChanged
     {
         ArgumentNullException.ThrowIfNull(updated);
         attempt = updated;
-        if (!CanSelect) isSelected = false;
-        foreach (var name in new[] { nameof(Toggl), nameof(Jira), nameof(Tempo), nameof(FailureText), nameof(CanSelect), nameof(IsSelected) })
+        foreach (var name in new[] { nameof(Toggl), nameof(Jira), nameof(Tempo), nameof(FailureText), nameof(CanPost) })
             OnPropertyChanged(name);
     }
 

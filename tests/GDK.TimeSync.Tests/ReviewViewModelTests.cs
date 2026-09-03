@@ -36,11 +36,11 @@ public sealed class ReviewViewModelTests
         // applies here; regression would leave these buttons showing "1" instead of a real label.
         var buttons = elements.Where(element => element.Name.LocalName == "Button").ToArray();
         var postSelected = buttons.Single(button => button.Attribute("Command")?.Value == "{Binding PostSelectedCommand}");
-        Assert.Equal("{Binding SelectedCount}", postSelected.Attribute("Content")?.Value);
+        Assert.Equal("{Binding PostableCount}", postSelected.Attribute("Content")?.Value);
         Assert.Equal("Post selected ({0})", postSelected.Attribute("ContentStringFormat")?.Value);
 
         var confirmPost = buttons.Single(button => button.Attribute("Command")?.Value == "{Binding ConfirmPostSelectedCommand}");
-        Assert.Equal("{Binding SelectedCount}", confirmPost.Attribute("Content")?.Value);
+        Assert.Equal("{Binding PostableCount}", confirmPost.Attribute("Content")?.Value);
         Assert.Equal("Post {0} task(s)", confirmPost.Attribute("ContentStringFormat")?.Value);
 
         // No ContentControl anywhere in the page should carry the broken pattern.
@@ -277,6 +277,7 @@ public sealed class ReviewViewModelTests
         var review = CreateReview(DailyPlan.Create(date, [item]), delivery, attempts: new AttemptRepository(Succeeded(item)), slackFactory: slack);
 
         review.DryRunCommand.Execute(null);
+        await review.RefreshAsync();
         await review.ComposeSlackPreviewAsync();
         review.CancelSlackConfirmation();
 
@@ -314,7 +315,10 @@ public sealed class ReviewViewModelTests
         Assert.Equal(2, review.Tasks.Count);
         var deliveredRow = review.Tasks.Single(task => task.Id == delivered.Id);
         Assert.Equal(DeliveryMark.Delivered, deliveredRow.Tempo);
-        Assert.False(deliveredRow.IsSelected);
+        // Ticked even though delivered: the tick decides the Slack update too, and CanPost is what
+        // keeps it out of a second delivery.
+        Assert.True(deliveredRow.IsSelected);
+        Assert.False(deliveredRow.CanPost);
         var pendingRow = review.Tasks.Single(task => task.Id == pending.Id);
         Assert.Equal(DeliveryMark.Pending, pendingRow.Tempo);
         Assert.True(pendingRow.IsSelected);
@@ -358,6 +362,7 @@ public sealed class ReviewViewModelTests
         var slack = new RecordingSlackClientFactory();
         var review = CreateReview(DailyPlan.Create(date, [item]), delivery, attempts: new AttemptRepository(Succeeded(item)), slackFactory: slack);
 
+        await review.RefreshAsync();
         await review.ComposeSlackPreviewAsync();
         Assert.True(review.IsSlackConfirmationVisible);
         Assert.Empty(slack.Client.PostedUpdates);
@@ -385,6 +390,7 @@ public sealed class ReviewViewModelTests
                 SlackExtraLines = ["Thank you, team."]
             }));
 
+        await review.RefreshAsync();
         await review.ComposeSlackPreviewAsync();
 
         Assert.Equal("Daily delivery", review.SlackPreview!.SlackTitle);
@@ -406,6 +412,7 @@ public sealed class ReviewViewModelTests
             var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
             var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)), settings: new UserSettingsService(path));
 
+            await review.RefreshAsync();
             await review.ComposeSlackPreviewAsync();
 
             Assert.DoesNotContain(sentinel, review.SlackPreview!.SlackTitle, StringComparison.Ordinal);
@@ -426,6 +433,7 @@ public sealed class ReviewViewModelTests
         var deliveries = new DailyDeliveryRepository();
         var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)), slackFactory: slack, dailyDeliveries: deliveries);
 
+        await review.RefreshAsync();
         await review.ComposeSlackPreviewAsync();
         await review.ConfirmSlackAsync();
 
@@ -444,6 +452,7 @@ public sealed class ReviewViewModelTests
         var deliveries = new DailyDeliveryRepository();
         var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)), slackFactory: slack, dailyDeliveries: deliveries);
 
+        await review.RefreshAsync();
         await review.ComposeSlackPreviewAsync();
         await review.ConfirmSlackAsync();
 
@@ -462,6 +471,7 @@ public sealed class ReviewViewModelTests
         var slack = new CredentialBackedSlackFactory(credentials);
         var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)), slackFactory: slack);
 
+        await review.RefreshAsync();
         await review.ComposeSlackPreviewAsync();
 
         Assert.Equal(0, credentials.GetCalls);
@@ -480,6 +490,7 @@ public sealed class ReviewViewModelTests
             DailyPlan.Create(date, [succeeded, failed]),
             attempts: new AttemptRepository(Succeeded(succeeded), new DeliveryAttempt(failed.Id, null, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TempoFailed, SlackDeliveryState.NotSupported)));
 
+        await review.RefreshAsync();
         await review.ComposeSlackPreviewAsync();
 
         Assert.Contains("CGM-1 Completed | 🔄 🔷", review.SlackPreview!.SlackExtraLines);
@@ -494,6 +505,7 @@ public sealed class ReviewViewModelTests
         var pending = PlannedWorkItem.Create(date, "Work", "CGM-1", "Not yet delivered", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
         var review = CreateReview(DailyPlan.Create(date, [pending]));
 
+        await review.RefreshAsync();
         await review.ComposeSlackPreviewAsync();
 
         Assert.NotNull(review.SlackPreview);
@@ -515,6 +527,7 @@ public sealed class ReviewViewModelTests
 
         Assert.False(review.CopySlackPreviewCommand.CanExecute(null));
 
+        await review.RefreshAsync();
         await review.ComposeSlackPreviewAsync();
 
         Assert.True(review.CopySlackPreviewCommand.CanExecute(null));
@@ -556,10 +569,135 @@ public sealed class ReviewViewModelTests
         var attempts = new AttemptRepository(items.Select(Succeeded).ToArray());
         var review = CreateReview(DailyPlan.Create(date, items), attempts: attempts);
 
+        await review.RefreshAsync();
+        var afterRefresh = attempts.ListCalls;
         await review.ComposeSlackPreviewAsync();
 
+        // Measured as a delta: RefreshAsync lists the attempts to build the grid, and what this test
+        // guards is that composing does not then go back per item.
         Assert.Equal(0, attempts.GetCalls);
-        Assert.Equal(1, attempts.ListCalls);
+        Assert.Equal(1, attempts.ListCalls - afterRefresh);
+    }
+
+    // ---- Issue #12: the ticks decide what goes into the Slack update ----
+    //
+    // The same ticks still drive Post selected, so a delivered row has to stay tickable -- Slack is
+    // composed after posting -- and "do not post twice" moves off the checkbox onto the post command.
+
+    [Fact]
+    public async Task ComposeBuildsTheSlackUpdateFromTheTickedRowsOnly()
+    {
+        var review = CreateReview(items: [Task30Minutes("CGM-1"), Task30Minutes("CGM-2"), Task30Minutes("CGM-3")]);
+        await review.RefreshAsync();
+        review.Tasks.Single(task => task.JiraIssueKey == "CGM-2").IsSelected = false;
+
+        await review.ComposeSlackPreviewAsync();
+
+        Assert.NotNull(review.SlackPreview);
+        Assert.Contains("CGM-1", review.SlackPreviewText);
+        Assert.Contains("CGM-3", review.SlackPreviewText);
+        Assert.DoesNotContain("CGM-2", review.SlackPreviewText);
+    }
+
+    [Fact]
+    public async Task ComposeWithNothingTickedProducesABlockerRatherThanTheWholePlan()
+    {
+        var review = CreateReview(items: [Task30Minutes("CGM-1"), Task30Minutes("CGM-2")]);
+        await review.RefreshAsync();
+        foreach (var task in review.Tasks) task.IsSelected = false;
+
+        await review.ComposeSlackPreviewAsync();
+
+        Assert.Null(review.SlackPreview);
+        Assert.Contains(review.SlackBlockers, blocker => blocker.Contains("no task", StringComparison.OrdinalIgnoreCase));
+        Assert.False(review.CanConfirmSlack);
+    }
+
+    // The warning has to describe the message being sent, not the day. An unposted row that was
+    // ticked off is not included, so counting it sends the reader looking for a line that is not there.
+    [Fact]
+    public async Task TheNotPostedWarningCountsOnlyTheRowsGoingIntoTheMessage()
+    {
+        var posted = Task30Minutes("CGM-1");
+        var review = CreateReview(items: [posted, Task30Minutes("CGM-2")], attempts: new AttemptRepository(Succeeded(posted)));
+        await review.RefreshAsync();
+        review.Tasks.Single(task => task.JiraIssueKey == "CGM-2").IsSelected = false;
+
+        await review.ComposeSlackPreviewAsync();
+
+        Assert.NotNull(review.SlackPreview);
+        Assert.DoesNotContain(review.SlackBlockers, blocker => blocker.Contains("not yet posted", StringComparison.Ordinal));
+    }
+
+    // Slack is composed after posting, so a delivered row must still be tickable -- otherwise the
+    // work you most want to report is the work you cannot include.
+    [Fact]
+    public async Task ADeliveredRowStaysTickedSoItCanStillGoIntoTheSlackUpdate()
+    {
+        var delivered = Task30Minutes("CGM-1");
+        var review = CreateReview(items: [delivered], attempts: new AttemptRepository(Succeeded(delivered)));
+        await review.RefreshAsync();
+
+        var row = Assert.Single(review.Tasks);
+        Assert.True(row.IsSelected);
+        Assert.False(row.CanPost);
+
+        await review.ComposeSlackPreviewAsync();
+
+        Assert.Contains("CGM-1", review.SlackPreviewText);
+    }
+
+    // The guard that used to live on the checkbox now lives here, and it has to be just as absolute.
+    [Fact]
+    public async Task PostSelectedSkipsATickedRowThatHasAlreadyBeenDelivered()
+    {
+        var delivered = Task30Minutes("CGM-1");
+        var delivery = new RecordingConfirmedDeliveryService();
+        var review = CreateReview(items: [delivered, Task30Minutes("CGM-2")], delivery: delivery,
+            attempts: new AttemptRepository(Succeeded(delivered)));
+        await review.RefreshAsync();
+        Assert.All(review.Tasks, task => Assert.True(task.IsSelected));
+
+        review.PostSelectedCommand.Execute(null);
+        await review.ConfirmPostSelectedAsync();
+
+        Assert.Equal(["CGM-2"], delivery.DeliveredItems.Select(item => item.JiraIssueKey));
+    }
+
+    [Fact]
+    public async Task PostSelectedIsUnavailableWhenEveryTickedRowHasAlreadyBeenDelivered()
+    {
+        var delivered = Task30Minutes("CGM-1");
+        var review = CreateReview(items: [delivered], attempts: new AttemptRepository(Succeeded(delivered)));
+        await review.RefreshAsync();
+
+        Assert.Equal(1, review.SelectedCount);
+        Assert.Equal(0, review.PostableCount);
+        Assert.False(review.PostSelectedCommand.CanExecute(null));
+    }
+
+    // Ticking a row that cannot be posted no longer silently does nothing, so the confirmation has
+    // to say what will happen rather than letting the count imply more than it delivers.
+    [Fact]
+    public async Task TheConfirmationSaysHowManyTickedRowsWillBeSkipped()
+    {
+        var delivered = Task30Minutes("CGM-1");
+        var review = CreateReview(items: [delivered, Task30Minutes("CGM-2")], attempts: new AttemptRepository(Succeeded(delivered)));
+        await review.RefreshAsync();
+
+        Assert.Equal(2, review.SelectedCount);
+        Assert.Equal(1, review.PostableCount);
+        Assert.Contains("1 already posted", review.BatchConfirmationSummary);
+    }
+
+    [Fact]
+    public async Task TheConfirmationSaysNothingAboutSkippingWhenEveryTickedRowCanBePosted()
+    {
+        var review = CreateReview(items: [Task30Minutes("CGM-1"), Task30Minutes("CGM-2")]);
+        await review.RefreshAsync();
+
+        Assert.Equal(2, review.PostableCount);
+        Assert.DoesNotContain("already posted", review.BatchConfirmationSummary);
     }
 
     private static ReviewViewModel CreateReview(

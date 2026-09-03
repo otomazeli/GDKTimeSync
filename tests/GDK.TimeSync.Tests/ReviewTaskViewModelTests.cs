@@ -18,13 +18,15 @@ public sealed class ReviewTaskViewModelTests
         Assert.Equal(DeliveryMark.Pending, row.Toggl);
         Assert.Equal(DeliveryMark.Pending, row.Jira);
         Assert.Equal(DeliveryMark.Pending, row.Tempo);
-        Assert.True(row.CanSelect);
+        Assert.True(row.CanPost);
         Assert.True(row.IsSelected);
         Assert.Null(row.FailureText);
     }
 
+    // Still ticked after a successful delivery: the tick also decides what goes into the Slack
+    // update, which is composed after posting. CanPost is what stops it being posted twice.
     [Fact]
-    public void ASucceededTaskShowsAllThreeDeliveredAndCannotBeSelected()
+    public void ASucceededTaskShowsAllThreeDeliveredAndCannotBePostedButStaysTicked()
     {
         var item = Item();
         var row = new ReviewTaskViewModel(item, new DeliveryAttempt(item.Id, 101, 201,
@@ -33,8 +35,8 @@ public sealed class ReviewTaskViewModelTests
         Assert.Equal(DeliveryMark.Delivered, row.Toggl);
         Assert.Equal(DeliveryMark.Delivered, row.Jira);
         Assert.Equal(DeliveryMark.Delivered, row.Tempo);
-        Assert.False(row.CanSelect);
-        Assert.False(row.IsSelected);
+        Assert.False(row.CanPost);
+        Assert.True(row.IsSelected);
     }
 
     // Delivery is ordered Toggl -> Jira -> Tempo, so a Tempo failure proves Jira validated.
@@ -125,37 +127,40 @@ public sealed class ReviewTaskViewModelTests
         Assert.Equal("Delivery: Delivery state could not be saved.", row.FailureText);
     }
 
-    // The existing per-task guard: an item neither marked for Toggl nor already linked to an entry
-    // cannot be delivered at all, so the grid must not offer it.
+    // An item neither marked for Toggl nor already linked to an entry cannot be delivered at all.
+    // It can still be reported in Slack, so it stays tickable and only CanPost says no.
     [Fact]
-    public void ATaskThatCannotBeDeliveredCannotBeSelected()
+    public void ATaskThatCannotBeDeliveredCannotBePosted()
     {
         var row = new ReviewTaskViewModel(Item(postToToggl: false));
 
-        Assert.False(row.CanSelect);
-        Assert.False(row.IsSelected);
+        Assert.False(row.CanPost);
+        Assert.True(row.IsSelected);
     }
 
     [Fact]
-    public void ATaskNotMarkedForTogglButAlreadyLinkedCanStillBeSelected()
+    public void ATaskNotMarkedForTogglButAlreadyLinkedCanStillBePosted()
     {
         var row = new ReviewTaskViewModel(Item(postToToggl: false, togglEntryId: 555));
 
-        Assert.True(row.CanSelect);
+        Assert.True(row.CanPost);
     }
 
+    // The tick is the user's own choice about scope now, so nothing overrides it in either direction.
     [Fact]
-    public void SettingIsSelectedOnAnUnselectableRowIsIgnored()
+    public void UntickingAndRetickingARowThatCannotBePostedIsRespected()
     {
         var row = new ReviewTaskViewModel(Item(postToToggl: false));
 
-        row.IsSelected = true;
-
+        row.IsSelected = false;
         Assert.False(row.IsSelected);
+
+        row.IsSelected = true;
+        Assert.True(row.IsSelected);
     }
 
     [Fact]
-    public void ApplyAttemptUpdatesTheMarksAndDeselectsASucceededRow()
+    public void ApplyAttemptUpdatesTheMarksAndClosesASucceededRowToFurtherPosting()
     {
         var item = Item();
         var row = new ReviewTaskViewModel(item);
@@ -164,7 +169,7 @@ public sealed class ReviewTaskViewModelTests
             DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported));
 
         Assert.Equal(DeliveryMark.Delivered, row.Tempo);
-        Assert.False(row.IsSelected);
-        Assert.False(row.CanSelect);
+        Assert.False(row.CanPost);
+        Assert.True(row.IsSelected);
     }
 }
