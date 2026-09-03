@@ -17,6 +17,10 @@ public sealed class ConfirmedTaskDeliveryService(
     // be recovered by the next, instead of vanishing with the coordinator that created it.
     private readonly ConcurrentDictionary<Guid, DeliveryAttempt> pendingReconciliation = new();
 
+    // Resolved once per process, not per item: a Review batch delivers item by item and the identity
+    // does not change between them.
+    private string? resolvedWorker;
+
     public async Task<DeliveryAttempt> DeliverConfirmedAsync(PlannedWorkItem item, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -37,7 +41,7 @@ public sealed class ConfirmedTaskDeliveryService(
         {
             return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TogglFailed);
         }
-        if (configuration.TogglWorkspaceId is not > 0 || string.IsNullOrWhiteSpace(configuration.JiraUser))
+        if (configuration.TogglWorkspaceId is not > 0)
             return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TogglFailed);
 
         ITogglClient toggl;
@@ -61,10 +65,18 @@ public sealed class ConfirmedTaskDeliveryService(
             using (jira)
             using (tempo)
             {
+                // Tempo rejects a worker it does not recognise ("User is invalid"), and the typed
+                // setting was the single most common way to get it wrong on a machine nobody can
+                // debug. Ask Jira who we are instead, and keep the setting only as an override for
+                // an instance where /myself does not return what Tempo wants.
+                var worker = await ResolveWorkerAsync(jira, configuration.JiraUser, cancellationToken);
+                if (string.IsNullOrWhiteSpace(worker))
+                    return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TempoFailed);
+
                 var coordinator = new PostAllCoordinator(
                     new TogglDeliveryClient(toggl, configuration.TogglWorkspaceId.Value),
                     new JiraDeliveryClient(jira),
-                    new TempoDeliveryClient(tempo, configuration.JiraUser),
+                    new TempoDeliveryClient(tempo, worker),
                     attempts,
                     pendingReconciliation);
                 return (await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]), cancellationToken)).Attempts.Single();
@@ -73,6 +85,33 @@ public sealed class ConfirmedTaskDeliveryService(
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.Cancelled);
+        }
+    }
+
+    // Prefers `key`, then `name`, matching the reference client. A configured value wins over both:
+    // it is an explicit override, and someone who typed it did so because resolution was not enough.
+    private async Task<string> ResolveWorkerAsync(JiraClient jira, string configured, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(configured)) return configured;
+        if (resolvedWorker is not null) return resolvedWorker;
+
+        try
+        {
+            var me = await jira.GetMyselfAsync(cancellationToken);
+            var worker = !string.IsNullOrWhiteSpace(me.Key) ? me.Key : me.Name;
+            if (string.IsNullOrWhiteSpace(worker)) return "";
+
+            auditLog?.Write(AuditLevel.Info, "Delivery", $"Tempo worker resolved from Jira: {worker}");
+            resolvedWorker = worker;
+            return worker;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return "";
         }
     }
 
@@ -133,7 +172,10 @@ public sealed class ConfirmedTaskDeliveryService(
                 jiraIssueId,
                 item.Day.ToDateTime(item.Start ?? TimeOnly.MinValue),
                 checked((int)item.Duration.TotalSeconds),
-                item.Comment), cancellationToken);
+                item.Comment,
+                // Issue #13: the category the user picks per row had no route to the payload, so every
+                // worklog reached Tempo uncategorised.
+                item.TempoCategory), cancellationToken);
             return worklog.TempoWorklogId;
         }
     }

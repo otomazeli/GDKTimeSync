@@ -31,6 +31,80 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         Assert.All(clients.CreatedClients, client => Assert.True(client.WasDisposed));
     }
 
+    // Issue #13: Tempo answered a real delivery with
+    // {"errors":{"worker":"User is invalid"}} because the worker came from a typed setting. Jira
+    // knows who we are, so ask it -- the Delphi reference client reads `key` first, then `name`.
+    [Fact]
+    public async Task DeliverConfirmedAsync_resolves_the_tempo_worker_from_jira_when_none_is_configured()
+    {
+        var clients = new RecordingIntegrationClientFactory();
+        clients.Handler.MyselfKey = "JIRAUSER4711";
+        clients.Handler.MyselfName = "odimar.tomazeli";
+        var service = new ConfirmedTaskDeliveryService(
+            clients,
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "" }),
+            new InMemoryAttemptRepository());
+
+        var attempt = await service.DeliverConfirmedAsync(Item());
+
+        Assert.Equal(DeliveryAttemptStatus.Succeeded, attempt.Status);
+        Assert.Equal("JIRAUSER4711", clients.LastTempoWorker);
+    }
+
+    [Fact]
+    public async Task DeliverConfirmedAsync_falls_back_to_the_jira_name_when_no_key_is_returned()
+    {
+        var clients = new RecordingIntegrationClientFactory();
+        clients.Handler.MyselfName = "odimar.tomazeli";
+        var service = new ConfirmedTaskDeliveryService(
+            clients,
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "" }),
+            new InMemoryAttemptRepository());
+
+        await service.DeliverConfirmedAsync(Item());
+
+        Assert.Equal("odimar.tomazeli", clients.LastTempoWorker);
+    }
+
+    // A typed value is an explicit override: whoever set it did so because resolution was not enough.
+    [Fact]
+    public async Task DeliverConfirmedAsync_prefers_a_configured_worker_and_does_not_ask_jira()
+    {
+        var clients = new RecordingIntegrationClientFactory();
+        clients.Handler.MyselfKey = "JIRAUSER4711";
+        var service = new ConfirmedTaskDeliveryService(
+            clients,
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "explicit.override" }),
+            new InMemoryAttemptRepository());
+
+        await service.DeliverConfirmedAsync(Item());
+
+        Assert.Equal("explicit.override", clients.LastTempoWorker);
+        Assert.Equal(0, clients.JiraMyselfRequests);
+    }
+
+    // Nothing configured and nothing resolvable must fail before the Tempo call, not send a blank
+    // worker and let Tempo reject it.
+    [Fact]
+    public async Task DeliverConfirmedAsync_fails_as_tempo_when_no_worker_can_be_determined()
+    {
+        var clients = new RecordingIntegrationClientFactory();
+        var service = new ConfirmedTaskDeliveryService(
+            clients,
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "" }),
+            new InMemoryAttemptRepository());
+
+        var attempt = await service.DeliverConfirmedAsync(Item());
+
+        Assert.Equal(DeliveryAttemptStatus.Failed, attempt.Status);
+        Assert.Equal(DeliveryFailureCode.TempoFailed, attempt.FailureCode);
+        Assert.Equal(0, clients.TempoWorklogRequests);
+    }
+
+    private static PlannedWorkItem Item() =>
+        PlannedWorkItem.Create(new DateOnly(2026, 8, 13), "Planning", "CGM-1", "Reviewed work",
+            TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT", start: new TimeOnly(9, 0));
+
     [Fact]
     public async Task DeliverConfirmedAsync_does_not_create_clients_until_invoked()
     {
@@ -222,6 +296,9 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         public int TogglRequests => handler.TogglRequests;
         public int JiraIssueRequests => handler.JiraIssueRequests;
         public int TempoWorklogRequests => handler.TempoWorklogRequests;
+        public int JiraMyselfRequests => handler.JiraMyselfRequests;
+        public string? LastTempoWorker => handler.LastTempoWorker;
+        public RecordingHandler Handler => handler;
         public TogglCreateTimeEntryRequest? LastTogglRequest => handler.LastTogglRequest;
 
         public Task<ITogglClient> CreateTogglAsync(CancellationToken cancellationToken = default) =>
@@ -246,7 +323,11 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         public int TogglRequests { get; private set; }
         public int JiraIssueRequests { get; private set; }
         public int TempoWorklogRequests { get; private set; }
+        public int JiraMyselfRequests { get; private set; }
         public TogglCreateTimeEntryRequest? LastTogglRequest { get; private set; }
+        public string? LastTempoWorker { get; private set; }
+        public string? MyselfKey { get; set; }
+        public string? MyselfName { get; set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -262,6 +343,11 @@ public sealed class ConfirmedTaskDeliveryServiceTests
                     payload.TryGetProperty("project_id", out var projectId) ? projectId.GetInt64() : null);
                 return Json(new { id = 101L });
             }
+            if (request.RequestUri.AbsolutePath.Contains("myself", StringComparison.Ordinal))
+            {
+                JiraMyselfRequests++;
+                return Json(new { name = MyselfName, displayName = "Planner", emailAddress = "planner@example.test", key = MyselfKey });
+            }
             if (request.RequestUri.AbsolutePath.Contains("issue", StringComparison.Ordinal))
             {
                 JiraIssueRequests++;
@@ -269,7 +355,8 @@ public sealed class ConfirmedTaskDeliveryServiceTests
             }
 
             TempoWorklogRequests++;
-            await request.Content!.ReadFromJsonAsync<object>(cancellationToken);
+            var tempoPayload = await request.Content!.ReadFromJsonAsync<JsonElement>(cancellationToken);
+            LastTempoWorker = tempoPayload.TryGetProperty("worker", out var worker) ? worker.GetString() : null;
             return Json(new { tempoWorklogId = 301L, worker = "planner", originTaskId = "201", started = "2026-08-13T09:00:00", timeSpentSeconds = 1800, comment = "Reviewed work" });
         }
 
