@@ -10,6 +10,24 @@ namespace GDK.TimeSync.Tests;
 
 public sealed class IntegrationDiagnosticsServiceTests
 {
+    // Issue #13: TempoClient hardcodes the work-category attribute id, copied from a reference client
+    // that captured it from Tempo's UI. The diagnostic already fetches the attribute list and threw it
+    // away -- naming it here is how you check that id on a corporate machine that has the executable
+    // and no SDK, debugger or network access to anything else.
+    [Fact]
+    public async Task RunAsync_names_the_tempo_work_attributes_it_found()
+    {
+        var clients = new RecordingIntegrationClientFactory(
+            workAttributes: [new TempoAttribute(4, "Work-Category"), new TempoAttribute(1, "Account")]);
+        var service = new IntegrationDiagnosticsService(clients);
+
+        var results = await service.RunAsync();
+
+        var tempo = results.Single(result => result.Target == IntegrationDiagnosticTarget.Tempo);
+        Assert.True(tempo.IsSuccessful);
+        Assert.Equal("Available: Work-Category (id 4), Account (id 1)", tempo.SafeMessage);
+    }
+
     [Fact]
     public async Task RunAsync_checks_all_read_only_targets_in_order_for_today_and_disposes_created_clients()
     {
@@ -22,7 +40,9 @@ public sealed class IntegrationDiagnosticsServiceTests
         Assert.Equal(
             [
                 new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Toggl, true, "Available"),
-                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Jira, true, "Available"),
+                // Names the identity Tempo is sent as a worklog `worker`, so a wrong one shows up on
+                // the Diagnostics page rather than as a 400 at delivery time.
+                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Jira, true, "Available: name=planner"),
                 new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Tempo, true, "Available")
             ],
             results);
@@ -112,9 +132,10 @@ public sealed class IntegrationDiagnosticsServiceTests
         IntegrationDiagnosticTarget? failingTarget = null,
         IntegrationDiagnosticTarget? cancellingTarget = null,
         string? failureDetail = null,
-        IntegrationDiagnosticTarget? throwingDisposeTarget = null) : IIntegrationClientFactory
+        IntegrationDiagnosticTarget? throwingDisposeTarget = null,
+        TempoAttribute[]? workAttributes = null) : IIntegrationClientFactory
     {
-        private readonly RecordingHandler handler = new(failingTarget, cancellingTarget, failureDetail);
+        private readonly RecordingHandler handler = new(failingTarget, cancellingTarget, failureDetail, workAttributes);
 
         public List<TrackingHttpClient> CreatedClients { get; } = [];
         public IReadOnlyList<string> Requests => handler.Requests;
@@ -148,7 +169,8 @@ public sealed class IntegrationDiagnosticsServiceTests
     private sealed class RecordingHandler(
         IntegrationDiagnosticTarget? failingTarget,
         IntegrationDiagnosticTarget? cancellingTarget,
-        string? failureDetail) : HttpMessageHandler
+        string? failureDetail,
+        TempoAttribute[]? workAttributes = null) : HttpMessageHandler
     {
         public List<string> Requests { get; } = [];
 
@@ -172,7 +194,7 @@ public sealed class IntegrationDiagnosticsServiceTests
             {
                 IntegrationDiagnosticTarget.Toggl => Json(Array.Empty<TogglTimeEntry>()),
                 IntegrationDiagnosticTarget.Jira => Json(new { name = "planner", displayName = "Planner", emailAddress = "planner@example.test" }),
-                IntegrationDiagnosticTarget.Tempo => Json(Array.Empty<TempoAttribute>()),
+                IntegrationDiagnosticTarget.Tempo => Json(workAttributes ?? []),
                 _ => throw new ArgumentOutOfRangeException()
             });
         }
