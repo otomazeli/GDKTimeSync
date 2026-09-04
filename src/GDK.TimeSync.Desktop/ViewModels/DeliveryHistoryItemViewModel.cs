@@ -30,6 +30,7 @@ public sealed class DeliveryHistoryItemViewModel(DeliveryHistoryEntry entry)
         DeliveryFailureCode.JiraIssueNotFound => "Jira issue was not found.",
         DeliveryFailureCode.TempoFailed => "Tempo delivery failed.",
         DeliveryFailureCode.TempoRejected => "Tempo rejected the worklog.",
+        DeliveryFailureCode.SetupFailed => "Delivery could not start.",
         DeliveryFailureCode.PersistenceFailed => "Delivery state could not be saved.",
         DeliveryFailureCode.Cancelled => "Delivery was cancelled.",
         DeliveryFailureCode.RemoteChangedAfterDelivery => "The Toggl entry changed after delivery.",

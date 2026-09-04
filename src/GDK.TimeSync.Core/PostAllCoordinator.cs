@@ -97,7 +97,10 @@ public sealed class PostAllCoordinator(
         if (current is not null && !current.IsResumable())
         {
             if (current.Status != DeliveryAttemptStatus.InProgress)
-                return current;
+                // Say that nothing was attempted. FailureDetail does not survive the database, so
+                // without this a replayed record is indistinguishable from a failure that just
+                // happened -- same code, same absent reason, milliseconds after Confirmed.
+                return current with { FailureDetail = ReplayNote(current) };
 
             var reconciliation = RequiresManualReconciliation(current);
             try
@@ -122,7 +125,7 @@ public sealed class PostAllCoordinator(
         }
 
         if (!claim.IsAcquired)
-            return claim.Attempt;
+            return claim.Attempt with { FailureDetail = ReplayNote(claim.Attempt) };
 
         if (cancellationToken.IsCancellationRequested)
             return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled,
@@ -213,6 +216,11 @@ public sealed class PostAllCoordinator(
             return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TempoFailed, ex.Message);
         }
     }
+
+    private static string ReplayNote(DeliveryAttempt stored) =>
+        stored.Status == DeliveryAttemptStatus.InProgress
+            ? "Not attempted: a delivery for this task is already in flight."
+            : $"Not attempted: {stored.Status} {stored.FailureCode} is already recorded for this task and cannot be repeated automatically.";
 
     private async Task<DeliveryAttempt> RecordCancellationBeforeWriteAsync(Guid itemId)
     {

@@ -69,6 +69,7 @@ public sealed class ReviewTaskViewModel : INotifyPropertyChanged
                 DeliveryFailureCode.TogglFailed => "Toggl",
                 DeliveryFailureCode.JiraFailed or DeliveryFailureCode.JiraIssueNotFound => "Jira",
                 DeliveryFailureCode.TempoFailed or DeliveryFailureCode.TempoRejected => "Tempo",
+                DeliveryFailureCode.SetupFailed => "Setup",
                 _ => "Delivery"
             };
             // PostAllCoordinator.RequiresManualReconciliation builds its attempt with `attempt with { ... }`,
@@ -104,6 +105,7 @@ public sealed class ReviewTaskViewModel : INotifyPropertyChanged
         DeliveryFailureCode.JiraIssueNotFound => "Jira issue was not found.",
         DeliveryFailureCode.TempoFailed => "Tempo delivery failed.",
         DeliveryFailureCode.TempoRejected => "Tempo rejected the worklog.",
+        DeliveryFailureCode.SetupFailed => "Delivery could not start.",
         DeliveryFailureCode.PersistenceFailed => "Delivery state could not be saved.",
         DeliveryFailureCode.Cancelled => "Delivery was cancelled.",
         DeliveryFailureCode.RemoteChangedAfterDelivery => "The Toggl entry changed after delivery.",

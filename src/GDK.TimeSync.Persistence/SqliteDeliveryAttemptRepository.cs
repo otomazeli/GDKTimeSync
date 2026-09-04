@@ -71,7 +71,7 @@ public sealed class SqliteDeliveryAttemptRepository(SqliteDatabase database) : I
                 tempo_write_recorded_at_utc = NULL,
                 reconciliation_recorded_at_utc = NULL
             WHERE delivery_attempts.status = $failed
-              AND delivery_attempts.failure_code IN ($jiraFailed, $jiraNotFound, $tempoRejected)
+              AND delivery_attempts.failure_code IN ($jiraFailed, $jiraNotFound, $tempoRejected, $setupFailed)
             """;
         command.Parameters.AddWithValue("$id", plannedWorkItemId.ToString("D"));
         command.Parameters.AddWithValue("$status", (int)DeliveryAttemptStatus.InProgress);
@@ -80,6 +80,7 @@ public sealed class SqliteDeliveryAttemptRepository(SqliteDatabase database) : I
         command.Parameters.AddWithValue("$jiraFailed", (int)DeliveryFailureCode.JiraFailed);
         command.Parameters.AddWithValue("$jiraNotFound", (int)DeliveryFailureCode.JiraIssueNotFound);
         command.Parameters.AddWithValue("$tempoRejected", (int)DeliveryFailureCode.TempoRejected);
+        command.Parameters.AddWithValue("$setupFailed", (int)DeliveryFailureCode.SetupFailed);
         if (await command.ExecuteNonQueryAsync(cancellationToken) == 1)
             // Re-read rather than assume: a resumed claim carries the toggl_entry_id the update kept.
             return new DeliveryAttemptClaim((await GetAsync(connection, plannedWorkItemId, cancellationToken))!, true);

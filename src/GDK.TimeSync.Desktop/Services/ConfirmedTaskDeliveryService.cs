@@ -41,25 +41,25 @@ public sealed class ConfirmedTaskDeliveryService(
         catch (Exception exception)
         {
             LogException(item.Id, "Settings", exception);
-            return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TogglFailed, "Settings could not be read.");
+            return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.SetupFailed, "Settings could not be read.");
         }
         if (configuration.TogglWorkspaceId is not > 0)
-            return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TogglFailed, "No Toggl workspace is configured.");
+            return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.SetupFailed, "No Toggl workspace is configured.");
 
         ITogglClient toggl;
         JiraClient jira;
         TempoClient tempo;
         try { toggl = await clients.CreateTogglAsync(cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.Cancelled, "Cancelled before any delivery."); }
-        catch (Exception exception) { LogException(item.Id, "Toggl client", exception); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TogglFailed, "The Toggl client could not be created -- check the API token."); }
+        catch (Exception exception) { LogException(item.Id, "Toggl client", exception); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.SetupFailed, "The Toggl client could not be created -- check the API token."); }
 
         try { jira = await clients.CreateJiraAsync(cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.Cancelled, "Cancelled before any delivery."); }
-        catch (Exception exception) { LogException(item.Id, "Jira client", exception); toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.JiraFailed, "The Jira client could not be created -- check the base URL and PAT."); }
+        catch (Exception exception) { LogException(item.Id, "Jira client", exception); toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.SetupFailed, "The Jira client could not be created -- check the base URL and PAT."); }
 
         try { tempo = await clients.CreateTempoAsync(cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { jira.Dispose(); toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.Cancelled, "Cancelled before any delivery."); }
-        catch (Exception exception) { LogException(item.Id, "Tempo client", exception); jira.Dispose(); toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TempoFailed, "The Tempo client could not be created -- check the base URL and PAT."); }
+        catch (Exception exception) { LogException(item.Id, "Tempo client", exception); jira.Dispose(); toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.SetupFailed, "The Tempo client could not be created -- check the base URL and PAT."); }
 
         try
         {
@@ -73,7 +73,7 @@ public sealed class ConfirmedTaskDeliveryService(
                 // an instance where /myself does not return what Tempo wants.
                 var worker = await ResolveWorkerAsync(jira, configuration.JiraUser, cancellationToken);
                 if (string.IsNullOrWhiteSpace(worker))
-                    return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TempoFailed,
+                    return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.SetupFailed,
                         "No Tempo worker: nothing configured, and Jira did not report an identity.");
 
                 var coordinator = new PostAllCoordinator(

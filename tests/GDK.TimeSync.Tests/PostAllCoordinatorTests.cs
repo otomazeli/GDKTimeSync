@@ -180,7 +180,11 @@ public sealed class PostAllCoordinatorTests
         Assert.Equal(1, toggl.CreateCount);
         Assert.Equal(0, jira.LookupCount);
         Assert.Equal(0, tempo.CreateCount);
-        Assert.Equal(attempt, Assert.Single(retried.Attempts));
+        // Same stored record, but the retry says it did not attempt anything -- FailureDetail does
+        // not survive the database, so a replay would otherwise read as a fresh failure.
+        var replay = Assert.Single(retried.Attempts);
+        Assert.Equal(attempt, replay with { FailureDetail = null });
+        Assert.Contains("Not attempted", replay.FailureDetail!, StringComparison.Ordinal);
         Assert.Equal(attempt, await attempts.GetAsync(item.Id));
     }
 
@@ -209,7 +213,11 @@ public sealed class PostAllCoordinatorTests
         Assert.Equal(1, toggl.CreateCount);
         Assert.Equal(1, jira.LookupCount);
         Assert.Equal(1, tempo.CreateCount);
-        Assert.Equal(attempt, Assert.Single(retried.Attempts));
+        // Same stored record, but the retry says it did not attempt anything -- FailureDetail does
+        // not survive the database, so a replay would otherwise read as a fresh failure.
+        var replay = Assert.Single(retried.Attempts);
+        Assert.Equal(attempt, replay with { FailureDetail = null });
+        Assert.Contains("Not attempted", replay.FailureDetail!, StringComparison.Ordinal);
         Assert.Equal(attempt, await attempts.GetAsync(item.Id));
     }
 

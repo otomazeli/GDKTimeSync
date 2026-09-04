@@ -109,8 +109,11 @@ public sealed class ConfirmedTaskDeliveryServiceTests
 
         var attempt = await service.DeliverConfirmedAsync(Item());
 
-        Assert.Equal(DeliveryFailureCode.TogglFailed, attempt.FailureCode);
+        Assert.Equal(DeliveryFailureCode.SetupFailed, attempt.FailureCode);
         Assert.Equal("No Toggl workspace is configured.", attempt.FailureDetail);
+        // Nothing was attempted, so fixing the setting and posting again must work -- recording this
+        // as TogglFailed wedged the task permanently, which is exactly what happened in the field.
+        Assert.True(attempt.IsResumable());
         Assert.Empty(clients.CreatedClients);
     }
 
@@ -204,9 +207,10 @@ public sealed class ConfirmedTaskDeliveryServiceTests
     }
 
     // Nothing configured and nothing resolvable must fail before the Tempo call, not send a blank
-    // worker and let Tempo reject it.
+    // worker and let Tempo reject it. Recorded as SetupFailed because nothing was attempted, which
+    // is what keeps the task retryable once the setting is fixed.
     [Fact]
-    public async Task DeliverConfirmedAsync_fails_as_tempo_when_no_worker_can_be_determined()
+    public async Task DeliverConfirmedAsync_fails_as_setup_when_no_worker_can_be_determined()
     {
         var clients = new RecordingIntegrationClientFactory();
         var service = new ConfirmedTaskDeliveryService(
@@ -217,7 +221,8 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         var attempt = await service.DeliverConfirmedAsync(Item());
 
         Assert.Equal(DeliveryAttemptStatus.Failed, attempt.Status);
-        Assert.Equal(DeliveryFailureCode.TempoFailed, attempt.FailureCode);
+        Assert.Equal(DeliveryFailureCode.SetupFailed, attempt.FailureCode);
+        Assert.True(attempt.IsResumable());
         Assert.Equal(0, clients.TempoWorklogRequests);
     }
 
@@ -281,11 +286,15 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         Assert.Equal(TimeSpan.FromMinutes(45), request.Stop - request.Start);
     }
 
+    // The attribution this protects -- never blame Toggl for a Jira problem -- now lives in the
+    // reason rather than the code. The code says "nothing was attempted", which is what makes the
+    // task retryable once the configuration is fixed; recording these as TogglFailed/JiraFailed put
+    // them in the ambiguous set and wedged the task permanently, which is what happened in the field.
     [Theory]
-    [InlineData("toggl", DeliveryFailureCode.TogglFailed)]
-    [InlineData("jira", DeliveryFailureCode.JiraFailed)]
-    [InlineData("tempo", DeliveryFailureCode.TempoFailed)]
-    public async Task DeliverConfirmedAsync_AttributesAClientSetupFailureToTheClientThatFailed(string failing, DeliveryFailureCode expected)
+    [InlineData("toggl", "Toggl client")]
+    [InlineData("jira", "Jira client")]
+    [InlineData("tempo", "Tempo client")]
+    public async Task DeliverConfirmedAsync_AttributesAClientSetupFailureToTheClientThatFailed(string failing, string expectedInReason)
     {
         var item = PlannedWorkItem.Create(new DateOnly(2026, 9, 1), "Work", "CGM-1", "Comment",
             TimeSpan.FromMinutes(30), "CGM", "DEVELOPMENT", start: new TimeOnly(9, 0), end: new TimeOnly(9, 30));
@@ -297,7 +306,9 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         var attempt = await service.DeliverConfirmedAsync(item);
 
         Assert.Equal(DeliveryAttemptStatus.Failed, attempt.Status);
-        Assert.Equal(expected, attempt.FailureCode);
+        Assert.Equal(DeliveryFailureCode.SetupFailed, attempt.FailureCode);
+        Assert.Contains(expectedInReason, attempt.FailureDetail!, StringComparison.Ordinal);
+        Assert.True(attempt.IsResumable());
     }
 
     [Fact]

@@ -22,7 +22,12 @@ public enum DeliveryFailureCode
     // Appended, never reordered: these are persisted as ints in delivery_attempts.failure_code.
     // Tempo answered and refused the worklog, so nothing was written -- distinct from TempoFailed,
     // which also covers a timeout that may have written one we never recorded.
-    TempoRejected
+    TempoRejected,
+
+    // Delivery gave up before reaching any integration: unreadable settings, no workspace, a client
+    // that could not be constructed. Nothing was attempted, so repeating it cannot duplicate
+    // anything -- unlike TogglFailed, which this used to be recorded as, wedging the task for good.
+    SetupFailed
 }
 
 // Thrown by a delivery client when the remote answered with a failure status. That answer is proof
@@ -71,7 +76,8 @@ public static class DeliveryRetry
         attempt is { Status: DeliveryAttemptStatus.Failed, FailureCode:
             DeliveryFailureCode.JiraFailed or
             DeliveryFailureCode.JiraIssueNotFound or
-            DeliveryFailureCode.TempoRejected };
+            DeliveryFailureCode.TempoRejected or
+            DeliveryFailureCode.SetupFailed };
 }
 
 public sealed record DeliveryAttemptClaim(DeliveryAttempt Attempt, bool IsAcquired);
