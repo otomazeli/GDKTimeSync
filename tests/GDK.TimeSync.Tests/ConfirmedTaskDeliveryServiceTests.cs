@@ -53,6 +53,47 @@ public sealed class ConfirmedTaskDeliveryServiceTests
             clients.LastTogglRequest!.Description);
     }
 
+    // The short reason says which step broke; this says how. A stack names the throw site, which is
+    // the one thing neither the reason nor the HTTP trail can give you on a machine with no debugger.
+    [Fact]
+    public async Task DeliverConfirmedAsync_logs_the_whole_exception_when_a_step_throws()
+    {
+        var log = new RecordingAuditLog();
+        var clients = new RecordingIntegrationClientFactory { TempoStatus = HttpStatusCode.BadRequest };
+        var service = new ConfirmedTaskDeliveryService(
+            clients,
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "planner" }),
+            new InMemoryAttemptRepository(),
+            log);
+
+        await service.DeliverConfirmedAsync(Item());
+
+        var thrown = Assert.Single(log.Entries, entry => entry.Message.Contains("Tempo threw", StringComparison.Ordinal));
+        Assert.Equal(AuditLevel.Error, thrown.Level);
+        Assert.Contains(nameof(DeliveryRejectedException), thrown.Message, StringComparison.Ordinal);
+        // A stack, not just a message: the frame that threw is the point of this line.
+        Assert.Contains("   at ", thrown.Message, StringComparison.Ordinal);
+    }
+
+    // The token must not ride along in a stack any more than in a header.
+    [Fact]
+    public async Task DeliverConfirmedAsync_never_writes_a_credential_into_the_exception_line()
+    {
+        // The token the fake clients are built with, which is what a leak would put in the log.
+        const string secret = "unit-token";
+        var log = new RecordingAuditLog();
+        var clients = new RecordingIntegrationClientFactory { TempoStatus = HttpStatusCode.BadRequest };
+        var service = new ConfirmedTaskDeliveryService(
+            clients,
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "planner" }),
+            new InMemoryAttemptRepository(),
+            log);
+
+        await service.DeliverConfirmedAsync(Item());
+
+        Assert.All(log.Entries, entry => Assert.DoesNotContain(secret, entry.Message, StringComparison.Ordinal));
+    }
+
     // Every setup failure returns before a single HTTP call, so the audit log showed only
     // "Failed TogglFailed" milliseconds after "Confirmed" -- true of a missing workspace, an
     // unavailable client and a task with Toggl switched off alike. The reason is the whole
@@ -396,6 +437,13 @@ public sealed class ConfirmedTaskDeliveryServiceTests
             CreatedClients.Add(client);
             return client;
         }
+    }
+
+    private sealed class RecordingAuditLog : IAuditLog
+    {
+        public List<(AuditLevel Level, string Category, string Message)> Entries { get; } = [];
+
+        public void Write(AuditLevel level, string category, string message) => Entries.Add((level, category, message));
     }
 
     private sealed class RecordingHandler : HttpMessageHandler

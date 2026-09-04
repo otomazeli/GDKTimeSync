@@ -31,9 +31,26 @@ public sealed class PostAllCoordinator(
     IDeliveryAttemptRepository attempts,
     // A new coordinator is built per delivery call (each needs its own live API clients); pass in
     // a store that outlives individual calls so a reconciliation record survives to the next one.
-    ConcurrentDictionary<Guid, DeliveryAttempt>? sharedPendingReconciliation = null) : IPostAllCoordinator
+    ConcurrentDictionary<Guid, DeliveryAttempt>? sharedPendingReconciliation = null,
+    IAuditLog? auditLog = null) : IPostAllCoordinator
 {
     private readonly ConcurrentDictionary<Guid, DeliveryAttempt> pendingReconciliation = sharedPendingReconciliation ?? [];
+
+    // A stack is long, and a truncated one still names the throw site, which is the part that says
+    // where delivery actually broke.
+    private const int MaxExceptionCharacters = 4000;
+
+    // FailureDetail carries a short reason for the review row; this is the whole exception, for the
+    // log only. Types, messages and frames from the integration clients -- no credential reaches
+    // here, because the clients' own messages are constants and the token lives in a header this
+    // code never reads.
+    private void LogException(Guid itemId, string step, Exception exception)
+    {
+        var text = exception.ToString();
+        if (text.Length > MaxExceptionCharacters)
+            text = text[..MaxExceptionCharacters] + " …(truncated)";
+        auditLog?.Write(AuditLevel.Error, "Delivery", $"{itemId} {step} threw{Environment.NewLine}{text}");
+    }
 
     public async Task<PostAllResult> PostAsync(DailyPlan plan, CancellationToken cancellationToken = default)
     {
@@ -140,6 +157,7 @@ public sealed class PostAllCoordinator(
             }
             catch (Exception ex)
             {
+                LogException(item.Id, "Toggl", ex);
                 return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed, ex.Message);
             }
         }
@@ -164,6 +182,7 @@ public sealed class PostAllCoordinator(
         }
         catch (Exception ex)
         {
+            LogException(item.Id, "Jira", ex);
             return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.JiraFailed, ex.Message);
         }
 
@@ -184,11 +203,13 @@ public sealed class PostAllCoordinator(
         }
         catch (DeliveryRejectedException ex)
         {
+            LogException(item.Id, "Tempo", ex);
             // Tempo answered and refused: nothing was written, so this attempt can be retried.
             return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TempoRejected, ex.Message);
         }
         catch (Exception ex)
         {
+            LogException(item.Id, "Tempo", ex);
             return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TempoFailed, ex.Message);
         }
     }

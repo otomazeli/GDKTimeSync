@@ -38,8 +38,9 @@ public sealed class ConfirmedTaskDeliveryService(
         {
             configuration = settings.Load();
         }
-        catch
+        catch (Exception exception)
         {
+            LogException(item.Id, "Settings", exception);
             return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TogglFailed, "Settings could not be read.");
         }
         if (configuration.TogglWorkspaceId is not > 0)
@@ -50,15 +51,15 @@ public sealed class ConfirmedTaskDeliveryService(
         TempoClient tempo;
         try { toggl = await clients.CreateTogglAsync(cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.Cancelled, "Cancelled before any delivery."); }
-        catch { return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TogglFailed, "The Toggl client could not be created -- check the API token."); }
+        catch (Exception exception) { LogException(item.Id, "Toggl client", exception); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TogglFailed, "The Toggl client could not be created -- check the API token."); }
 
         try { jira = await clients.CreateJiraAsync(cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.Cancelled, "Cancelled before any delivery."); }
-        catch { toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.JiraFailed, "The Jira client could not be created -- check the base URL and PAT."); }
+        catch (Exception exception) { LogException(item.Id, "Jira client", exception); toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.JiraFailed, "The Jira client could not be created -- check the base URL and PAT."); }
 
         try { tempo = await clients.CreateTempoAsync(cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { jira.Dispose(); toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.Cancelled, "Cancelled before any delivery."); }
-        catch { jira.Dispose(); toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TempoFailed, "The Tempo client could not be created -- check the base URL and PAT."); }
+        catch (Exception exception) { LogException(item.Id, "Tempo client", exception); jira.Dispose(); toggl.Dispose(); return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.TempoFailed, "The Tempo client could not be created -- check the base URL and PAT."); }
 
         try
         {
@@ -80,7 +81,8 @@ public sealed class ConfirmedTaskDeliveryService(
                     new JiraDeliveryClient(jira),
                     new TempoDeliveryClient(tempo, worker),
                     attempts,
-                    pendingReconciliation);
+                    pendingReconciliation,
+                    auditLog);
                 return (await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]), cancellationToken)).Attempts.Single();
             }
         }
@@ -116,6 +118,19 @@ public sealed class ConfirmedTaskDeliveryService(
             return "";
         }
     }
+
+    // The whole exception, for the log only -- the review row shows the short reason instead. The
+    // integration clients' own messages are constants and the token lives in a header this code
+    // never reads, so no credential reaches here.
+    private void LogException(Guid itemId, string step, Exception exception)
+    {
+        var text = exception.ToString();
+        if (text.Length > MaxExceptionCharacters)
+            text = text[..MaxExceptionCharacters] + " …(truncated)";
+        auditLog?.Write(AuditLevel.Error, "Delivery", $"{itemId} {step} threw{Environment.NewLine}{text}");
+    }
+
+    private const int MaxExceptionCharacters = 4000;
 
     // `reason` is what the audit log shows. Every path here returns before a single HTTP call, so
     // without it the log reads "Failed TogglFailed" milliseconds after "Confirmed" and says nothing
