@@ -19,7 +19,12 @@
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
         <Border Background="#FF1F2937" Padding="16">
-            <StackPanel>
+            <DockPanel>
+                <!-- Pinned to the bottom so "which build am I running?" is answerable at a glance,
+                     on a machine where the only other answer is the log's startup line. -->
+                <TextBlock DockPanel.Dock="Bottom" x:Name="VersionText" Margin="0,16,0,0"
+                           Foreground="#FF9CA3AF" FontSize="10" TextWrapping="Wrap" />
+                <StackPanel>
                 <TextBlock Text="GDK TimeSync" Foreground="White" FontSize="20" FontWeight="SemiBold" />
                 <TextBlock Margin="0,4,0,24" Text="Toggl → Jira → Tempo" Foreground="#FFD1D5DB" />
                 <Button Command="{Binding NavigateCommand}" CommandParameter="{x:Static viewModels:NavigationPage.Today}">Today</Button>
@@ -52,7 +57,8 @@
                 <Button Margin="0,10,0,0" Command="{Binding ConnectionStatus.RefreshCommand}" Content="Refresh connections" />
                 <TextBlock Margin="0,18,0,0" Text="Last sync" Foreground="#FFD1D5DB" FontWeight="SemiBold" />
                 <TextBlock Margin="0,3,0,0" Text="{Binding Main.SyncStatusText, TargetNullValue='Not synced yet'}" Foreground="#FFD1D5DB" FontSize="11" TextWrapping="Wrap" />
-            </StackPanel>
+                </StackPanel>
+            </DockPanel>
         </Border>
         <Grid Grid.Column="1" Margin="28">
             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="20" /><RowDefinition Height="*" /></Grid.RowDefinitions>

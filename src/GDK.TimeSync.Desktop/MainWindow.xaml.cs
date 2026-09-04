@@ -1,4 +1,5 @@
 using System.Windows;
+using GDK.TimeSync.Desktop.Services;
 using GDK.TimeSync.Desktop.ViewModels;
 
 namespace GDK.TimeSync.Desktop;
@@ -13,6 +14,7 @@ public partial class MainWindow : Window
         this.viewModel = viewModel;
         this.shellViewModel = shellViewModel;
         InitializeComponent();
+        VersionText.Text = AppVersion.Display;
         DataContext = shellViewModel;
     }
 

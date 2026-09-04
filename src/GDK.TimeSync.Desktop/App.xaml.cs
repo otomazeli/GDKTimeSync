@@ -32,7 +32,7 @@ public partial class App : System.Windows.Application
         serviceProvider = services.BuildServiceProvider();
         var auditLog = serviceProvider.GetRequiredService<IAuditLog>();
         (auditLog as FileAuditLog)?.DeleteFilesOlderThan(14);
-        auditLog.Write(AuditLevel.Info, "App", $"Started version {typeof(App).Assembly.GetName().Version} — log at {LogDirectory}");
+        auditLog.Write(AuditLevel.Info, "App", $"Started {AppVersion.Display} — log at {LogDirectory}");
         // Must run before StartAsync: CheckNow() inside it can raise ReviewDue synchronously,
         // and HandleReviewReminderAsync silently drops the reminder if trayIcon isn't set yet.
         InitializeTrayIcon();

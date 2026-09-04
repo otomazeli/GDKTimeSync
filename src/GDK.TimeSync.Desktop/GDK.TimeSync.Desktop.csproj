@@ -20,6 +20,20 @@
     <RootNamespace>GDK.TimeSync.Desktop</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\GDK.TimeSync.ico</ApplicationIcon>
+    <Version>1.1.0</Version>
   </PropertyGroup>
+
+  <!-- "Started version 1.0.0.0" could not tell one build from another, which is how an old executable
+       went on being tested for a day. Stamping the commit makes the running build identifiable, in
+       the window and in the log. ContinueOnError so a build outside a git checkout still succeeds. -->
+  <Target Name="StampGitRevision" BeforeTargets="GetAssemblyAttributes">
+    <Exec Command="git rev-parse --short HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true"
+          ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitRevision" />
+    </Exec>
+    <PropertyGroup>
+      <InformationalVersion Condition="'$(GitRevision)' != ''">$(Version)+$(GitRevision.Trim())</InformationalVersion>
+    </PropertyGroup>
+  </Target>
 
 </Project>
