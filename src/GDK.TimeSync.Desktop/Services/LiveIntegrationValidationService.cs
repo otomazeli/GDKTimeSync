@@ -315,7 +315,7 @@ public sealed class LiveIntegrationValidationService(
         {
             var workspaceId = settings.Load().TogglWorkspaceId;
             if (workspaceId is not > 0) throw new InvalidOperationException();
-            request = new TogglCreateTimeEntryRequest(workspaceId.Value, item.Comment, timing.Start, timing.Stop);
+            request = new TogglCreateTimeEntryRequest(workspaceId.Value, item.TogglDescription, timing.Start, timing.Stop);
             return true;
         }
         catch

@@ -16,6 +16,22 @@ public sealed record PlannedWorkItem(
     bool IsBillable,
     WorkStatus Status = WorkStatus.InProgress)
 {
+    // What this item is called in Toggl. The description is the only field that carries the Jira key
+    // across the round trip -- TogglSyncService.ParseDescription reads "KEY - Comment" back off an
+    // imported entry to recover it -- so writing the bare comment meant an entry this app created
+    // came back with no key attached.
+    public string TogglDescription
+    {
+        get
+        {
+            var comment = Comment?.Trim() ?? "";
+            var key = JiraIssueKey?.Trim() ?? "";
+            if (key.Length == 0) return comment;
+            if (comment.Length == 0) return key;
+            return comment.StartsWith(key, StringComparison.OrdinalIgnoreCase) ? comment : $"{key} - {comment}";
+        }
+    }
+
     public long? TogglProjectId { get; init; }
     public bool PostToToggl { get; init; } = true;
     public long? TogglEntryId { get; init; }

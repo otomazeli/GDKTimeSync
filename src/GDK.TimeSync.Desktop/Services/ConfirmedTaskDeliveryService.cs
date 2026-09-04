@@ -149,7 +149,7 @@ public sealed class ConfirmedTaskDeliveryService(
             var stopDay = item.End is { } end && PlannedWorkItem.EndWrapsToNextDay(startTime, end) ? item.Day.AddDays(1) : item.Day;
             var entry = await client.CreateTimeEntryAsync(new TogglCreateTimeEntryRequest(
                 workspaceId,
-                item.Comment,
+                item.TogglDescription,
                 new DateTimeOffset(start, offset),
                 new DateTimeOffset(item.End is { } stop ? stopDay.ToDateTime(stop) : start.Add(item.Duration), offset),
                 item.TogglProjectId), cancellationToken);
