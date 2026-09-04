@@ -54,10 +54,10 @@ public sealed class ReviewTaskViewModel : INotifyPropertyChanged
 
     // Reaching Tempo at all proves Jira validated, whether or not Tempo then succeeded.
     public DeliveryMark Jira => Mark(
-        attempt?.TempoWorklogId is not null || attempt?.FailureCode == DeliveryFailureCode.TempoFailed,
+        attempt?.TempoWorklogId is not null || attempt?.FailureCode is DeliveryFailureCode.TempoFailed or DeliveryFailureCode.TempoRejected,
         DeliveryFailureCode.JiraFailed, DeliveryFailureCode.JiraIssueNotFound);
 
-    public DeliveryMark Tempo => Mark(attempt?.TempoWorklogId is not null, DeliveryFailureCode.TempoFailed);
+    public DeliveryMark Tempo => Mark(attempt?.TempoWorklogId is not null, DeliveryFailureCode.TempoFailed, DeliveryFailureCode.TempoRejected);
 
     public string? FailureText
     {
@@ -68,7 +68,7 @@ public sealed class ReviewTaskViewModel : INotifyPropertyChanged
             {
                 DeliveryFailureCode.TogglFailed => "Toggl",
                 DeliveryFailureCode.JiraFailed or DeliveryFailureCode.JiraIssueNotFound => "Jira",
-                DeliveryFailureCode.TempoFailed => "Tempo",
+                DeliveryFailureCode.TempoFailed or DeliveryFailureCode.TempoRejected => "Tempo",
                 _ => "Delivery"
             };
             // PostAllCoordinator.RequiresManualReconciliation builds its attempt with `attempt with { ... }`,
@@ -77,7 +77,7 @@ public sealed class ReviewTaskViewModel : INotifyPropertyChanged
             // codes PostAllCoordinator actually pairs a message with -- every other code falls back to the
             // coded reason, even when a (stale) detail is present.
             var usesDetail = code is DeliveryFailureCode.JiraFailed or DeliveryFailureCode.JiraIssueNotFound
-                or DeliveryFailureCode.TempoFailed;
+                or DeliveryFailureCode.TempoFailed or DeliveryFailureCode.TempoRejected;
             var message = (usesDetail ? attempt.FailureDetail : null) ?? CodedReason(code);
             return $"{where}: {message}";
         }
@@ -103,6 +103,7 @@ public sealed class ReviewTaskViewModel : INotifyPropertyChanged
         DeliveryFailureCode.JiraFailed => "Jira delivery failed.",
         DeliveryFailureCode.JiraIssueNotFound => "Jira issue was not found.",
         DeliveryFailureCode.TempoFailed => "Tempo delivery failed.",
+        DeliveryFailureCode.TempoRejected => "Tempo rejected the worklog.",
         DeliveryFailureCode.PersistenceFailed => "Delivery state could not be saved.",
         DeliveryFailureCode.Cancelled => "Delivery was cancelled.",
         DeliveryFailureCode.RemoteChangedAfterDelivery => "The Toggl entry changed after delivery.",

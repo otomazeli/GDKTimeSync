@@ -56,17 +56,33 @@ public sealed class SqliteDeliveryAttemptRepository(SqliteDatabase database) : I
     {
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
+        // The conflict clause mirrors DeliveryAttempt.IsResumable: a failure whose extent we know can
+        // be claimed again. toggl_entry_id is deliberately preserved -- it is the record of work
+        // already done, and clearing it would make the retry create a second Toggl entry for the
+        // same task. Everything else resets so the retry starts from a clean InProgress attempt.
         command.CommandText = """
             INSERT INTO delivery_attempts(planned_work_item_id, toggl_entry_id, tempo_worklog_id, status, failure_code, slack_state,
                                           toggl_write_recorded_at_utc, tempo_write_recorded_at_utc, reconciliation_recorded_at_utc)
             VALUES ($id, NULL, NULL, $status, NULL, $slackState, NULL, NULL, NULL)
-            ON CONFLICT(planned_work_item_id) DO NOTHING
+            ON CONFLICT(planned_work_item_id) DO UPDATE SET
+                tempo_worklog_id = NULL,
+                status = excluded.status,
+                failure_code = NULL,
+                tempo_write_recorded_at_utc = NULL,
+                reconciliation_recorded_at_utc = NULL
+            WHERE delivery_attempts.status = $failed
+              AND delivery_attempts.failure_code IN ($jiraFailed, $jiraNotFound, $tempoRejected)
             """;
         command.Parameters.AddWithValue("$id", plannedWorkItemId.ToString("D"));
         command.Parameters.AddWithValue("$status", (int)DeliveryAttemptStatus.InProgress);
         command.Parameters.AddWithValue("$slackState", (int)SlackDeliveryState.NotSupported);
+        command.Parameters.AddWithValue("$failed", (int)DeliveryAttemptStatus.Failed);
+        command.Parameters.AddWithValue("$jiraFailed", (int)DeliveryFailureCode.JiraFailed);
+        command.Parameters.AddWithValue("$jiraNotFound", (int)DeliveryFailureCode.JiraIssueNotFound);
+        command.Parameters.AddWithValue("$tempoRejected", (int)DeliveryFailureCode.TempoRejected);
         if (await command.ExecuteNonQueryAsync(cancellationToken) == 1)
-            return new DeliveryAttemptClaim(new DeliveryAttempt(plannedWorkItemId, null, null, DeliveryAttemptStatus.InProgress, null, SlackDeliveryState.NotSupported), true);
+            // Re-read rather than assume: a resumed claim carries the toggl_entry_id the update kept.
+            return new DeliveryAttemptClaim((await GetAsync(connection, plannedWorkItemId, cancellationToken))!, true);
 
         return new DeliveryAttemptClaim((await GetAsync(connection, plannedWorkItemId, cancellationToken))!, false);
     }

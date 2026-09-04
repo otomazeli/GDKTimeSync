@@ -17,8 +17,19 @@ public enum DeliveryFailureCode
     TempoFailed,
     PersistenceFailed,
     Cancelled,
-    RemoteChangedAfterDelivery
+    RemoteChangedAfterDelivery,
+
+    // Appended, never reordered: these are persisted as ints in delivery_attempts.failure_code.
+    // Tempo answered and refused the worklog, so nothing was written -- distinct from TempoFailed,
+    // which also covers a timeout that may have written one we never recorded.
+    TempoRejected
 }
+
+// Thrown by a delivery client when the remote answered with a failure status. That answer is proof
+// the write did not happen, which is what makes the attempt safe to repeat; an exception without one
+// leaves the outcome unknown.
+public sealed class DeliveryRejectedException(string message, Exception? innerException = null)
+    : Exception(message, innerException);
 
 public enum SlackDeliveryState
 {
@@ -42,6 +53,25 @@ public sealed record DeliveryAttempt(
     // is still looking at the row; a row rehydrated on a later launch falls back to FailureCode and
     // the audit log, which does keep the detail.
     public string? FailureDetail { get; init; }
+}
+
+public static class DeliveryRetry
+{
+    // A failure is resumable only when we know the write did not happen. Delivery is ordered
+    // Toggl -> Jira -> Tempo and the attempt records the Toggl entry id, so a retry resumes from
+    // the recorded point rather than starting over.
+    //
+    // The Jira step is a lookup, so it writes nothing and always repeats safely. TempoRejected means
+    // Tempo answered and refused. Everything else is excluded because the outcome is unknown, and
+    // repeating an unknown write is how you get a duplicate worklog or a duplicate Toggl entry:
+    // TogglFailed and TempoFailed both cover timeouts that may have succeeded, Cancelled can land
+    // between a write and its persistence, and PersistenceFailed and RemoteChangedAfterDelivery mean
+    // the stored and remote states may already disagree -- which is what reconciliation is for.
+    public static bool IsResumable(this DeliveryAttempt attempt) =>
+        attempt is { Status: DeliveryAttemptStatus.Failed, FailureCode:
+            DeliveryFailureCode.JiraFailed or
+            DeliveryFailureCode.JiraIssueNotFound or
+            DeliveryFailureCode.TempoRejected };
 }
 
 public sealed record DeliveryAttemptClaim(DeliveryAttempt Attempt, bool IsAcquired);

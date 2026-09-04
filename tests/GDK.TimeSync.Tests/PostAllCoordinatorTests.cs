@@ -29,6 +29,32 @@ public sealed class PostAllCoordinatorTests
         Assert.Equal(201, attempt.TempoWorklogId);
     }
 
+    // Issue #10, the end-to-end half: retrying a task whose Tempo write failed must resume from the
+    // Toggl entry the first run created. The plan item does not carry that id -- only the attempt
+    // does -- so reading it from the item alone booked the same half hour into Toggl a second time.
+    [Fact]
+    public async Task PostAsync_ResumesFromTheTogglEntryTheFailedAttemptRecorded()
+    {
+        var item = CreateItem();
+        var attempts = new InMemoryDeliveryAttemptRepository();
+        var events = new List<string>();
+        var toggl = new RecordingTogglClient(events);
+        var coordinator = new PostAllCoordinator(toggl, new RecordingJiraClient(events), new RecordingTempoClient(events), attempts);
+
+        // First run gets as far as Toggl, then Tempo rejects it.
+        await attempts.ClaimAsync(item.Id);
+        await attempts.SaveAsync(new DeliveryAttempt(item.Id, 4540080148, null, DeliveryAttemptStatus.Failed,
+            DeliveryFailureCode.TempoRejected, SlackDeliveryState.NotSupported));
+
+        var result = await coordinator.PostAsync(DailyPlan.Create(item.Day, [item]));
+
+        var attempt = Assert.Single(result.Attempts);
+        Assert.Equal(DeliveryAttemptStatus.Succeeded, attempt.Status);
+        Assert.Equal(4540080148, attempt.TogglEntryId);
+        Assert.Equal(0, toggl.CreateCount);
+        Assert.Equal(["jira", "tempo"], events);
+    }
+
     [Fact]
     public async Task PostAsync_ReusesAKnownTogglEntryInsteadOfCreatingANewOne()
     {
@@ -460,6 +486,20 @@ public sealed class PostAllCoordinatorTests
                     return Task.FromResult(new DeliveryAttemptClaim(created, true));
                 }
 
+                // Mirrors SqliteDeliveryAttemptRepository: a resumable failure is claimed again, and
+                // the Toggl entry an earlier run created is carried forward.
+                if (existing.IsResumable())
+                {
+                    var resumed = existing with
+                    {
+                        Status = DeliveryAttemptStatus.InProgress,
+                        FailureCode = null,
+                        TempoWorklogId = null
+                    };
+                    attempts[plannedWorkItemId] = resumed;
+                    return Task.FromResult(new DeliveryAttemptClaim(resumed, true));
+                }
+
                 return Task.FromResult(new DeliveryAttemptClaim(existing, false));
             }
         }
@@ -639,6 +679,84 @@ public sealed class SqliteDeliveryAttemptRepositoryTests : IAsyncLifetime
         var reopened = await new SqliteDeliveryAttemptRepository(new SqliteDatabase(databasePath)).GetAsync(itemId);
         Assert.Equal(togglAt, reopened!.TogglWriteRecordedAtUtc);
         Assert.Equal(reconciliationAt, reopened.ReconciliationRecordedAtUtc);
+    }
+
+    // Issue #10. The claim was taken before any delivery work and never released on failure, so one
+    // failed post made an item permanently un-retryable: PostAllCoordinator returns the stored
+    // attempt verbatim when the claim is refused, replaying the old failure in a millisecond without
+    // calling anything. The only way to try again was a fresh row, which booked a second Toggl entry.
+    [Theory]
+    [InlineData(DeliveryFailureCode.JiraFailed)]
+    [InlineData(DeliveryFailureCode.JiraIssueNotFound)]
+    [InlineData(DeliveryFailureCode.TempoRejected)]
+    public async Task ClaimAsync_ReopensAFailureWhoseWriteProvablyDidNotHappen(DeliveryFailureCode failureCode)
+    {
+        var repository = new SqliteDeliveryAttemptRepository(new SqliteDatabase(databasePath));
+        var itemId = Guid.NewGuid();
+        Assert.True((await repository.ClaimAsync(itemId)).IsAcquired);
+        await repository.SaveAsync(new DeliveryAttempt(itemId, null, null, DeliveryAttemptStatus.Failed, failureCode, SlackDeliveryState.NotSupported));
+
+        var claim = await repository.ClaimAsync(itemId);
+
+        Assert.True(claim.IsAcquired);
+        Assert.Equal(DeliveryAttemptStatus.InProgress, claim.Attempt.Status);
+        Assert.Null(claim.Attempt.FailureCode);
+    }
+
+    // The point of resuming: the Toggl entry an earlier run created is work already done, and the
+    // retry has to pick it up rather than book the same half hour twice.
+    [Fact]
+    public async Task ClaimAsync_KeepsTheTogglEntryAlreadyCreatedSoARetryDoesNotBookItTwice()
+    {
+        var repository = new SqliteDeliveryAttemptRepository(new SqliteDatabase(databasePath));
+        var itemId = Guid.NewGuid();
+        Assert.True((await repository.ClaimAsync(itemId)).IsAcquired);
+        await repository.SaveAsync(new DeliveryAttempt(itemId, 4540080148, null, DeliveryAttemptStatus.Failed,
+            DeliveryFailureCode.TempoRejected, SlackDeliveryState.NotSupported));
+
+        var claim = await repository.ClaimAsync(itemId);
+
+        Assert.True(claim.IsAcquired);
+        Assert.Equal(4540080148, claim.Attempt.TogglEntryId);
+        Assert.Null(claim.Attempt.TempoWorklogId);
+    }
+
+    // These mean the stored and remote states may disagree, which is what reconciliation is for.
+    // Cancelled is here because a cancel can land between the Tempo write and its persistence, so a
+    // worklog may exist that was never recorded -- retrying would duplicate it.
+    // TogglFailed and TempoFailed are here, not above: both also cover a timeout that may have
+    // written the very thing a retry would write again.
+    [Theory]
+    [InlineData(DeliveryFailureCode.TogglFailed)]
+    [InlineData(DeliveryFailureCode.TempoFailed)]
+    [InlineData(DeliveryFailureCode.PersistenceFailed)]
+    [InlineData(DeliveryFailureCode.Cancelled)]
+    [InlineData(DeliveryFailureCode.RemoteChangedAfterDelivery)]
+    public async Task ClaimAsync_KeepsAnAmbiguousFailureClosed(DeliveryFailureCode failureCode)
+    {
+        var repository = new SqliteDeliveryAttemptRepository(new SqliteDatabase(databasePath));
+        var itemId = Guid.NewGuid();
+        Assert.True((await repository.ClaimAsync(itemId)).IsAcquired);
+        await repository.SaveAsync(new DeliveryAttempt(itemId, 4540080148, null, DeliveryAttemptStatus.Failed, failureCode, SlackDeliveryState.NotSupported));
+
+        var claim = await repository.ClaimAsync(itemId);
+
+        Assert.False(claim.IsAcquired);
+        Assert.Equal(failureCode, claim.Attempt.FailureCode);
+    }
+
+    [Fact]
+    public async Task ClaimAsync_NeverReopensASucceededDelivery()
+    {
+        var repository = new SqliteDeliveryAttemptRepository(new SqliteDatabase(databasePath));
+        var itemId = Guid.NewGuid();
+        Assert.True((await repository.ClaimAsync(itemId)).IsAcquired);
+        await repository.SaveAsync(new DeliveryAttempt(itemId, 4540080148, 301, DeliveryAttemptStatus.Succeeded, null, SlackDeliveryState.NotSupported));
+
+        var claim = await repository.ClaimAsync(itemId);
+
+        Assert.False(claim.IsAcquired);
+        Assert.Equal(DeliveryAttemptStatus.Succeeded, claim.Attempt.Status);
     }
 
     [Fact]

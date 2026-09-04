@@ -70,10 +70,14 @@ public sealed class PostAllCoordinator(
         }
         catch (Exception)
         {
-            return PersistenceFailure(item.Id, null, null);
+            return PersistenceFailure(item.Id, null, null, "The stored delivery state could not be read.");
         }
 
-        if (current is not null)
+        // A resumable failure falls through to the claim below, which reopens it and carries forward
+        // the Toggl entry an earlier run already created. Without this the stored failure was simply
+        // returned -- the same outcome replayed in a millisecond, with nothing retried and no way to
+        // ever deliver the task.
+        if (current is not null && !current.IsResumable())
         {
             if (current.Status != DeliveryAttemptStatus.InProgress)
                 return current;
@@ -97,23 +101,31 @@ public sealed class PostAllCoordinator(
         }
         catch (Exception)
         {
-            return PersistenceFailure(item.Id, null, null);
+            return PersistenceFailure(item.Id, null, null, "The delivery claim could not be taken.");
         }
 
         if (!claim.IsAcquired)
             return claim.Attempt;
 
         if (cancellationToken.IsCancellationRequested)
-            return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
+            return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled,
+                "Cancelled before the Toggl entry was created.");
 
         long togglEntryId;
-        if (item.TogglEntryId is { } knownTogglEntryId)
+        // The claim's own entry id comes first: on a resumed attempt it is the entry an earlier run
+        // already created, and the plan item does not carry it. Preferring the item here would post
+        // a second Toggl entry for work that is already tracked.
+        if ((claim.Attempt.TogglEntryId ?? item.TogglEntryId) is { } knownTogglEntryId)
         {
             togglEntryId = knownTogglEntryId;
         }
         else if (!item.PostToToggl)
         {
-            return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed);
+            // No HTTP happens on this path, so without a reason the log shows only "Failed
+            // TogglFailed" a few milliseconds after Confirmed -- indistinguishable from a
+            // configuration problem or an unreachable Toggl.
+            return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed,
+                "Push to Toggl is off for this task and it has no linked Toggl entry.");
         }
         else
         {
@@ -123,11 +135,12 @@ public sealed class PostAllCoordinator(
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
+                return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled,
+                    "Cancelled while creating the Toggl entry -- one may exist that was not recorded.");
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed);
+                return await PersistAsync(item.Id, null, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TogglFailed, ex.Message);
             }
         }
 
@@ -136,7 +149,8 @@ public sealed class PostAllCoordinator(
             return current;
 
         if (cancellationToken.IsCancellationRequested)
-            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
+            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled,
+                "Cancelled after the Toggl entry, before the Jira lookup.");
 
         string? jiraIssueId;
         try
@@ -145,7 +159,8 @@ public sealed class PostAllCoordinator(
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
+            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled,
+                "Cancelled during the Jira lookup.");
         }
         catch (Exception ex)
         {
@@ -153,7 +168,8 @@ public sealed class PostAllCoordinator(
         }
 
         if (string.IsNullOrWhiteSpace(jiraIssueId))
-            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.JiraIssueNotFound);
+            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.JiraIssueNotFound,
+                $"Jira returned no id for {item.JiraIssueKey}.");
 
         try
         {
@@ -163,7 +179,13 @@ public sealed class PostAllCoordinator(
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled);
+            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled,
+                "Cancelled while writing the Tempo worklog -- one may exist that was not recorded.");
+        }
+        catch (DeliveryRejectedException ex)
+        {
+            // Tempo answered and refused: nothing was written, so this attempt can be retried.
+            return await PersistAsync(item.Id, togglEntryId, null, DeliveryAttemptStatus.Failed, DeliveryFailureCode.TempoRejected, ex.Message);
         }
         catch (Exception ex)
         {
@@ -177,12 +199,13 @@ public sealed class PostAllCoordinator(
         {
             var claim = await attempts.ClaimAsync(itemId, CancellationToken.None);
             return claim.IsAcquired
-                ? await PersistAsync(itemId, null, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled)
+                ? await PersistAsync(itemId, null, null, DeliveryAttemptStatus.Cancelled, DeliveryFailureCode.Cancelled,
+                    "Cancelled before delivery began -- nothing was written anywhere.")
                 : claim.Attempt;
         }
         catch (Exception)
         {
-            return PersistenceFailure(itemId, null, null);
+            return PersistenceFailure(itemId, null, null, "The delivery claim could not be taken while cancelling.");
         }
     }
 
@@ -238,6 +261,6 @@ public sealed class PostAllCoordinator(
     private static DeliveryAttempt RequiresManualReconciliation(DeliveryAttempt attempt) =>
         attempt with { Status = DeliveryAttemptStatus.ReconciliationRequired, FailureCode = DeliveryFailureCode.PersistenceFailed };
 
-    private static DeliveryAttempt PersistenceFailure(Guid itemId, long? togglEntryId, long? tempoWorklogId) =>
-        RequiresManualReconciliation(new(itemId, togglEntryId, tempoWorklogId, DeliveryAttemptStatus.Failed, null, SlackDeliveryState.NotSupported));
+    private static DeliveryAttempt PersistenceFailure(Guid itemId, long? togglEntryId, long? tempoWorklogId, string? reason = null) =>
+        RequiresManualReconciliation(new DeliveryAttempt(itemId, togglEntryId, tempoWorklogId, DeliveryAttemptStatus.Failed, null, SlackDeliveryState.NotSupported) { FailureDetail = reason });
 }
