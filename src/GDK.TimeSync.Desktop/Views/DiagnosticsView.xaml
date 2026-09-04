@@ -18,8 +18,24 @@
                 <ItemsControl ItemsSource="{Binding Entries}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding}" FontFamily="Consolas" FontSize="11"
-                                       TextWrapping="Wrap" Margin="0,0,0,7" />
+                            <!-- Failures are what anyone opens this page to find. Red for an error,
+                                 amber for a warning such as "0 succeeded, 1 failed"; everything else
+                                 stays default so the colour still means something. -->
+                            <TextBlock Text="{Binding Text}" FontFamily="Consolas" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,0,0,7">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Level}" Value="Error">
+                                                <Setter Property="Foreground" Value="#FFB91C1C" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding Level}" Value="Warning">
+                                                <Setter Property="Foreground" Value="#FFB45309" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>

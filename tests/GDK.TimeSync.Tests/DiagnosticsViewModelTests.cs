@@ -1,3 +1,4 @@
+using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
 using GDK.TimeSync.Desktop.ViewModels;
 
@@ -5,6 +6,47 @@ namespace GDK.TimeSync.Tests;
 
 public sealed class DiagnosticsViewModelTests : IDisposable
 {
+
+    // The Diagnostics list was plain text, so a failure had to be found by reading. Each entry now
+    // carries its level, which is what lets the view colour the ones that went wrong.
+    [Fact]
+    public async Task RefreshAsync_MarksTheLevelOfEachEntrySoFailuresCanBeColoured()
+    {
+        WriteLog("""
+            2026-09-04 10:36:43.979 INFO  App
+              Started v1.1.0
+            2026-09-04 10:37:26.771 ERROR Delivery
+              ac4a8171 -> Failed TogglFailed: No Toggl workspace is configured.
+            2026-09-04 10:37:26.781 WARN  Review
+              Post finished: 0 succeeded, 1 failed
+            """);
+        var viewModel = new DiagnosticsViewModel(new AuditLogReader(directory));
+
+        await viewModel.RefreshAsync();
+
+        // Newest first, as the reader returns them.
+        Assert.Equal(AuditLevel.Warning, viewModel.Entries[0].Level);
+        Assert.Equal(AuditLevel.Error, viewModel.Entries[1].Level);
+        Assert.Equal(AuditLevel.Info, viewModel.Entries[2].Level);
+    }
+
+    // A continuation line can say anything, including the word ERROR inside a logged stack trace.
+    // Only the entry's own first line decides its level.
+    [Fact]
+    public async Task RefreshAsync_TakesTheLevelFromTheEntryNotItsContinuationLines()
+    {
+        WriteLog("""
+            2026-09-04 10:36:43.979 INFO  Sync
+              9/4/2026: Imported 0, updated 0, 0 needs review.
+              ERROR was mentioned here but this entry is not one
+            """);
+        var viewModel = new DiagnosticsViewModel(new AuditLogReader(directory));
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal(AuditLevel.Info, Assert.Single(viewModel.Entries).Level);
+    }
+
     private readonly string directory = Path.Combine(Path.GetTempPath(), $"GDK.TimeSync.Diag.{Guid.NewGuid():N}");
 
     [Fact]
@@ -22,9 +64,9 @@ public sealed class DiagnosticsViewModelTests : IDisposable
         await viewModel.RefreshAsync();
 
         Assert.Equal(2, viewModel.Entries.Count);
-        Assert.Contains("Tempo.CreateWorklog", viewModel.Entries[0], StringComparison.Ordinal);
-        Assert.Contains("Worker could not be found", viewModel.Entries[0], StringComparison.Ordinal);
-        Assert.Contains("Started", viewModel.Entries[1], StringComparison.Ordinal);
+        Assert.Contains("Tempo.CreateWorklog", viewModel.Entries[0].Text, StringComparison.Ordinal);
+        Assert.Contains("Worker could not be found", viewModel.Entries[0].Text, StringComparison.Ordinal);
+        Assert.Contains("Started", viewModel.Entries[1].Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -37,7 +79,7 @@ public sealed class DiagnosticsViewModelTests : IDisposable
         await viewModel.RefreshAsync();
 
         Assert.Equal(500, viewModel.Entries.Count);
-        Assert.Contains("entry 599", viewModel.Entries[0], StringComparison.Ordinal);
+        Assert.Contains("entry 599", viewModel.Entries[0].Text, StringComparison.Ordinal);
     }
 
     [Fact]

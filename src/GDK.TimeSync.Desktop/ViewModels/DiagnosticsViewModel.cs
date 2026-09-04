@@ -24,13 +24,13 @@ public sealed class DiagnosticsViewModel : INotifyPropertyChanged
         this.clipboard = clipboard;
         LiveValidation = new LiveValidationViewModel(planProvider, diagnosticsService, validationService);
         RefreshCommand = new RelayCommand(_ => _ = RefreshAsync());
-        CopyAllCommand = new RelayCommand(_ => clipboard?.SetText(string.Join(Environment.NewLine, Entries)));
+        CopyAllCommand = new RelayCommand(_ => clipboard?.SetText(string.Join(Environment.NewLine, Entries.Select(entry => entry.Text))));
         OpenFolderCommand = new RelayCommand(_ => OpenFolder());
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public ObservableCollection<string> Entries { get; } = [];
+    public ObservableCollection<AuditLogEntry> Entries { get; } = [];
     public RelayCommand RefreshCommand { get; }
     public RelayCommand CopyAllCommand { get; }
     public RelayCommand OpenFolderCommand { get; }
