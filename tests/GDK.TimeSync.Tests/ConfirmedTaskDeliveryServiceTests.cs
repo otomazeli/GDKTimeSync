@@ -31,6 +31,85 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         Assert.All(clients.CreatedClients, client => Assert.True(client.WasDisposed));
     }
 
+    // The description posted to Toggl was never asserted, which is how it shipped without the Jira
+    // key: TogglSyncService parses "KEY - Comment" back off imported entries, so an entry this app
+    // created came back unmatched to its issue.
+    [Fact]
+    public async Task DeliverConfirmedAsync_posts_a_toggl_description_carrying_the_jira_key()
+    {
+        var item = PlannedWorkItem.Create(new DateOnly(2026, 8, 13), "Planning", "CGMFRAVII-8431",
+            "DMP — Endpoint : vérifier l'existence d'un DMP (validate-existence)", TimeSpan.FromMinutes(30),
+            "GDK", "DEVELOPMENT", start: new TimeOnly(9, 0));
+        var clients = new RecordingIntegrationClientFactory();
+        var service = new ConfirmedTaskDeliveryService(
+            clients,
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "planner" }),
+            new InMemoryAttemptRepository());
+
+        await service.DeliverConfirmedAsync(item);
+
+        Assert.Equal(
+            "CGMFRAVII-8431 - DMP — Endpoint : vérifier l'existence d'un DMP (validate-existence)",
+            clients.LastTogglRequest!.Description);
+    }
+
+    // Every setup failure returns before a single HTTP call, so the audit log showed only
+    // "Failed TogglFailed" milliseconds after "Confirmed" -- true of a missing workspace, an
+    // unavailable client and a task with Toggl switched off alike. The reason is the whole
+    // difference between a log you can diagnose from and one you cannot.
+    [Fact]
+    public async Task DeliverConfirmedAsync_says_why_when_it_gives_up_before_calling_anything()
+    {
+        var clients = new RecordingIntegrationClientFactory();
+        var service = new ConfirmedTaskDeliveryService(
+            clients,
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = null, JiraUser = "planner" }),
+            new InMemoryAttemptRepository());
+
+        var attempt = await service.DeliverConfirmedAsync(Item());
+
+        Assert.Equal(DeliveryFailureCode.TogglFailed, attempt.FailureCode);
+        Assert.Equal("No Toggl workspace is configured.", attempt.FailureDetail);
+        Assert.Empty(clients.CreatedClients);
+    }
+
+    // The other no-HTTP refusal, and the one hardest to guess from a log: the task itself has
+    // "Push to Toggl" switched off and no entry to fall back on.
+    [Fact]
+    public async Task DeliverConfirmedAsync_says_so_when_the_task_is_not_set_to_post_to_toggl()
+    {
+        var clients = new RecordingIntegrationClientFactory();
+        var service = new ConfirmedTaskDeliveryService(
+            clients,
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "planner" }),
+            new InMemoryAttemptRepository());
+
+        var attempt = await service.DeliverConfirmedAsync(Item() with { PostToToggl = false, TogglEntryId = null });
+
+        Assert.Equal(DeliveryFailureCode.TogglFailed, attempt.FailureCode);
+        Assert.Equal("Push to Toggl is off for this task and it has no linked Toggl entry.", attempt.FailureDetail);
+        Assert.Equal(0, clients.TogglRequests);
+    }
+
+    // Issue #10: a Tempo 400 is proof the worklog was not written, so the task must stay retryable.
+    // Recording it as TempoFailed -- the same code a timeout produces -- made a real rejection
+    // permanent, and the only way to try again was a fresh row that booked Toggl a second time.
+    [Fact]
+    public async Task DeliverConfirmedAsync_records_a_tempo_refusal_as_rejected_so_it_can_be_retried()
+    {
+        var clients = new RecordingIntegrationClientFactory { TempoStatus = HttpStatusCode.BadRequest };
+        var service = new ConfirmedTaskDeliveryService(
+            clients,
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "planner" }),
+            new InMemoryAttemptRepository());
+
+        var attempt = await service.DeliverConfirmedAsync(Item());
+
+        Assert.Equal(DeliveryAttemptStatus.Failed, attempt.Status);
+        Assert.Equal(DeliveryFailureCode.TempoRejected, attempt.FailureCode);
+        Assert.True(attempt.IsResumable());
+    }
+
     // Issue #13: Tempo answered a real delivery with
     // {"errors":{"worker":"User is invalid"}} because the worker came from a typed setting. Jira
     // knows who we are, so ask it -- the Delphi reference client reads `key` first, then `name`.
@@ -297,6 +376,7 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         public int JiraIssueRequests => handler.JiraIssueRequests;
         public int TempoWorklogRequests => handler.TempoWorklogRequests;
         public int JiraMyselfRequests => handler.JiraMyselfRequests;
+        public HttpStatusCode? TempoStatus { set => handler.TempoStatus = value; }
         public string? LastTempoWorker => handler.LastTempoWorker;
         public RecordingHandler Handler => handler;
         public TogglCreateTimeEntryRequest? LastTogglRequest => handler.LastTogglRequest;
@@ -328,6 +408,7 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         public string? LastTempoWorker { get; private set; }
         public string? MyselfKey { get; set; }
         public string? MyselfName { get; set; }
+        public HttpStatusCode? TempoStatus { get; set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -357,6 +438,8 @@ public sealed class ConfirmedTaskDeliveryServiceTests
             TempoWorklogRequests++;
             var tempoPayload = await request.Content!.ReadFromJsonAsync<JsonElement>(cancellationToken);
             LastTempoWorker = tempoPayload.TryGetProperty("worker", out var worker) ? worker.GetString() : null;
+            if (TempoStatus is { } status)
+                return new HttpResponseMessage(status) { Content = new StringContent("""{"errors":{"worker":"User is invalid"}}""") };
             return Json(new { tempoWorklogId = 301L, worker = "planner", originTaskId = "201", started = "2026-08-13T09:00:00", timeSpentSeconds = 1800, comment = "Reviewed work" });
         }
 
