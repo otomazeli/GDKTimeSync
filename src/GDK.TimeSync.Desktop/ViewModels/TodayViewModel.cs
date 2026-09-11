@@ -623,9 +623,16 @@ public sealed class TodayViewModel : INotifyPropertyChanged, ILocalPlanSnapshotP
         if (latest is null) return;
 
         var localIds = Items.Select(item => item.Id).ToHashSet();
+        // A row imported from Toggl carries a fresh item id per writer, so matching on id alone
+        // merged a second copy of an entry already listed here -- the shape that tripled every
+        // imported row on 2026-09-08. The Toggl entry id is what identifies the work; Add both
+        // tests it and records it, so two copies arriving in one batch collapse as well.
+        var localTogglEntryIds = Items.Where(item => item.TogglEntryId is not null)
+            .Select(item => item.TogglEntryId!.Value).ToHashSet();
         foreach (var remoteItem in latest.Items)
         {
             if (localIds.Contains(remoteItem.Id)) continue;
+            if (remoteItem.TogglEntryId is { } togglEntryId && !localTogglEntryIds.Add(togglEntryId)) continue;
             Items.Add(new PlannedWorkItemViewModel(
                 remoteItem.Name, remoteItem.JiraIssueKey, remoteItem.Comment, remoteItem.Duration, remoteItem.TogglProject, remoteItem.TempoCategory,
                 remoteItem.Id, remoteItem.Start, remoteItem.End, remoteItem.IsBillable, remoteItem.Status,

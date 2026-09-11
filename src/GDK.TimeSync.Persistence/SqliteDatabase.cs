@@ -106,6 +106,7 @@ public sealed class SqliteDatabase
                     await EnsureColumnAsync(connection, "planned_work_items", "source", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
                     await EnsureColumnAsync(connection, "daily_plans", "version", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
                     await EnsureDeliveryAttemptTimestampColumnsAsync(connection, cancellationToken);
+                    await CollapseDuplicateTogglImportsAsync(connection, cancellationToken);
                     await CommitAsync(connection, cancellationToken);
                 }
                 catch
@@ -157,6 +158,38 @@ public sealed class SqliteDatabase
             await connection.DisposeAsync();
             throw;
         }
+    }
+
+    // Repairs rows left behind by a period when more than one instance ran against this file: each
+    // wrote its own item id for the same Toggl entry, so one entry became two or three rows on the
+    // same day. A Toggl entry belongs to exactly one row of a day, so anything past the first copy
+    // is duplicate. Idempotent, so it runs with the schema check rather than carrying its own version.
+    //
+    // A row with a delivery attempt is never deleted: it is the record of work that reached Toggl or
+    // Tempo. So a day holding two *delivered* copies of one entry survives as two rows -- that is
+    // real double-posting, and it needs a person rather than a silent delete.
+    private static async Task CollapseDuplicateTogglImportsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE FROM planned_work_items
+            WHERE toggl_entry_id IS NOT NULL
+              AND id NOT IN (SELECT planned_work_item_id FROM delivery_attempts)
+              AND EXISTS (
+                  SELECT 1 FROM planned_work_items sibling
+                  JOIN delivery_attempts a ON a.planned_work_item_id = sibling.id
+                  WHERE sibling.plan_date = planned_work_items.plan_date
+                    AND sibling.toggl_entry_id = planned_work_items.toggl_entry_id);
+
+            DELETE FROM planned_work_items
+            WHERE toggl_entry_id IS NOT NULL
+              AND id NOT IN (SELECT planned_work_item_id FROM delivery_attempts)
+              AND rowid NOT IN (
+                  SELECT MIN(rowid) FROM planned_work_items
+                  WHERE toggl_entry_id IS NOT NULL
+                  GROUP BY plan_date, toggl_entry_id);
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task EnsureWorkStatusColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
