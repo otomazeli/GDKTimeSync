@@ -20,7 +20,10 @@ public sealed class LiveIntegrationValidationService(
         var attempt = await attempts.GetAsync(item.Id, cancellationToken);
         return new LiveValidationPreview(
             attempt,
-            configuration.JiraUser.Trim(),
+            // Says where the worker comes from rather than naming it: selecting a row must make no
+            // client calls at all, and the typed setting it used to show was not what gets posted.
+            // "Run diagnostics" names the actual identity, because that step is allowed to ask Jira.
+            "resolved from Jira on delivery (see Run diagnostics)",
             SafeServer(configuration.JiraBaseUrl),
             string.IsNullOrWhiteSpace(item.TempoCategory) ? configuration.DefaultTempoWorkCategory : item.TempoCategory);
     }
@@ -186,7 +189,7 @@ public sealed class LiveIntegrationValidationService(
         if (current.TempoWorklogId is not null)
             return await ReadExistingTempoAsync(current, timing, cancellationToken);
 
-        if (!TryCreateTempoRequest(item, timing, out var request))
+        if (!TryCreateTempoRequest(item, timing, await ResolveWorkerAsync(cancellationToken), out var request))
             return FailedResult(LiveValidationStep.Tempo, item.Id, DeliveryFailureCode.TempoFailed, "Tempo creation could not start.", current);
 
         string? jiraIssueId;
@@ -325,11 +328,29 @@ public sealed class LiveIntegrationValidationService(
         }
     }
 
-    private bool TryCreateTempoRequest(PlannedWorkItem item, Timing timing, out GDK.TimeSync.Tempo.TempoWorklogRequest request)
+    // Asks Jira who we are, exactly as delivery does. Empty when Jira cannot be reached or reports no
+    // identity, which every caller already treats as "cannot start".
+    private async Task<string> ResolveWorkerAsync(CancellationToken cancellationToken)
     {
         try
         {
-            var worker = settings.Load().JiraUser;
+            using var jira = await clients.CreateJiraAsync(cancellationToken);
+            return (await jira.GetMyselfAsync(cancellationToken)).TempoWorker;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    private static bool TryCreateTempoRequest(PlannedWorkItem item, Timing timing, string worker, out GDK.TimeSync.Tempo.TempoWorklogRequest request)
+    {
+        try
+        {
             if (string.IsNullOrWhiteSpace(worker)) throw new InvalidOperationException();
             request = new GDK.TimeSync.Tempo.TempoWorklogRequest(worker, string.Empty, timing.Start.DateTime, timing.DurationSeconds, item.Comment);
             return true;

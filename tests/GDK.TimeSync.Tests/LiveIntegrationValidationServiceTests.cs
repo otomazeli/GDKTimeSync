@@ -54,7 +54,10 @@ public sealed class LiveIntegrationValidationServiceTests
         var preview = await CreateService(clients, new RecordingAttemptRepository(attempt), settings).LoadPreviewAsync(item);
 
         Assert.Equal(attempt, preview.Attempt);
-        Assert.Equal("planner@example.test", preview.TempoWorker);
+        // Not the configured email: that is the Slack identity and Tempo rejects it as a worker. The
+        // preview may not call Jira to find the real one (see the zero-client assertion below), so it
+        // says where the value comes from instead of naming a value that is not the one posted.
+        Assert.Equal("resolved from Jira on delivery (see Run diagnostics)", preview.TempoWorker);
         Assert.Equal("https://jira.example.test", preview.TempoBaseUrl);
         Assert.Equal("DEVELOPMENT", preview.TempoCategory);
         Assert.Equal(0, clients.TogglClientCreations + clients.TempoClientCreations + clients.JiraClientCreations);
@@ -104,7 +107,7 @@ public sealed class LiveIntegrationValidationServiceTests
         Assert.Equal(LiveValidationStep.Tempo, result.Step);
         Assert.Equal(DeliveryAttemptStatus.Succeeded, result.Attempt.Status);
         Assert.Equal(456L, result.Attempt.TempoWorklogId);
-        Assert.Equal(["JiraGet", "TempoCreate", "TempoRead"], calls);
+        Assert.Equal(["JiraMyself", "JiraGet", "TempoCreate", "TempoRead"], calls);
         Assert.Equal(0, attempts.ClaimCount);
         Assert.Equal(3, attempts.SaveCount);
     }
@@ -124,7 +127,7 @@ public sealed class LiveIntegrationValidationServiceTests
 
         Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, result.Attempt.Status);
         Assert.Equal(456L, result.Attempt.TempoWorklogId);
-        Assert.Equal(["JiraGet", "TempoCreate", "TempoRead"], calls);
+        Assert.Equal(["JiraMyself", "JiraGet", "TempoCreate", "TempoRead"], calls);
     }
 
     [Fact]
@@ -311,7 +314,7 @@ public sealed class LiveIntegrationValidationServiceTests
 
             Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, failed.Attempt.Status);
             Assert.Equal(DeliveryFailureCode.PersistenceFailed, failed.Attempt.FailureCode);
-            Assert.Equal(["JiraGet", "TempoCreate"], firstCalls);
+            Assert.Equal(["JiraMyself", "JiraGet", "TempoCreate"], firstCalls);
             Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, repeated.Attempt.Status);
             Assert.Equal(DeliveryFailureCode.PersistenceFailed, repeated.Attempt.FailureCode);
             Assert.Empty(resumedCalls);
@@ -338,7 +341,7 @@ public sealed class LiveIntegrationValidationServiceTests
 
         Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, result.Attempt.Status);
         Assert.Equal(DeliveryFailureCode.PersistenceFailed, result.Attempt.FailureCode);
-        Assert.Equal(["JiraGet"], calls);
+        Assert.Equal(["JiraMyself", "JiraGet"], calls);
         Assert.True(Assert.Single(clients.TempoHttpClients).WasDisposed);
     }
 
@@ -438,7 +441,7 @@ public sealed class LiveIntegrationValidationServiceTests
 
         Assert.Equal(DeliveryAttemptStatus.Failed, result.Attempt.Status);
         Assert.NotEqual(DeliveryAttemptStatus.ReconciliationRequired, result.Attempt.Status);
-        Assert.Equal(["JiraGet"], calls);
+        Assert.Equal(["JiraMyself", "JiraGet"], calls);
         Assert.Equal(0, attempts.SaveCount);
     }
 
@@ -467,7 +470,7 @@ public sealed class LiveIntegrationValidationServiceTests
         Assert.Equal(DeliveryFailureCode.Cancelled, result.Attempt.FailureCode);
         Assert.Equal(456L, result.Attempt.TempoWorklogId);
         Assert.Equal(result.Attempt, repeated.Attempt);
-        Assert.Equal(["JiraGet", "TempoCreate", "TempoRead"], calls);
+        Assert.Equal(["JiraMyself", "JiraGet", "TempoCreate", "TempoRead"], calls);
         Assert.Equal(3, attempts.SaveCount);
     }
 
@@ -493,7 +496,7 @@ public sealed class LiveIntegrationValidationServiceTests
 
         Assert.Equal(DeliveryAttemptStatus.ReconciliationRequired, result.Attempt.Status);
         Assert.Equal(456L, result.Attempt.TempoWorklogId);
-        Assert.Equal(["JiraGet", "TempoCreate", "TempoRead"], calls);
+        Assert.Equal(["JiraMyself", "JiraGet", "TempoCreate", "TempoRead"], calls);
     }
 
     [Fact]
@@ -663,6 +666,7 @@ public sealed class LiveIntegrationValidationServiceTests
             {
                 (IntegrationTarget.Toggl, "GET", _) => "TogglProjects",
                 (IntegrationTarget.Toggl, "POST", _) => "TogglCreate",
+                (IntegrationTarget.Jira, "GET", var path) when path.EndsWith("/myself", StringComparison.Ordinal) => "JiraMyself",
                 (IntegrationTarget.Jira, "GET", _) => "JiraGet",
                 (IntegrationTarget.Tempo, "POST", _) => "TempoCreate",
                 (IntegrationTarget.Tempo, "GET", _) => "TempoRead",
@@ -681,6 +685,7 @@ public sealed class LiveIntegrationValidationServiceTests
             {
                 "TogglProjects" => Json(new[] { new TogglProject(314, "GDK") }),
                 "TogglCreate" => Json(new TogglTimeEntry { Id = 123, Description = "Validate integrations", Start = new DateTimeOffset(2026, 8, 14, 9, 0, 0, TimeSpan.Zero), Stop = new DateTimeOffset(2026, 8, 14, 9, 30, 0, TimeSpan.Zero) }),
+                "JiraMyself" => Json(new { name = "odimar.tomazeli", displayName = "Planner", emailAddress = "planner@example.test", key = "JIRAUSER4711" }),
                 "JiraGet" => Json(new { id = "jira-42", key = "GDK-42", fields = new { summary = "Validation" } }),
                 "TempoCreate" => Json(new TempoWorklog(456, "planner", "jira-42", new DateTime(2026, 8, 14, 9, 0, 0), 1800, "Validate integrations")),
                 "TempoRead" => Json(new TempoWorklog(returnMismatchedTempoReadId ? 457 : 456, "planner", "jira-42", new DateTime(2026, 8, 14, 9, 0, 0), returnMismatchedTempoReadDuration ? 1799 : 1800, "Validate integrations")),

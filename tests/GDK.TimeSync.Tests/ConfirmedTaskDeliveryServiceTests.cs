@@ -197,6 +197,7 @@ public sealed class ConfirmedTaskDeliveryServiceTests
     public async Task DeliverConfirmedAsync_falls_back_to_the_jira_name_when_no_key_is_returned()
     {
         var clients = new RecordingIntegrationClientFactory();
+        clients.Handler.MyselfKey = null;
         clients.Handler.MyselfName = "odimar.tomazeli";
         var service = new ConfirmedTaskDeliveryService(
             clients,
@@ -208,21 +209,23 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         Assert.Equal("odimar.tomazeli", clients.LastTempoWorker);
     }
 
-    // A typed value is an explicit override: whoever set it did so because resolution was not enough.
+    // The setting that used to override this is validated as an email address and shared with the
+    // Slack update, and Tempo answers an email with {"errors":{"worker":"User is invalid"}} -- so
+    // filling it in guaranteed the failure it was meant to prevent. Jira decides, always.
     [Fact]
-    public async Task DeliverConfirmedAsync_prefers_a_configured_worker_and_does_not_ask_jira()
+    public async Task DeliverConfirmedAsync_ignores_the_configured_email_and_asks_jira_for_the_worker()
     {
         var clients = new RecordingIntegrationClientFactory();
         clients.Handler.MyselfKey = "JIRAUSER4711";
         var service = new ConfirmedTaskDeliveryService(
             clients,
-            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "explicit.override" }),
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "odimar.tomazeli@partner.cgm.com" }),
             new InMemoryAttemptRepository());
 
         await service.DeliverConfirmedAsync(Item());
 
-        Assert.Equal("explicit.override", clients.LastTempoWorker);
-        Assert.Equal(0, clients.JiraMyselfRequests);
+        Assert.Equal("JIRAUSER4711", clients.LastTempoWorker);
+        Assert.Equal(1, clients.JiraMyselfRequests);
     }
 
     // Nothing configured and nothing resolvable must fail before the Tempo call, not send a blank
@@ -232,6 +235,8 @@ public sealed class ConfirmedTaskDeliveryServiceTests
     public async Task DeliverConfirmedAsync_fails_as_setup_when_no_worker_can_be_determined()
     {
         var clients = new RecordingIntegrationClientFactory();
+        clients.Handler.MyselfKey = null;
+        clients.Handler.MyselfName = null;
         var service = new ConfirmedTaskDeliveryService(
             clients,
             new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "" }),
@@ -485,8 +490,10 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         public int JiraMyselfRequests { get; private set; }
         public TogglCreateTimeEntryRequest? LastTogglRequest { get; private set; }
         public string? LastTempoWorker { get; private set; }
-        public string? MyselfKey { get; set; }
-        public string? MyselfName { get; set; }
+        // Delivery resolves the worker from /myself, so a fixture with no identity cannot deliver at
+        // all. Defaults stand in for a reachable Jira; the tests about resolution set their own.
+        public string? MyselfKey { get; set; } = "JIRAUSER4711";
+        public string? MyselfName { get; set; } = "odimar.tomazeli";
         public HttpStatusCode? TempoStatus { get; set; }
         public string? TempoScope { get; private set; }
 

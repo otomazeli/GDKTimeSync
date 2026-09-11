@@ -9,7 +9,7 @@
 
             <TextBlock Text="Jira base URL" />
             <TextBox x:Name="JiraBaseUrlTextBox" Margin="0,5,0,14" />
-            <TextBlock Text="Jira user email (optional)" />
+            <TextBlock Text="Your email for the Slack update (optional)" />
             <TextBox x:Name="JiraUserTextBox" Margin="0,5,0,14" />
             <TextBlock Text="Toggl workspace ID (optional)" />
             <TextBox x:Name="TogglWorkspaceIdTextBox" Margin="0,5,0,14" />

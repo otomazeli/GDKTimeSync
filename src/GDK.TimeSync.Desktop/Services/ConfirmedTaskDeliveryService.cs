@@ -71,11 +71,12 @@ public sealed class ConfirmedTaskDeliveryService(
             using (jira)
             using (tempo)
             {
-                // Tempo rejects a worker it does not recognise ("User is invalid"), and the typed
-                // setting was the single most common way to get it wrong on a machine nobody can
-                // debug. Ask Jira who we are instead, and keep the setting only as an override for
-                // an instance where /myself does not return what Tempo wants.
-                var worker = await ResolveWorkerAsync(jira, configuration.JiraUser, cancellationToken);
+                // Tempo rejects a worker it does not recognise ("User is invalid"), so ask Jira who we
+                // are. There is no typed override: the setting that used to serve as one is validated
+                // as an email address and shared with the Slack update, and an email is never a valid
+                // Tempo worker -- so filling it in guaranteed the 400 it was meant to prevent. The
+                // Delphi reference client has no worker input at all, for the same reason.
+                var worker = await ResolveWorkerAsync(jira, cancellationToken);
                 if (string.IsNullOrWhiteSpace(worker))
                     return await RecordSetupFailureAsync(item.Id, DeliveryFailureCode.SetupFailed,
                         "No Tempo worker: nothing configured, and Jira did not report an identity.");
@@ -96,17 +97,16 @@ public sealed class ConfirmedTaskDeliveryService(
         }
     }
 
-    // Prefers `key`, then `name`, matching the reference client. A configured value wins over both:
-    // it is an explicit override, and someone who typed it did so because resolution was not enough.
-    private async Task<string> ResolveWorkerAsync(JiraClient jira, string configured, CancellationToken cancellationToken)
+    // Prefers `key`, then `name` -- see JiraCurrentUser.TempoWorker, which is the one place that rule
+    // is written, matching the reference client.
+    private async Task<string> ResolveWorkerAsync(JiraClient jira, CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(configured)) return configured;
         if (resolvedWorker is not null) return resolvedWorker;
 
         try
         {
             var me = await jira.GetMyselfAsync(cancellationToken);
-            var worker = !string.IsNullOrWhiteSpace(me.Key) ? me.Key : me.Name;
+            var worker = me.TempoWorker;
             if (string.IsNullOrWhiteSpace(worker)) return "";
 
             auditLog?.Write(AuditLevel.Info, "Delivery", $"Tempo worker resolved from Jira: {worker}");

@@ -18,7 +18,7 @@
             </Grid.RowDefinitions>
             <TextBlock Text="Jira base URL" />
             <TextBlock Grid.Column="1" Text="{Binding JiraBaseUrl}" TextWrapping="Wrap" />
-            <TextBlock Grid.Row="2" Text="Jira user" />
+            <TextBlock Grid.Row="2" Text="Slack update email" />
             <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding JiraUser}" />
             <TextBlock Grid.Row="4" Text="Toggl workspace" />
             <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding TogglWorkspaceId}" />
