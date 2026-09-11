@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.IO;
 using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
@@ -24,6 +24,16 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // A second instance would be a second writer against the same database; see SingleInstance
+        // for what that duplicated. Hand the user the window that is already running instead.
+        if (!SingleInstance.TryAcquire())
+        {
+            SingleInstance.ActivateExistingInstance();
+            Shutdown();
+            return;
+        }
+
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
         var services = new ServiceCollection();
@@ -42,6 +52,8 @@ public partial class App : System.Windows.Application
         togglAutoSyncService = serviceProvider.GetRequiredService<ITogglAutoSyncService>();
         togglAutoSyncService.StartAsync().GetAwaiter().GetResult();
         ShowMainWindow();
+        // After the window is shown, so it has the handle the message hook needs.
+        SingleInstance.ListenForActivation(serviceProvider.GetRequiredService<MainWindow>(), ShowMainWindow);
     }
 
     internal static void ConfigureServices(IServiceCollection services)
