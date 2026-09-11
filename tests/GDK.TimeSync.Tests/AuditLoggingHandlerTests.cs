@@ -185,6 +185,67 @@ public sealed class AuditLoggingHandlerTests
         Assert.Contains("transport failure", entry.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    // Tempo answers a bad worklog with "User is invalid" and nothing about what it was sent, so the
+    // payload is the half that says which worker, issue id or category was wrong.
+    [Fact]
+    public async Task Logs_the_request_body_for_a_failed_call_without_consuming_it()
+    {
+        var log = new RecordingAuditLog();
+        var inner = new CapturingHandler(HttpStatusCode.BadRequest, "{\"errors\":[{\"message\":\"User is invalid\"}]}");
+        var handler = new AuditLoggingHandler(log, "GDK.TimeSync.Tempo") { InnerHandler = inner };
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("https://jira.example.test/") };
+        const string payload = "{\"worker\":\"wrong.person\",\"originTaskId\":\"12345\"}";
+
+        await client.PostAsync("rest/tempo-timesheets/4/worklogs", new StringContent(payload));
+
+        var entry = Assert.Single(log.Entries);
+        Assert.Contains($"request: {payload}", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("User is invalid", entry.Message, StringComparison.Ordinal);
+        // Buffering for the log must not starve the send.
+        Assert.Equal(payload, inner.ReceivedBody);
+    }
+
+    [Fact]
+    public async Task Does_not_log_the_request_body_for_a_successful_call()
+    {
+        var log = new RecordingAuditLog();
+        using var client = CreateClient(log, "GDK.TimeSync.Tempo", HttpStatusCode.OK, "{\"id\":55}");
+
+        await client.PostAsync("rest/tempo-timesheets/4/worklogs", new StringContent("{\"worker\":\"planner\"}"));
+
+        Assert.DoesNotContain("request:", Assert.Single(log.Entries).Message, StringComparison.Ordinal);
+    }
+
+    // The Slack client's body is the message posted through a webhook whose URL is the credential;
+    // it is the one client whose request must never be written.
+    [Fact]
+    public async Task Never_logs_the_request_body_for_the_redacted_client()
+    {
+        var log = new RecordingAuditLog();
+        var handler = new AuditLoggingHandler(log, "GDK.TimeSync.Slack", redactUri: true)
+        {
+            InnerHandler = new StubHandler(HttpStatusCode.NotFound, "no_service")
+        };
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("https://hooks.slack.test/triggers/secret-trigger/") };
+
+        await client.PostAsync("", new StringContent("{\"text\":\"daily update\"}"));
+
+        var entry = Assert.Single(log.Entries);
+        Assert.DoesNotContain("request:", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("daily update", entry.Message, StringComparison.Ordinal);
+    }
+
+    private sealed class CapturingHandler(HttpStatusCode status, string body) : HttpMessageHandler
+    {
+        public string? ReceivedBody { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            ReceivedBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(status) { Content = new StringContent(body) };
+        }
+    }
+
     private static HttpClient CreateClient(IAuditLog log, string clientName, HttpStatusCode status, string body)
     {
         var handler = new AuditLoggingHandler(log, clientName) { InnerHandler = new StubHandler(status, body) };

@@ -53,6 +53,25 @@ public sealed class ConfirmedTaskDeliveryServiceTests
             clients.LastTogglRequest!.Description);
     }
 
+    // The delivery's own lines and the HTTP handler's were joined only by timestamp, with auto-sync
+    // writing in between. The token has to survive every await down to the Tempo call to fix that.
+    [Fact]
+    public async Task DeliverConfirmedAsync_carries_one_token_from_the_delivery_down_to_the_tempo_call()
+    {
+        var item = PlannedWorkItem.Create(new DateOnly(2026, 8, 13), "Planning", "CGM-1", "Reviewed work", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT", start: new TimeOnly(9, 0));
+        var clients = new RecordingIntegrationClientFactory();
+        var service = new ConfirmedTaskDeliveryService(
+            clients,
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42, JiraUser = "planner" }),
+            new InMemoryAttemptRepository());
+
+        await service.DeliverConfirmedAsync(item);
+
+        Assert.Equal(item.Id.ToString("N")[..8], clients.TempoScope);
+        // And it is put back afterwards, so later lines are not filed under a finished delivery.
+        Assert.Null(AuditScope.Current);
+    }
+
     // The short reason says which step broke; this says how. A stack names the throw site, which is
     // the one thing neither the reason nor the HTTP trail can give you on a machine with no debugger.
     [Fact]
@@ -429,6 +448,7 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         public int TempoWorklogRequests => handler.TempoWorklogRequests;
         public int JiraMyselfRequests => handler.JiraMyselfRequests;
         public HttpStatusCode? TempoStatus { set => handler.TempoStatus = value; }
+        public string? TempoScope => handler.TempoScope;
         public string? LastTempoWorker => handler.LastTempoWorker;
         public RecordingHandler Handler => handler;
         public TogglCreateTimeEntryRequest? LastTogglRequest => handler.LastTogglRequest;
@@ -468,6 +488,7 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         public string? MyselfKey { get; set; }
         public string? MyselfName { get; set; }
         public HttpStatusCode? TempoStatus { get; set; }
+        public string? TempoScope { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -495,6 +516,9 @@ public sealed class ConfirmedTaskDeliveryServiceTests
             }
 
             TempoWorklogRequests++;
+            // Where AuditLoggingHandler sits in production, so what it can see of the delivery scope
+            // is what this sees.
+            TempoScope = AuditScope.Current;
             var tempoPayload = await request.Content!.ReadFromJsonAsync<JsonElement>(cancellationToken);
             LastTempoWorker = tempoPayload.TryGetProperty("worker", out var worker) ? worker.GetString() : null;
             if (TempoStatus is { } status)

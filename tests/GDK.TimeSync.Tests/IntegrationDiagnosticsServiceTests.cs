@@ -25,7 +25,41 @@ public sealed class IntegrationDiagnosticsServiceTests
 
         var tempo = results.Single(result => result.Target == IntegrationDiagnosticTarget.Tempo);
         Assert.True(tempo.IsSuccessful);
-        Assert.Equal("Available: Work-Category (id 4), Account (id 1)", tempo.SafeMessage);
+        Assert.Equal("Available: work category sent as attribute id 4; instance has Work-Category (id 4), Account (id 1)", tempo.SafeMessage);
+    }
+
+    // A red row reading only "Unavailable" could not separate a rejected token from a host that does
+    // not resolve, so the reason had to be dug out of the log to learn which one it was.
+    [Fact]
+    public async Task RunAsync_names_the_status_code_a_target_refused_with()
+    {
+        var clients = new RecordingIntegrationClientFactory(
+            refusingTarget: IntegrationDiagnosticTarget.Jira, refusalStatus: HttpStatusCode.Unauthorized);
+        var service = new IntegrationDiagnosticsService(clients);
+
+        var results = await service.RunAsync();
+
+        var jira = results.Single(result => result.Target == IntegrationDiagnosticTarget.Jira);
+        Assert.False(jira.IsSuccessful);
+        Assert.Equal("Unavailable: 401 Unauthorized", jira.SafeMessage);
+    }
+
+    // How a timeout arrives -- and what the page showed on the first real run of this change: the
+    // client wraps the transport failure with no status, and its constant message is the only thing
+    // that says which of the two it was.
+    [Fact]
+    public async Task RunAsync_falls_back_to_the_clients_own_message_when_there_is_no_status_code()
+    {
+        const string secret = "diagnostic-secret-sentinel";
+        var clients = new RecordingIntegrationClientFactory(failingTarget: IntegrationDiagnosticTarget.Tempo, failureDetail: secret);
+        var service = new IntegrationDiagnosticsService(clients);
+
+        var results = await service.RunAsync();
+
+        var tempo = results.Single(result => result.Target == IntegrationDiagnosticTarget.Tempo);
+        Assert.Equal("Unavailable: Unable to reach Tempo.", tempo.SafeMessage);
+        // The transport exception's own detail stays out: only the client's constant is shown.
+        Assert.DoesNotContain(secret, tempo.SafeMessage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -43,7 +77,7 @@ public sealed class IntegrationDiagnosticsServiceTests
                 // Names the identity Tempo is sent as a worklog `worker`, so a wrong one shows up on
                 // the Diagnostics page rather than as a 400 at delivery time.
                 new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Jira, true, "Available: name=planner"),
-                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Tempo, true, "Available")
+                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Tempo, true, "Available: work category sent as attribute id 4; instance reports no work attributes")
             ],
             results);
         Assert.Equal(
@@ -69,8 +103,8 @@ public sealed class IntegrationDiagnosticsServiceTests
         Assert.Equal(
             [
                 new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Toggl, true, "Available"),
-                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Jira, false, "Unavailable"),
-                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Tempo, true, "Available")
+                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Jira, false, "Unavailable: InvalidOperationException"),
+                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Tempo, true, "Available: work category sent as attribute id 4; instance reports no work attributes")
             ],
             results);
         Assert.Equal(["Toggl GET /me/time_entries?start_date=" + DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd") + "&end_date=" + DateOnly.FromDateTime(DateTime.Today).AddDays(1).ToString("yyyy-MM-dd"), "Tempo GET /rest/tempo-core/1/work-attribute"], clients.Requests);
@@ -90,7 +124,7 @@ public sealed class IntegrationDiagnosticsServiceTests
             [
                 new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Toggl, true, "Available"),
                 new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Jira, false, "Cancelled"),
-                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Tempo, true, "Available")
+                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Tempo, true, "Available: work category sent as attribute id 4; instance reports no work attributes")
             ],
             results);
         Assert.Equal(
@@ -115,7 +149,7 @@ public sealed class IntegrationDiagnosticsServiceTests
             [
                 new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Toggl, true, "Available"),
                 new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Jira, false, "Unavailable"),
-                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Tempo, true, "Available")
+                new IntegrationDiagnosticResult(IntegrationDiagnosticTarget.Tempo, true, "Available: work category sent as attribute id 4; instance reports no work attributes")
             ],
             results);
         Assert.Equal(
@@ -133,9 +167,11 @@ public sealed class IntegrationDiagnosticsServiceTests
         IntegrationDiagnosticTarget? cancellingTarget = null,
         string? failureDetail = null,
         IntegrationDiagnosticTarget? throwingDisposeTarget = null,
-        TempoAttribute[]? workAttributes = null) : IIntegrationClientFactory
+        TempoAttribute[]? workAttributes = null,
+        IntegrationDiagnosticTarget? refusingTarget = null,
+        HttpStatusCode refusalStatus = HttpStatusCode.Unauthorized) : IIntegrationClientFactory
     {
-        private readonly RecordingHandler handler = new(failingTarget, cancellingTarget, failureDetail, workAttributes);
+        private readonly RecordingHandler handler = new(failingTarget, cancellingTarget, failureDetail, workAttributes, refusingTarget, refusalStatus);
 
         public List<TrackingHttpClient> CreatedClients { get; } = [];
         public IReadOnlyList<string> Requests => handler.Requests;
@@ -170,7 +206,9 @@ public sealed class IntegrationDiagnosticsServiceTests
         IntegrationDiagnosticTarget? failingTarget,
         IntegrationDiagnosticTarget? cancellingTarget,
         string? failureDetail,
-        TempoAttribute[]? workAttributes = null) : HttpMessageHandler
+        TempoAttribute[]? workAttributes = null,
+        IntegrationDiagnosticTarget? refusingTarget = null,
+        HttpStatusCode refusalStatus = HttpStatusCode.Unauthorized) : HttpMessageHandler
     {
         public List<string> Requests { get; } = [];
 
@@ -189,6 +227,8 @@ public sealed class IntegrationDiagnosticsServiceTests
                 throw new OperationCanceledException();
             if (failingTarget == target)
                 throw new HttpRequestException(failureDetail);
+            if (refusingTarget == target)
+                return Task.FromResult(new HttpResponseMessage(refusalStatus) { Content = new StringContent("") });
 
             return Task.FromResult(target switch
             {

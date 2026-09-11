@@ -115,7 +115,9 @@ public sealed class TempoClient : ITempoClient
 
     // ponytail: the attribute id is fixed at 4 to match the working reference client. ITempoClient
     // exposes GetWorkAttributesAsync if another Tempo instance ever numbers it differently.
-    private const int WorkCategoryAttributeId = 4;
+    // Public so Diagnostics can name it beside the ids the instance actually reports: a mismatch is
+    // the whole failure, and until it was shown it had to be known about to be looked for.
+    public const int WorkCategoryAttributeId = 4;
 
     private static object CreatePayload(TempoWorklogRequest request)
     {

@@ -17,6 +17,9 @@ public sealed class AuditLoggingHandler(IAuditLog auditLog, string clientName, b
         // Only the method and path are read. Headers are never enumerated, so the Authorization
         // header carrying the Toggl token / Jira PAT cannot reach the log by any path.
         var target = $"{request.Method.Method} {DescribeUri(request.RequestUri)}";
+        // Buffered before the send, not after: HttpClient disposes the request content once the send
+        // completes, and by then it is too late to read what went out.
+        var requestBody = await BufferRequestBodyAsync(request);
         try
         {
             var response = await base.SendAsync(request, cancellationToken);
@@ -25,16 +28,42 @@ public sealed class AuditLoggingHandler(IAuditLog auditLog, string clientName, b
             if (response.IsSuccessStatusCode)
                 auditLog.Write(AuditLevel.Info, clientName, line);
             else
-                auditLog.Write(AuditLevel.Error, clientName, $"{line}{Environment.NewLine}response: {await DescribeFailureAsync(response, cancellationToken)}");
+                auditLog.Write(AuditLevel.Error, clientName,
+                    $"{line}{DescribeRequest(requestBody)}{Environment.NewLine}response: {await DescribeFailureAsync(response, cancellationToken)}");
             return response;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             stopwatch.Stop();
-            auditLog.Write(AuditLevel.Error, clientName, $"{target} -> transport failure after {stopwatch.ElapsedMilliseconds} ms: {exception.GetType().Name}");
+            auditLog.Write(AuditLevel.Error, clientName,
+                $"{target} -> transport failure after {stopwatch.ElapsedMilliseconds} ms: {exception.GetType().Name}{DescribeRequest(requestBody)}");
             throw;
         }
     }
+
+    // A Tempo 400 is almost always about what was sent -- which worker, which issue id, which work
+    // category -- and the response says only "User is invalid". The request body is the half that
+    // answers it. Written on failures alone, so a working day's log does not grow a copy of every
+    // payload. Credentials cannot arrive here: these APIs authenticate with a header, and the one
+    // client whose body *is* the secret is excluded outright below.
+    private async Task<string?> BufferRequestBodyAsync(HttpRequestMessage request)
+    {
+        if (redactUri || request.Content is null) return null;
+        try
+        {
+            // Buffering also makes the content replayable, so reading it cannot starve the send.
+            await request.Content.LoadIntoBufferAsync();
+            var body = await request.Content.ReadAsStringAsync();
+            return body.Length > MaxBodyCharacters ? body[..MaxBodyCharacters] + " …(truncated)" : body;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return "(request body could not be read)";
+        }
+    }
+
+    private static string DescribeRequest(string? body) =>
+        string.IsNullOrEmpty(body) ? "" : $"{Environment.NewLine}request: {body}";
 
     // The Slack webhook URL is itself the credential -- SlackClient posts to "" against a
     // BaseAddress that is the secret trigger URL -- so for Slack no part of the URI is written.

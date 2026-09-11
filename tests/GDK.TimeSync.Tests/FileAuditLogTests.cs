@@ -23,6 +23,31 @@ public sealed class FileAuditLogTests : IDisposable
         Assert.Contains("2026-09-01 14:02:11.884", text, StringComparison.Ordinal);
     }
 
+    // The token has to sit after the category: AuditLogReader finds the level at a fixed offset from
+    // the start of the line, so anything inserted ahead of it would stop failed lines being coloured.
+    [Fact]
+    public async Task Write_StampsTheDeliveryTokenAfterTheCategoryAndOnlyInsideTheScope()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 9, 1, 14, 2, 11, 884, TimeSpan.Zero));
+        var log = new FileAuditLog(directory, clock);
+
+        using (AuditScope.Begin("a1b2c3d4"))
+        {
+            log.Write(AuditLevel.Info, "Delivery", "Confirmed");
+            // An await inside the scope, because the HTTP handler's writes happen after several.
+            await Task.Yield();
+            log.Write(AuditLevel.Error, "GDK.TimeSync.Tempo", "POST /worklogs -> 400 BadRequest");
+        }
+
+        log.Write(AuditLevel.Info, "Sync", "Imported 0");
+
+        var lines = File.ReadAllLines(log.CurrentFilePath);
+        Assert.Contains(lines, line => line.EndsWith("INFO  Delivery [a1b2c3d4]", StringComparison.Ordinal));
+        Assert.Contains(lines, line => line.EndsWith("ERROR GDK.TimeSync.Tempo [a1b2c3d4]", StringComparison.Ordinal));
+        Assert.Contains(lines, line => line.EndsWith("INFO  Sync", StringComparison.Ordinal));
+        Assert.Equal(AuditLevel.Error, AuditLogReader.LevelOf(lines.Single(line => line.Contains("Tempo", StringComparison.Ordinal))));
+    }
+
     // Every Write emits a header line plus its indented body, so 200 writes produce 400 lines.
     // What matters is that no entry is torn or interleaved with another's.
     [Fact]

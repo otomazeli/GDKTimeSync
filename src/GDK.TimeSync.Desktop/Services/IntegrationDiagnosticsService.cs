@@ -1,5 +1,7 @@
+using System.Net;
 using GDK.TimeSync.Jira;
 using GDK.TimeSync.Tempo;
+using GDK.TimeSync.Toggl;
 
 namespace GDK.TimeSync.Desktop.Services;
 
@@ -35,10 +37,33 @@ public sealed class IntegrationDiagnosticsService(IIntegrationClientFactory clie
     // currently hardcodes. Names only -- nothing here is a credential, and nothing else is read.
     private static string DescribeWorkAttributes(IReadOnlyList<TempoAttribute> attributes) =>
         attributes.Count == 0
-            ? "Available"
-            : $"Available: {string.Join(", ", attributes.Take(MaxDescribedAttributes).Select(attribute => $"{attribute.Name} (id {attribute.Id})"))}";
+            ? $"Available: work category sent as attribute id {TempoClient.WorkCategoryAttributeId}; instance reports no work attributes"
+            : $"Available: work category sent as attribute id {TempoClient.WorkCategoryAttributeId}; instance has {string.Join(", ", attributes.Take(MaxDescribedAttributes).Select(attribute => $"{attribute.Name} (id {attribute.Id})"))}";
 
     private const int MaxDescribedAttributes = 12;
+
+    // A bare "Unavailable" could not separate a rejected token from a host that never answered, so
+    // the page showed a red row and the reason had to be dug out of the log. A status code separates
+    // them outright. Without one -- the shape a timeout takes -- the client's own message does, and
+    // every message these three throw is a constant ("Unable to reach Jira."), so nothing variable
+    // reaches the page. Anything else falls back to the type name, never a message that could quote
+    // the host or the request.
+    private static string DescribeFailure(Exception exception) => exception switch
+    {
+        JiraApiException or TempoApiException or TogglApiException => Describe(StatusOf(exception), exception.Message),
+        _ => $"Unavailable: {exception.GetType().Name}"
+    };
+
+    private static HttpStatusCode? StatusOf(Exception exception) => exception switch
+    {
+        JiraApiException jira => jira.StatusCode,
+        TempoApiException tempo => tempo.StatusCode,
+        TogglApiException toggl => toggl.StatusCode,
+        _ => null
+    };
+
+    private static string Describe(HttpStatusCode? status, string message) =>
+        status is { } code ? $"Unavailable: {(int)code} {code}" : $"Unavailable: {message}";
 
     private static async Task<IntegrationDiagnosticResult> CheckAsync<TClient, TResult>(
         IntegrationDiagnosticTarget target,
@@ -60,9 +85,9 @@ public sealed class IntegrationDiagnosticsService(IIntegrationClientFactory clie
         {
             result = new IntegrationDiagnosticResult(target, false, "Cancelled");
         }
-        catch
+        catch (Exception exception)
         {
-            result = new IntegrationDiagnosticResult(target, false, "Unavailable");
+            result = new IntegrationDiagnosticResult(target, false, DescribeFailure(exception));
         }
         finally
         {

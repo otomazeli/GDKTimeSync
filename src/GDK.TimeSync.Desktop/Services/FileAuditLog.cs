@@ -29,7 +29,11 @@ public sealed class FileAuditLog(string logDirectory, TimeProvider? timeProvider
             // some hosts this would not produce "HH:mm:ss" at all -- and AuditLogReader (Task 5)
             // parses these 23 characters back with TryParseExact against InvariantCulture.
             var stamp = now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture);
-            var line = $"{stamp} {Label(level)} {category}{Environment.NewLine}{Indent(message)}";
+            // After the category, never before it: AuditLogReader finds the level at a fixed offset
+            // from the start of the line, so anything inserted ahead of it would stop failed lines
+            // being coloured. Absent outside a delivery.
+            var scope = AuditScope.Current is { } token ? $" [{token}]" : "";
+            var line = $"{stamp} {Label(level)} {category}{scope}{Environment.NewLine}{Indent(message)}";
             lock (appendLock)
             {
                 Directory.CreateDirectory(logDirectory);

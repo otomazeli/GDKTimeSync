@@ -24,6 +24,10 @@ public sealed class ConfirmedTaskDeliveryService(
     public async Task<DeliveryAttempt> DeliverConfirmedAsync(PlannedWorkItem item, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(item);
+        // Every line this delivery causes -- here, in the coordinator, and in the HTTP handler --
+        // carries this token, so one task's Jira and Tempo calls can be read as a run instead of
+        // guessed at from timestamps interleaved with auto-sync.
+        using var scope = AuditScope.Begin(item.Id.ToString("N")[..8]);
         auditLog?.Write(AuditLevel.Info, "Delivery", $"Confirmed {item.Id} {item.JiraIssueKey} {item.Day}");
         var attempt = await DeliverAsync(item, cancellationToken);
         var detail = string.IsNullOrWhiteSpace(attempt.FailureDetail) ? "" : $": {attempt.FailureDetail}";
