@@ -147,9 +147,92 @@ public sealed class TempoClient : ITempoClient
         return payload;
     }
 
-    private static async Task<TempoWorklog> ReadRequiredJsonAsync(HttpResponseMessage response, CancellationToken cancellationToken) =>
-        await ReadJsonAsync<TempoWorklog>(response, cancellationToken)
-        ?? throw new TempoApiException("Tempo returned an empty response.", response.StatusCode);
+    // Read field by field rather than deserialised into the record: a strict bind failed on a 200
+    // that had already created the worklog, and the only thing anyone does with the result is take
+    // the id (plus TimeSpentSeconds, for the Live Validation readback). Tolerating an array wrapper,
+    // a missing field and an id sent as a string removes the whole class of failure rather than the
+    // one field that happened to differ.
+    private static async Task<TempoWorklog> ReadRequiredJsonAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        var body = await ReadBodyAsync(response, cancellationToken);
+        if (string.IsNullOrWhiteSpace(body))
+            throw new TempoApiException("Tempo returned an empty response.", response.StatusCode);
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement.ValueKind == JsonValueKind.Array
+                ? document.RootElement.EnumerateArray().FirstOrDefault()
+                : document.RootElement;
+
+            if (root.ValueKind == JsonValueKind.Object && ReadId(root, "tempoWorklogId") is { } worklogId)
+                return new TempoWorklog(
+                    worklogId,
+                    ReadString(root, "worker"),
+                    ReadString(root, "originTaskId"),
+                    ReadStarted(root),
+                    ReadInt(root, "timeSpentSeconds"),
+                    ReadString(root, "comment"));
+        }
+        catch (JsonException)
+        {
+            throw Unreadable(response, body);
+        }
+
+        throw Unreadable(response, body);
+    }
+
+    // The body travels in the message because that is what reaches the audit log: the delivery
+    // service logs the whole exception, and nothing else here can see a response. Capped, because a
+    // reason also shows on the review row.
+    private static TempoApiException Unreadable(HttpResponseMessage response, string body) =>
+        new($"Tempo returned a response that could not be read. Body: {Truncate(body)}", response.StatusCode);
+
+    private static string Truncate(string body) =>
+        body.Length > MaxLoggedBodyCharacters ? body[..MaxLoggedBodyCharacters] + " …(truncated)" : body;
+
+    private const int MaxLoggedBodyCharacters = 1000;
+
+    private static async Task<string> ReadBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        // Checked rather than left to the read: buffered content completes without ever looking at the
+        // token, so a cancelled readback finished as Succeeded instead of asking for reconciliation.
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            return await response.Content.ReadAsStringAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new TempoApiException("Tempo's response could not be read.", response.StatusCode);
+        }
+    }
+
+    // Tempo's own UI sends originTaskId as text, so an id coming back as a string is expected rather
+    // than exceptional.
+    private static long? ReadId(JsonElement root, string name) => root.TryGetProperty(name, out var value)
+        ? value.ValueKind switch
+        {
+            JsonValueKind.Number when value.TryGetInt64(out var number) => number,
+            JsonValueKind.String when long.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            _ => null
+        }
+        : null;
+
+    private static string ReadString(JsonElement root, string name) => root.TryGetProperty(name, out var value)
+        ? value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString() ?? "",
+            JsonValueKind.Number => value.ToString(),
+            _ => ""
+        }
+        : "";
+
+    private static int ReadInt(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) ? number : 0;
+
+    private static DateTime ReadStarted(JsonElement root) =>
+        DateTime.TryParse(ReadString(root, "started"), CultureInfo.InvariantCulture, DateTimeStyles.None, out var started) ? started : default;
 
     private static async Task<T?> ReadJsonAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
     {

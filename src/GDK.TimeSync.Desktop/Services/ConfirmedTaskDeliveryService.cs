@@ -195,9 +195,13 @@ public sealed class ConfirmedTaskDeliveryService(
             {
                 return await CreateCoreAsync(item, jiraIssueId, cancellationToken);
             }
-            // A status code means Tempo answered and refused, so the worklog does not exist and the
-            // task can be posted again. Without one the outcome is unknown and must not be repeated.
-            catch (TempoApiException exception) when (exception.StatusCode is not null)
+            // A *failure* status means Tempo answered and refused, so the worklog does not exist and
+            // the task can be posted again. Without one the outcome is unknown and must not be
+            // repeated -- and neither must a success status we could not read, which is a worklog
+            // that exists: this condition said "is not null", so a 200 whose body failed to parse was
+            // recorded as TempoRejected, which IsResumable lists as retryable. That offered a second
+            // post for work Tempo had already written.
+            catch (TempoApiException exception) when (exception.StatusCode is { } status && (int)status >= 400)
             {
                 throw new DeliveryRejectedException(exception.Message, exception);
             }

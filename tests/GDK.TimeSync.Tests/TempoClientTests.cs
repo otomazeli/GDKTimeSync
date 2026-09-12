@@ -119,6 +119,49 @@ public sealed class TempoClientTests
         Assert.Contains("\"started\":\"2026-08-07T08:15:00.000\"", body);
     }
 
+    // A 200 that had already created the worklog failed to bind to the record and was reported as a
+    // rejection. Only the id matters downstream, so these are the shapes that must not throw.
+    [Theory]
+    // The id as a string, the way Tempo's own UI sends originTaskId.
+    [InlineData("""{"tempoWorklogId":"456","timeSpentSeconds":1800}""")]
+    // Wrapped in an array.
+    [InlineData("""[{"tempoWorklogId":456,"timeSpentSeconds":1800}]""")]
+    // originTaskId as a number rather than the string the record declared.
+    [InlineData("""{"tempoWorklogId":456,"originTaskId":12345,"timeSpentSeconds":1800}""")]
+    // A nested issue object and no originTaskId at all, which is what the Delphi client reads.
+    [InlineData("""{"tempoWorklogId":456,"issue":{"id":12345,"key":"CGM-1"},"timeSpentSeconds":1800,"comment":null}""")]
+    // Fields we never modelled, and none of the ones we did.
+    [InlineData("""{"tempoWorklogId":456,"billableSeconds":null,"originId":-1,"timeSpentSeconds":1800}""")]
+    public async Task CreateWorklogAsync_reads_the_worklog_id_from_any_shape_tempo_returns(string body)
+    {
+        var handler = new StubHttpMessageHandler(_ => JsonResponse(body));
+        using var httpClient = CreateHttpClient(handler);
+        using ITempoClient client = CreateClient(httpClient);
+
+        var result = await client.CreateWorklogAsync(ValidRequest());
+
+        Assert.Equal(456, result.TempoWorklogId);
+        Assert.Equal(1800, result.TimeSpentSeconds);
+    }
+
+    // When it genuinely cannot be read, the body has to reach the log: the delivery service writes
+    // the whole exception, and nothing else in the app can see a Tempo response.
+    [Fact]
+    public async Task CreateWorklogAsync_carries_an_unreadable_body_into_the_exception_without_the_token()
+    {
+        const string secret = "test-pat";
+        const string body = """{"unexpected":"no worklog id here"}""";
+        var handler = new StubHttpMessageHandler(_ => JsonResponse(body));
+        using var httpClient = CreateHttpClient(handler);
+        using ITempoClient client = new TempoClient(httpClient, new TempoOptions { BaseUrl = "https://jira.example.test", PersonalAccessToken = secret });
+
+        var exception = await Assert.ThrowsAsync<TempoApiException>(() => client.CreateWorklogAsync(ValidRequest()));
+
+        Assert.Contains(body, exception.Message, StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.OK, exception.StatusCode);
+        Assert.DoesNotContain(secret, exception.ToString(), StringComparison.Ordinal);
+    }
+
     // Issue #13: every worklog we posted landed in Tempo with no work category, because the payload
     // had no `attributes` object at all. The shape below is the one the Delphi reference client
     // (uTempoClient.pas) sends, which was captured from Tempo's own UI and is known to work.

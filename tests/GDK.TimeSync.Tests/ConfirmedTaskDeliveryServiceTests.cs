@@ -173,6 +173,27 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         Assert.True(attempt.IsResumable());
     }
 
+    // The worklog was created -- Tempo answered 200 -- and only reading the response failed. Recording
+    // that as TempoRejected made it resumable, which offered a second post for work already written.
+    // A success we cannot read is the one outcome that must never be retried automatically.
+    [Fact]
+    public async Task DeliverConfirmedAsync_never_offers_a_retry_when_tempo_accepted_but_the_response_was_unreadable()
+    {
+        var clients = new RecordingIntegrationClientFactory { TempoSuccessBody = """{"no":"worklog id"}""" };
+        var service = new ConfirmedTaskDeliveryService(
+            clients,
+            new FixedSettingsStore(new UserSettings { TogglWorkspaceId = 42 }),
+            new InMemoryAttemptRepository());
+
+        var attempt = await service.DeliverConfirmedAsync(Item());
+
+        Assert.Equal(DeliveryAttemptStatus.Failed, attempt.Status);
+        Assert.NotEqual(DeliveryFailureCode.TempoRejected, attempt.FailureCode);
+        Assert.False(attempt.IsResumable());
+        // The body has to survive into the reason, because that is the only record of what Tempo said.
+        Assert.Contains("""{"no":"worklog id"}""", attempt.FailureDetail ?? "", StringComparison.Ordinal);
+    }
+
     // Issue #13: Tempo answered a real delivery with
     // {"errors":{"worker":"User is invalid"}} because the worker came from a typed setting. Jira
     // knows who we are, so ask it -- the Delphi reference client reads `key` first, then `name`.
@@ -453,6 +474,7 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         public int TempoWorklogRequests => handler.TempoWorklogRequests;
         public int JiraMyselfRequests => handler.JiraMyselfRequests;
         public HttpStatusCode? TempoStatus { set => handler.TempoStatus = value; }
+        public string? TempoSuccessBody { set => handler.TempoSuccessBody = value; }
         public string? TempoScope => handler.TempoScope;
         public string? LastTempoWorker => handler.LastTempoWorker;
         public RecordingHandler Handler => handler;
@@ -495,6 +517,7 @@ public sealed class ConfirmedTaskDeliveryServiceTests
         public string? MyselfKey { get; set; } = "JIRAUSER4711";
         public string? MyselfName { get; set; } = "odimar.tomazeli";
         public HttpStatusCode? TempoStatus { get; set; }
+        public string? TempoSuccessBody { get; set; }
         public string? TempoScope { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -530,6 +553,8 @@ public sealed class ConfirmedTaskDeliveryServiceTests
             LastTempoWorker = tempoPayload.TryGetProperty("worker", out var worker) ? worker.GetString() : null;
             if (TempoStatus is { } status)
                 return new HttpResponseMessage(status) { Content = new StringContent("""{"errors":{"worker":"User is invalid"}}""") };
+            if (TempoSuccessBody is { } successBody)
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(successBody) };
             return Json(new { tempoWorklogId = 301L, worker = "planner", originTaskId = "201", started = "2026-08-13T09:00:00", timeSpentSeconds = 1800, comment = "Reviewed work" });
         }
 
