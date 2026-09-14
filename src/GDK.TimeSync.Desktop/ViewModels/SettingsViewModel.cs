@@ -295,7 +295,9 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
                 settings.Save(normalizedSettings);
             }
             catch (Exception exception) { throw new SettingsSaveException("Credentials may have been saved, but non-secret settings could not be saved.", exception); }
-            auditLog?.Write(AuditLevel.Info, "Settings", $"Saved: {DescribeChangedFields(previousSettings, normalizedSettings)}");
+            var replacedCredentials = DescribeReplacedCredentials(newTogglToken, newJiraPat, newSlackWebhook).ToList();
+            var credentialNote = replacedCredentials.Count > 0 ? $"; credentials replaced: {string.Join(", ", replacedCredentials)}" : "";
+            auditLog?.Write(AuditLevel.Info, "Settings", $"Saved: {DescribeChangedFields(previousSettings, normalizedSettings)}{credentialNote}");
             await configurationState.RefreshAsync(cancellationToken);
             await UpdateCredentialStatusAsync(cancellationToken);
             LoadNonSecretSettings(normalizedSettings);
@@ -364,6 +366,17 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         if (previous.SlackTaskHeading != updated.SlackTaskHeading) changed.Add(nameof(UserSettings.SlackTaskHeading));
         if (!previous.SlackExtraLines.SequenceEqual(updated.SlackExtraLines)) changed.Add(nameof(UserSettings.SlackExtraLines));
         return changed.Count > 0 ? string.Join(", ", changed) : "(no fields changed)";
+    }
+
+    // Credentials live outside UserSettings, so replacing one changed nothing this log could see: a
+    // Slack webhook swapped for the wrong URL wrote "Saved: JiraUser" and stayed invisible until it
+    // failed eleven days later. Names of what was replaced only -- never a value, and never whether
+    // one is merely present, which UpdateCredentialStatusAsync already exposes.
+    private static IEnumerable<string> DescribeReplacedCredentials(string? togglToken, string? jiraPat, string? slackWebhook)
+    {
+        if (!string.IsNullOrWhiteSpace(togglToken)) yield return "TogglApiToken";
+        if (!string.IsNullOrWhiteSpace(jiraPat)) yield return "JiraPat";
+        if (!string.IsNullOrWhiteSpace(slackWebhook)) yield return "SlackWebhook";
     }
 
     private static string NormalizeSlackText(string? value)

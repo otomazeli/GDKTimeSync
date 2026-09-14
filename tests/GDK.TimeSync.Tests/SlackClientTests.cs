@@ -35,7 +35,10 @@ public sealed class SlackClientTests
     [Fact]
     public async Task PostAsync_posts_to_the_webhook_url_exactly_as_stored()
     {
-        const string webhook = "https://hooks.slack.example.test/triggers/T03KQC8QV/11891630366823/36c74d05a493cc007642cf541459bdc8";
+        // Shaped like a trigger URL, invented throughout. An earlier version of this test kept the
+        // real team, trigger and secret segments behind a changed host, which reconstructs the live
+        // webhook by swapping the host back -- and the webhook URL is the whole credential.
+        const string webhook = "https://hooks.slack.example.test/triggers/T00000000/00000000000/0000000000000000000000000000000";
         HttpRequestMessage? seen = null;
         var handler = new StubHttpMessageHandler(request => { seen = request; return new HttpResponseMessage(HttpStatusCode.OK); });
         var client = new SlackClient(new HttpClient(handler) { BaseAddress = new Uri(webhook) });

@@ -1,3 +1,4 @@
+using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
 using GDK.TimeSync.Desktop.ViewModels;
 using System.Text.Json;
@@ -191,6 +192,50 @@ public sealed class DesktopConfigurationTests
         await viewModel.SaveAsync("https://jira.cgm.ag", null, null, $"  {webhook}  ");
 
         Assert.True(credentials.WasSaved(CredentialKeys.SlackWebhook, webhook));
+    }
+
+    // Replacing the Slack webhook changes no UserSettings field, so the log read "Saved: JiraUser"
+    // and said nothing about the value that had just broken Slack -- for eleven days.
+    [Fact]
+    public async Task Saving_records_which_credentials_were_replaced_but_never_their_values()
+    {
+        const string webhook = "https://hooks.slack.com/triggers/T0000/1111/sentinel-secret";
+        const string togglToken = "toggl-sentinel-secret";
+        var log = new RecordingAuditLog();
+        var credentials = new FakeCredentialStore();
+        var settings = new FakeSettingsStore(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" });
+        var viewModel = new SettingsViewModel(credentials, settings, new ConfigurationStateService(credentials, settings), log);
+
+        await viewModel.SaveAsync(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag", JiraUser = "planner@example.com" },
+            togglToken, null, webhook);
+
+        var entry = Assert.Single(log.Messages, message => message.StartsWith("Saved:", StringComparison.Ordinal));
+        Assert.Contains("JiraUser", entry, StringComparison.Ordinal);
+        Assert.Contains("credentials replaced: TogglApiToken, SlackWebhook", entry, StringComparison.Ordinal);
+        // Names only. The webhook URL is itself the credential; the Toggl token equally so.
+        Assert.DoesNotContain(webhook, entry, StringComparison.Ordinal);
+        Assert.DoesNotContain(togglToken, entry, StringComparison.Ordinal);
+        Assert.DoesNotContain("hooks.slack.com", entry, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Saving_no_credentials_leaves_the_audit_line_as_it_was()
+    {
+        var log = new RecordingAuditLog();
+        var credentials = new FakeCredentialStore();
+        var settings = new FakeSettingsStore(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" });
+        var viewModel = new SettingsViewModel(credentials, settings, new ConfigurationStateService(credentials, settings), log);
+
+        await viewModel.SaveAsync(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag", JiraUser = "planner@example.com" }, null, null, null);
+
+        var entry = Assert.Single(log.Messages, message => message.StartsWith("Saved:", StringComparison.Ordinal));
+        Assert.DoesNotContain("credentials replaced", entry, StringComparison.Ordinal);
+    }
+
+    private sealed class RecordingAuditLog : IAuditLog
+    {
+        public List<string> Messages { get; } = [];
+        public void Write(AuditLevel level, string category, string message) => Messages.Add(message);
     }
 
     [Fact]
