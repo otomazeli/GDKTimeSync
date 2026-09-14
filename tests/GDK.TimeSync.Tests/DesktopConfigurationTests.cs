@@ -160,6 +160,39 @@ public sealed class DesktopConfigurationTests
         Assert.Equal("saved@example.com", viewModel.JiraUser);
     }
 
+    // Workflow Builder's "copy link" gives a shortcut link, which is a page rather than an endpoint:
+    // posting to it answers 404, and that only surfaced days later on a real send.
+    [Theory]
+    [InlineData("https://slack.com/shortcuts/Ft0AAAAAAAAA/0000000000000000000000000000000")]
+    [InlineData("http://hooks.slack.com/triggers/T1/2/3")]
+    [InlineData("hooks.slack.com/triggers/T1/2/3")]
+    [InlineData("not a url at all")]
+    public async Task A_slack_url_that_is_not_a_webhook_prevents_saving_credentials_or_settings(string webhook)
+    {
+        var credentials = new FakeCredentialStore();
+        var initial = new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" };
+        var settings = new FakeSettingsStore(initial);
+        var viewModel = new SettingsViewModel(credentials, settings, new ConfigurationStateService(credentials, settings));
+
+        await Assert.ThrowsAsync<ArgumentException>(() => viewModel.SaveAsync(initial, "toggl-token", null, webhook));
+
+        Assert.Empty(credentials.SavedKeys);
+        Assert.Equal(initial, settings.Current);
+    }
+
+    [Fact]
+    public async Task A_webhook_trigger_url_is_accepted_and_stored_trimmed()
+    {
+        const string webhook = "https://hooks.slack.com/triggers/T0000/1111/abcdef";
+        var credentials = new FakeCredentialStore();
+        var settings = new FakeSettingsStore(new UserSettings { JiraBaseUrl = "https://jira.cgm.ag" });
+        var viewModel = new SettingsViewModel(credentials, settings, new ConfigurationStateService(credentials, settings));
+
+        await viewModel.SaveAsync("https://jira.cgm.ag", null, null, $"  {webhook}  ");
+
+        Assert.True(credentials.WasSaved(CredentialKeys.SlackWebhook, webhook));
+    }
+
     [Fact]
     public async Task Invalid_jira_user_prevents_saving_credentials_or_settings()
     {

@@ -230,6 +230,16 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         var normalizedJiraUser = proposedSettings.JiraUser.Trim();
         if (!string.IsNullOrEmpty(normalizedJiraUser) && !IsEmailAddress(normalizedJiraUser))
             throw new ArgumentException("Enter a valid Jira user email address.", nameof(proposedSettings));
+        // Checked here, with the other entry validation, so nothing is stored when it is wrong.
+        // Workflow Builder's "copy link" hands you a shortcut link (slack.com/shortcuts/...), which
+        // is a page, not an endpoint: posting to it answers 404. That was only discovered at send
+        // time days later, and reported as a reconciliation problem. The host is the reliable part
+        // of the rule -- the path shape has changed before, so it is named in the message rather
+        // than enforced.
+        if (!string.IsNullOrWhiteSpace(newSlackWebhook) && !IsSlackWebhookUrl(newSlackWebhook.Trim()))
+            throw new ArgumentException(
+                "Enter the Slack Workflow Builder webhook trigger URL (https://hooks.slack.com/triggers/...), not a workflow shortcut link.",
+                nameof(newSlackWebhook));
         if (!TimeOnly.TryParseExact(proposedSettings.ReviewReminderTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var reviewTime))
             throw new ArgumentException("Enter review reminder time as HH:mm.", nameof(proposedSettings));
         if (proposedSettings.SyncIntervalMinutes < 1)
@@ -276,7 +286,7 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
 
             if (!string.IsNullOrWhiteSpace(newSlackWebhook))
             {
-                try { await credentials.SaveAsync(CredentialKeys.SlackWebhook, newSlackWebhook, cancellationToken); }
+                try { await credentials.SaveAsync(CredentialKeys.SlackWebhook, newSlackWebhook.Trim(), cancellationToken); }
                 catch (Exception exception) { throw new SettingsSaveException("Unable to save Slack credential.", exception); }
             }
 
@@ -320,6 +330,11 @@ public sealed class SettingsViewModel(ICredentialStore credentials, IUserSetting
         IsJiraPatConfigured = configurationState.HasJiraCredential;
         IsSlackWebhookConfigured = await credentials.ExistsAsync(CredentialKeys.SlackWebhook, cancellationToken);
     }
+
+    private static bool IsSlackWebhookUrl(string value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri)
+        && uri.Scheme == Uri.UriSchemeHttps
+        && uri.Host.Equals("hooks.slack.com", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsEmailAddress(string value)
     {

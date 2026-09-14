@@ -2,6 +2,7 @@ using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
 using GDK.TimeSync.Desktop.ViewModels;
 using GDK.TimeSync.Slack;
+using System.Net;
 using System.Xml.Linq;
 
 namespace GDK.TimeSync.Tests;
@@ -443,6 +444,48 @@ public sealed class ReviewViewModelTests
         Assert.Equal(0, slack.CreateCalls);
     }
 
+    // A 404 from a webhook URL that was not a webhook was reported as "requires reconciliation",
+    // which sent someone looking for a problem that did not exist: Slack answered and refused, so
+    // nothing reached the channel and TryClaimAsync already allows the day to be sent again.
+    [Fact]
+    public async Task A_slack_refusal_says_nothing_was_sent_and_stays_retryable()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var slack = new RecordingSlackClientFactory();
+        slack.Client.ThrowOnPost = new SlackApiException("Slack returned an unsuccessful response.",
+            SlackFailureCode.UnsuccessfulResponse, HttpStatusCode.NotFound);
+        var deliveries = new DailyDeliveryRepository();
+        var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)), slackFactory: slack, dailyDeliveries: deliveries);
+
+        await review.RefreshAsync();
+        await review.ComposeSlackPreviewAsync();
+        await review.ConfirmSlackAsync();
+
+        Assert.Equal("Slack refused the daily update (404 NotFound) and nothing was sent. Check the webhook URL in Settings, then send again.", review.SlackDeliveryError);
+        // The stored state is the one the repository lets a later send claim again.
+        Assert.True(deliveries.Saved.Last().CanBeRetried);
+    }
+
+    [Fact]
+    public async Task A_slack_failure_of_unknown_outcome_still_asks_for_reconciliation()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var slack = new RecordingSlackClientFactory();
+        slack.Client.ThrowOnPost = new SlackApiException("Unable to reach Slack.", SlackFailureCode.Transport);
+        var deliveries = new DailyDeliveryRepository();
+        var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)), slackFactory: slack, dailyDeliveries: deliveries);
+
+        await review.RefreshAsync();
+        await review.ComposeSlackPreviewAsync();
+        await review.ConfirmSlackAsync();
+
+        // A transport failure genuinely may have posted, so it must not offer a resend.
+        Assert.Equal("Daily Slack delivery requires reconciliation.", review.SlackDeliveryError);
+        Assert.False(deliveries.Saved.Last().CanBeRetried);
+    }
+
     [Fact]
     public async Task Invalid_final_slack_configuration_is_validated_before_claim_or_reconciliation()
     {
@@ -871,7 +914,8 @@ public sealed class ReviewViewModelTests
             delivery = new DailySlackDelivery(date, contentFingerprint, DailySlackDeliveryState.InProgress, null);
             return Task.FromResult(true);
         }
-        public Task SaveAsync(DailySlackDelivery value, CancellationToken cancellationToken = default) { SaveCalls++; delivery = value; return Task.CompletedTask; }
+        public List<DailySlackDelivery> Saved { get; } = [];
+        public Task SaveAsync(DailySlackDelivery value, CancellationToken cancellationToken = default) { SaveCalls++; Saved.Add(value); delivery = value; return Task.CompletedTask; }
     }
 
     private sealed class RecordingSlackClientFactory : ISlackClientFactory
@@ -886,7 +930,15 @@ public sealed class ReviewViewModelTests
     private sealed class RecordingSlackClient : ISlackClient
     {
         public List<SlackDailyUpdate> PostedUpdates { get; } = [];
-        public Task PostAsync(SlackDailyUpdate update, CancellationToken cancellationToken = default) { PostedUpdates.Add(update); return Task.CompletedTask; }
+        public Exception? ThrowOnPost { get; set; }
+
+        public Task PostAsync(SlackDailyUpdate update, CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnPost is { } failure) throw failure;
+            PostedUpdates.Add(update);
+            return Task.CompletedTask;
+        }
+
         public void Dispose() { }
     }
 

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Net;
 using System.Runtime.CompilerServices;
 using GDK.TimeSync.Core;
 using GDK.TimeSync.Desktop.Services;
@@ -438,13 +439,14 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         }
         catch (SlackApiException exception)
         {
-            await MarkSlackReconciliationRequiredAsync(exception.FailureCode switch
+            var failureCode = exception.FailureCode switch
             {
                 SlackFailureCode.UnsuccessfulResponse => DailySlackFailureCode.UnsuccessfulResponse,
                 SlackFailureCode.InvalidResponse => DailySlackFailureCode.InvalidResponse,
                 SlackFailureCode.Cancelled => DailySlackFailureCode.Cancelled,
                 _ => DailySlackFailureCode.Transport
-            });
+            };
+            await MarkSlackFailureAsync(failureCode, DescribeSlackFailure(failureCode, exception.StatusCode));
         }
         catch
         {
@@ -452,7 +454,10 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         }
     }
 
-    private async Task MarkSlackReconciliationRequiredAsync(DailySlackFailureCode failureCode)
+    private Task MarkSlackReconciliationRequiredAsync(DailySlackFailureCode failureCode) =>
+        MarkSlackFailureAsync(failureCode, ReconciliationMessage);
+
+    private async Task MarkSlackFailureAsync(DailySlackFailureCode failureCode, string message)
     {
         try
         {
@@ -462,8 +467,23 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         catch
         {
         }
-        SlackDeliveryError = "Daily Slack delivery requires reconciliation.";
+        SlackDeliveryError = message;
     }
+
+    private const string ReconciliationMessage = "Daily Slack delivery requires reconciliation.";
+
+    // Slack answering and refusing is the one failure whose outcome is known: nothing reached the
+    // channel, so the day can simply be sent again -- which TryClaimAsync already allows for exactly
+    // this state. Saying "reconciliation" for it sent someone hunting a problem that did not exist,
+    // when the answer was a 404 from a webhook URL that was not a webhook. The status code is safe to
+    // show: it cannot carry the webhook URL, which is itself the credential.
+    private static string DescribeSlackFailure(DailySlackFailureCode failureCode, HttpStatusCode? statusCode) =>
+        failureCode == DailySlackFailureCode.UnsuccessfulResponse
+            ? $"Slack refused the daily update{Describe(statusCode)} and nothing was sent. Check the webhook URL in Settings, then send again."
+            : ReconciliationMessage;
+
+    private static string Describe(HttpStatusCode? statusCode) =>
+        statusCode is { } status ? $" ({(int)status} {status})" : "";
 
     private void RunDryRun()
     {
