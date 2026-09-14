@@ -34,6 +34,10 @@ public sealed record DailySlackDelivery(
 public interface IDailySlackDeliveryRepository
 {
     Task<DailySlackDelivery?> GetAsync(DateOnly date, CancellationToken cancellationToken = default);
-    Task<bool> TryClaimAsync(DateOnly date, string contentFingerprint, CancellationToken cancellationToken = default);
+    // allowResend reopens a day this repository would otherwise keep closed -- including one already
+    // Sent. It exists for the case the app cannot see: the user has deleted the previous message in
+    // Slack and wants the day posted again. Only ever set from an explicit confirmation, never as a
+    // default, because the duplicate it can create lands in a channel the app cannot clean up.
+    Task<bool> TryClaimAsync(DateOnly date, string contentFingerprint, bool allowResend = false, CancellationToken cancellationToken = default);
     Task SaveAsync(DailySlackDelivery delivery, CancellationToken cancellationToken = default);
 }

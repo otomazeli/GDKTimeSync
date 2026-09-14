@@ -20,7 +20,7 @@ public sealed class SqliteDailySlackDeliveryRepository(SqliteDatabase database) 
             : null;
     }
 
-    public async Task<bool> TryClaimAsync(DateOnly date, string contentFingerprint, CancellationToken cancellationToken = default)
+    public async Task<bool> TryClaimAsync(DateOnly date, string contentFingerprint, bool allowResend = false, CancellationToken cancellationToken = default)
     {
         ValidateFingerprint(contentFingerprint);
         await using var connection = await database.OpenConnectionAsync(cancellationToken);
@@ -35,12 +35,14 @@ public sealed class SqliteDailySlackDeliveryRepository(SqliteDatabase database) 
                 content_fingerprint = excluded.content_fingerprint,
                 state = excluded.state,
                 failure_code = NULL
-            WHERE daily_slack_deliveries.state = $retryableState
-              AND daily_slack_deliveries.failure_code = $retryableFailure
+            WHERE $allowResend = 1
+               OR (daily_slack_deliveries.state = $retryableState
+                   AND daily_slack_deliveries.failure_code = $retryableFailure)
             """;
         command.Parameters.AddWithValue("$date", date.ToString("yyyy-MM-dd"));
         command.Parameters.AddWithValue("$fingerprint", contentFingerprint);
         command.Parameters.AddWithValue("$state", (int)DailySlackDeliveryState.InProgress);
+        command.Parameters.AddWithValue("$allowResend", allowResend ? 1 : 0);
         command.Parameters.AddWithValue("$retryableState", (int)DailySlackDeliveryState.ReconciliationRequired);
         command.Parameters.AddWithValue("$retryableFailure", (int)DailySlackFailureCode.UnsuccessfulResponse);
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;

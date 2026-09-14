@@ -169,7 +169,7 @@ public sealed class EndToEndDryRunTests
 
         public Task<DailySlackDelivery?> GetAsync(DateOnly date, CancellationToken cancellationToken = default) => Task.FromResult(delivery);
 
-        public Task<bool> TryClaimAsync(DateOnly date, string contentFingerprint, CancellationToken cancellationToken = default)
+        public Task<bool> TryClaimAsync(DateOnly date, string contentFingerprint, bool allowResend = false, CancellationToken cancellationToken = default)
         {
             if (delivery is not null) return Task.FromResult(false);
             delivery = new DailySlackDelivery(date, contentFingerprint, DailySlackDeliveryState.InProgress, null);

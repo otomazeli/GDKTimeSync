@@ -18,6 +18,8 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     private readonly IUserSettingsStore? settings;
     private readonly IClipboardService? clipboard;
     private readonly IAuditLog? auditLog;
+    private readonly IUserConfirmation? confirmation;
+    private bool resendAcknowledged;
     private string dryRunSummary = "Run Dry Run to validate the current local plan.";
     private SlackDailyUpdate? slackPreview;
     private string? slackDeliveryError;
@@ -37,8 +39,10 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
         ISlackClientFactory? slackClientFactory = null,
         IUserSettingsStore? settings = null,
         IClipboardService? clipboard = null,
-        IAuditLog? auditLog = null)
+        IAuditLog? auditLog = null,
+        IUserConfirmation? confirmation = null)
     {
+        this.confirmation = confirmation;
         this.planProvider = planProvider;
         this.deliveryService = deliveryService;
         this.attempts = attempts;
@@ -319,12 +323,22 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
                 return;
             }
 
-            // A day Slack rejected can be composed and sent again -- nothing reached the channel.
-            // Anything else already stored stays closed.
-            if (await dailyDeliveries.GetAsync(plan.Date, cancellationToken) is { CanBeRetried: false })
+            // A day Slack rejected reopens by itself -- nothing reached the channel. A day that did
+            // reach it, or whose outcome is unknown, is the user's call: only they can see whether
+            // the message is still in the channel. Asking here rather than blocking means the
+            // preview can always be built, read and copied; it is the *send* the answer unlocks.
+            resendAcknowledged = false;
+            if (await dailyDeliveries.GetAsync(plan.Date, cancellationToken) is { CanBeRetried: false } existing)
             {
-                SlackBlockers.Add("A daily Slack delivery already exists and cannot be sent again.");
-                return;
+                if (confirmation is null || !confirmation.Confirm(DescribeResend(existing, plan.Date)))
+                {
+                    SlackBlockers.Add("A daily Slack delivery already exists for this date and sending again was declined.");
+                    auditLog?.Write(AuditLevel.Info, "Slack", $"Resend declined for {plan.Date} ({existing.State})");
+                    return;
+                }
+
+                resendAcknowledged = true;
+                auditLog?.Write(AuditLevel.Warning, "Slack", $"Resend confirmed for {plan.Date} ({existing.State}); a previous update was already delivered");
             }
 
             // Issue #12: the grid's ticks decide what goes into the channel, so a developer can keep
@@ -422,7 +436,10 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
 
             using (client)
             {
-            if (!await dailyDeliveries.TryClaimAsync(preview.Date, preview.ContentFingerprint, cancellationToken))
+            // resendAcknowledged is set only by the confirmation raised during compose, and compose
+            // clears it every time -- so an acknowledged resend cannot outlive the preview it was
+            // granted for.
+            if (!await dailyDeliveries.TryClaimAsync(preview.Date, preview.ContentFingerprint, resendAcknowledged, cancellationToken))
             {
                 SlackDeliveryError = "A daily Slack delivery already exists and cannot be sent again.";
                 return;
@@ -471,6 +488,18 @@ public sealed class ReviewViewModel : INotifyPropertyChanged
     }
 
     private const string ReconciliationMessage = "Daily Slack delivery requires reconciliation.";
+
+    // Says which of the two cases it is, because they need different things from the reader: a Sent
+    // day certainly has a message in the channel, while the others may or may not -- and only the
+    // person looking at Slack can tell.
+    private static string DescribeResend(DailySlackDelivery existing, DateOnly date) =>
+        existing.State == DailySlackDeliveryState.Sent
+            ? $"The daily Slack update for {date:yyyy-MM-dd} has already been posted.{Environment.NewLine}{Environment.NewLine}" +
+              $"Delete the previous message in Slack first, or the channel will show it twice.{Environment.NewLine}{Environment.NewLine}" +
+              "Choose OK to proceed and compose it again, or Cancel to leave it alone."
+            : $"A daily Slack update for {date:yyyy-MM-dd} was attempted and its outcome is unknown ({existing.State}).{Environment.NewLine}{Environment.NewLine}" +
+              $"Check the channel: if the message is there, delete it first, or it will show twice.{Environment.NewLine}{Environment.NewLine}" +
+              "Choose OK to proceed and compose it again, or Cancel to leave it alone.";
 
     // Slack answering and refusing is the one failure whose outcome is known: nothing reached the
     // channel, so the day can simply be sent again -- which TryClaimAsync already allows for exactly

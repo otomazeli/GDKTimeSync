@@ -98,6 +98,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ISlackClientFactory, SlackClientFactory>();
         services.AddSingleton<ITogglSyncService, TogglSyncService>();
         services.AddSingleton<IClipboardService, ClipboardService>();
+        services.AddSingleton<IUserConfirmation, MessageBoxUserConfirmation>();
         services.AddSingleton<ITogglAutoSyncService>(provider => new TogglAutoSyncService(
             provider.GetRequiredService<MainViewModel>(),
             provider.GetRequiredService<TodayViewModel>(),
@@ -137,7 +138,8 @@ public partial class App : System.Windows.Application
             provider.GetRequiredService<ISlackClientFactory>(),
             provider.GetRequiredService<IUserSettingsStore>(),
             provider.GetRequiredService<IClipboardService>(),
-            provider.GetRequiredService<IAuditLog>()));
+            provider.GetRequiredService<IAuditLog>(),
+            provider.GetRequiredService<IUserConfirmation>()));
 
     protected override void OnExit(ExitEventArgs e)
     {

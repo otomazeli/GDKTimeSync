@@ -162,7 +162,7 @@ public sealed class ShellViewModelTests
     {
         public int Calls { get; private set; }
         public Task<DailySlackDelivery?> GetAsync(DateOnly date, CancellationToken cancellationToken = default) { Calls++; return Task.FromResult<DailySlackDelivery?>(null); }
-        public Task<bool> TryClaimAsync(DateOnly date, string contentFingerprint, CancellationToken cancellationToken = default) { Calls++; return Task.FromResult(false); }
+        public Task<bool> TryClaimAsync(DateOnly date, string contentFingerprint, bool allowResend = false, CancellationToken cancellationToken = default) { Calls++; return Task.FromResult(false); }
         public Task SaveAsync(DailySlackDelivery delivery, CancellationToken cancellationToken = default) { Calls++; return Task.CompletedTask; }
     }
 

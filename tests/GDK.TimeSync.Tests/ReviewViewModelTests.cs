@@ -444,6 +444,128 @@ public sealed class ReviewViewModelTests
         Assert.Equal(0, slack.CreateCalls);
     }
 
+    // An already-sent day used to refuse to compose at all, so you could not even re-read or copy
+    // the message. It now asks, because only the person looking at Slack can say whether the
+    // previous message is still there.
+    [Fact]
+    public async Task An_already_sent_day_composes_again_once_the_user_confirms_and_the_send_is_unlocked()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var deliveries = new DailyDeliveryRepository(new DailySlackDelivery(date, "old-fingerprint", DailySlackDeliveryState.Sent, null));
+        var confirmation = new StubConfirmation(answer: true);
+        var slack = new RecordingSlackClientFactory();
+        var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)),
+            slackFactory: slack, dailyDeliveries: deliveries, confirmation: confirmation);
+
+        await review.RefreshAsync();
+        await review.ComposeSlackPreviewAsync();
+
+        Assert.NotNull(review.SlackPreview);
+        Assert.True(review.CanConfirmSlack);
+        Assert.Contains("already been posted", confirmation.LastMessage, StringComparison.Ordinal);
+        Assert.Contains("Delete the previous message in Slack", confirmation.LastMessage, StringComparison.Ordinal);
+
+        await review.ConfirmSlackAsync();
+
+        Assert.Null(review.SlackDeliveryError);
+        Assert.True(deliveries.LastAllowResend);
+        Assert.Single(slack.Client.PostedUpdates);
+    }
+
+    [Fact]
+    public async Task Declining_the_confirmation_composes_nothing_and_claims_nothing()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var deliveries = new DailyDeliveryRepository(new DailySlackDelivery(date, "old-fingerprint", DailySlackDeliveryState.Sent, null));
+        var slack = new RecordingSlackClientFactory();
+        var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)),
+            slackFactory: slack, dailyDeliveries: deliveries, confirmation: new StubConfirmation(answer: false));
+
+        await review.RefreshAsync();
+        await review.ComposeSlackPreviewAsync();
+
+        Assert.Null(review.SlackPreview);
+        Assert.False(review.CanConfirmSlack);
+        Assert.Equal(0, deliveries.ClaimCalls);
+        Assert.Empty(slack.Client.PostedUpdates);
+        Assert.Contains(review.SlackBlockers, blocker => blocker.Contains("declined", StringComparison.Ordinal));
+    }
+
+    // A day Slack refused reopens on its own -- nothing reached the channel, so there is nothing to
+    // delete and nothing to ask about.
+    [Fact]
+    public async Task A_day_slack_refused_composes_without_asking_and_does_not_claim_a_resend()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var refused = new DailySlackDelivery(date, "old-fingerprint", DailySlackDeliveryState.ReconciliationRequired, DailySlackFailureCode.UnsuccessfulResponse);
+        var deliveries = new DailyDeliveryRepository(refused);
+        var confirmation = new StubConfirmation(answer: false);
+        var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)),
+            dailyDeliveries: deliveries, confirmation: confirmation);
+
+        await review.RefreshAsync();
+        await review.ComposeSlackPreviewAsync();
+        await review.ConfirmSlackAsync();
+
+        Assert.Equal(0, confirmation.Calls);
+        Assert.Null(review.SlackDeliveryError);
+        Assert.False(deliveries.LastAllowResend);
+    }
+
+    // An outcome nobody knows still asks -- but says so, because the message may or may not be there.
+    [Fact]
+    public async Task An_unknown_outcome_asks_with_a_different_message()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var unknown = new DailySlackDelivery(date, "old-fingerprint", DailySlackDeliveryState.ReconciliationRequired, DailySlackFailureCode.Transport);
+        var confirmation = new StubConfirmation(answer: true);
+        var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)),
+            dailyDeliveries: new DailyDeliveryRepository(unknown), confirmation: confirmation);
+
+        await review.RefreshAsync();
+        await review.ComposeSlackPreviewAsync();
+
+        Assert.Equal(1, confirmation.Calls);
+        Assert.Contains("outcome is unknown", confirmation.LastMessage, StringComparison.Ordinal);
+        Assert.NotNull(review.SlackPreview);
+    }
+
+    [Fact]
+    public async Task A_first_send_asks_nothing_and_claims_no_resend()
+    {
+        var date = new DateOnly(2026, 8, 13);
+        var item = PlannedWorkItem.Create(date, "Work", "CGM-1", "Completed", TimeSpan.FromMinutes(30), "GDK", "DEVELOPMENT");
+        var deliveries = new DailyDeliveryRepository();
+        var confirmation = new StubConfirmation(answer: true);
+        var review = CreateReview(DailyPlan.Create(date, [item]), attempts: new AttemptRepository(Succeeded(item)),
+            dailyDeliveries: deliveries, confirmation: confirmation);
+
+        await review.RefreshAsync();
+        await review.ComposeSlackPreviewAsync();
+        await review.ConfirmSlackAsync();
+
+        Assert.Equal(0, confirmation.Calls);
+        Assert.False(deliveries.LastAllowResend);
+        Assert.Null(review.SlackDeliveryError);
+    }
+
+    private sealed class StubConfirmation(bool answer) : IUserConfirmation
+    {
+        public int Calls { get; private set; }
+        public string LastMessage { get; private set; } = "";
+
+        public bool Confirm(string message, string title = "GDK TimeSync")
+        {
+            Calls++;
+            LastMessage = message;
+            return answer;
+        }
+    }
+
     // A 404 from a webhook URL that was not a webhook was reported as "requires reconciliation",
     // which sent someone looking for a problem that did not exist: Slack answered and refused, so
     // nothing reached the channel and TryClaimAsync already allows the day to be sent again.
@@ -791,7 +913,8 @@ public sealed class ReviewViewModelTests
         IDailySlackDeliveryRepository? dailyDeliveries = null,
         IUserSettingsStore? settings = null,
         IClipboardService? clipboard = null,
-        IAuditLog? auditLog = null) =>
+        IAuditLog? auditLog = null,
+        IUserConfirmation? confirmation = null) =>
         new(
             new FixedPlanSnapshotProvider(plan),
             delivery ?? new RecordingConfirmedDeliveryService(),
@@ -800,7 +923,8 @@ public sealed class ReviewViewModelTests
             slackFactory ?? new RecordingSlackClientFactory(),
             settings ?? new FixedSettingsStore(new UserSettings()),
             clipboard: clipboard,
-            auditLog: auditLog);
+            auditLog: auditLog,
+            confirmation: confirmation);
 
     private static ReviewViewModel CreateReview(
         IReadOnlyList<PlannedWorkItem> items,
@@ -810,10 +934,11 @@ public sealed class ReviewViewModelTests
         IDailySlackDeliveryRepository? dailyDeliveries = null,
         IUserSettingsStore? settings = null,
         IClipboardService? clipboard = null,
-        IAuditLog? auditLog = null) =>
+        IAuditLog? auditLog = null,
+        IUserConfirmation? confirmation = null) =>
         CreateReview(
             DailyPlan.Create(items.Count > 0 ? items[0].Day : default, items),
-            delivery, attempts, slackFactory, dailyDeliveries, settings, clipboard, auditLog);
+            delivery, attempts, slackFactory, dailyDeliveries, settings, clipboard, auditLog, confirmation);
 
     private static ReviewViewModel CreateReview(IReadOnlyList<PlannedWorkItem> items, out RecordingConfirmedDeliveryService delivery, IAuditLog? auditLog = null)
     {
@@ -907,10 +1032,15 @@ public sealed class ReviewViewModelTests
         public int ClaimCalls { get; private set; }
         public int SaveCalls { get; private set; }
         public Task<DailySlackDelivery?> GetAsync(DateOnly date, CancellationToken cancellationToken = default) => Task.FromResult(delivery);
-        public Task<bool> TryClaimAsync(DateOnly date, string contentFingerprint, CancellationToken cancellationToken = default)
+        public bool? LastAllowResend { get; private set; }
+
+        // Mirrors SqliteDailySlackDeliveryRepository: a free day, a day Slack refused, or an
+        // explicitly acknowledged resend.
+        public Task<bool> TryClaimAsync(DateOnly date, string contentFingerprint, bool allowResend = false, CancellationToken cancellationToken = default)
         {
             ClaimCalls++;
-            if (delivery is not null) return Task.FromResult(false);
+            LastAllowResend = allowResend;
+            if (delivery is not null && !allowResend && !delivery.CanBeRetried) return Task.FromResult(false);
             delivery = new DailySlackDelivery(date, contentFingerprint, DailySlackDeliveryState.InProgress, null);
             return Task.FromResult(true);
         }
