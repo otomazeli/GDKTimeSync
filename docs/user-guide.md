@@ -39,8 +39,10 @@ The app has six pages, reachable from the sidebar:
 
 Open **Settings > Edit settings and credentials** to configure:
 
-- **Jira base URL** (e.g. `https://jira.cgm.ag`) and, optionally, your **Jira user email** (used
-  as the Tempo worklog author) and default **Tempo work category**.
+- **Jira base URL** (e.g. `https://jira.cgm.ag`), a default **Tempo work category**, and optionally
+  **your email for the Slack update**. That email is *not* the Tempo worklog author: the author is
+  resolved from Jira (`/myself`) on every delivery, because Tempo rejects an email address as a
+  worker. There is no setting for it.
 - **Toggl workspace ID**.
 - **End-of-day review reminder** time and how it's presented (tray notification, opening Review,
   or both).
