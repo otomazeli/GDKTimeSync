@@ -26,7 +26,11 @@ public sealed class AuditLoggingHandler(IAuditLog auditLog, string clientName, b
             stopwatch.Stop();
             var line = $"{target} -> {(int)response.StatusCode} {response.StatusCode} ({stopwatch.ElapsedMilliseconds} ms)";
             if (response.IsSuccessStatusCode)
-                auditLog.Write(AuditLevel.Info, clientName, line);
+                // On success too, not only on failure: Slack accepted a post and rendered none of it,
+                // and with nothing recorded there was no way to tell a payload we got wrong from a
+                // workflow that stopped referencing its variables. Only POST/PUT carry a body, so the
+                // GET traffic that fills this log is unaffected.
+                auditLog.Write(AuditLevel.Info, clientName, $"{line}{DescribeRequest(requestBody)}");
             else
                 auditLog.Write(AuditLevel.Error, clientName,
                     $"{line}{DescribeRequest(requestBody)}{Environment.NewLine}response: {await DescribeFailureAsync(response, cancellationToken)}");
@@ -43,12 +47,16 @@ public sealed class AuditLoggingHandler(IAuditLog auditLog, string clientName, b
 
     // A Tempo 400 is almost always about what was sent -- which worker, which issue id, which work
     // category -- and the response says only "User is invalid". The request body is the half that
-    // answers it. Written on failures alone, so a working day's log does not grow a copy of every
-    // payload. Credentials cannot arrive here: these APIs authenticate with a header, and the one
-    // client whose body *is* the secret is excluded outright below.
-    private async Task<string?> BufferRequestBodyAsync(HttpRequestMessage request)
+    // answers it.
+    //
+    // Every client's body is logged, Slack's included. What is redacted for Slack is the *URL*,
+    // because that is the credential; the body is the composed message, which carries the same Jira
+    // keys and comments the delivery lines already record, and UserSettingsService.ValidateSlackPresentation
+    // refuses to store a webhook URL in the presentation text that feeds it. No API here puts a
+    // credential in a body -- all four authenticate with a header or the address itself.
+    private static async Task<string?> BufferRequestBodyAsync(HttpRequestMessage request)
     {
-        if (redactUri || request.Content is null) return null;
+        if (request.Content is null) return null;
         try
         {
             // Buffering also makes the content replayable, so reading it cannot starve the send.

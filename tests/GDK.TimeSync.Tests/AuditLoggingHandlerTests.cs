@@ -205,34 +205,55 @@ public sealed class AuditLoggingHandlerTests
         Assert.Equal(payload, inner.ReceivedBody);
     }
 
+    // Slack accepted a post and rendered none of it. With the body recorded only on failure there
+    // was nothing to separate a payload we got wrong from a workflow that had stopped referencing
+    // its variables.
     [Fact]
-    public async Task Does_not_log_the_request_body_for_a_successful_call()
+    public async Task Logs_the_request_body_for_a_successful_call()
     {
         var log = new RecordingAuditLog();
         using var client = CreateClient(log, "GDK.TimeSync.Tempo", HttpStatusCode.OK, "{\"id\":55}");
+        const string payload = "{\"worker\":\"planner\"}";
 
-        await client.PostAsync("rest/tempo-timesheets/4/worklogs", new StringContent("{\"worker\":\"planner\"}"));
+        await client.PostAsync("rest/tempo-timesheets/4/worklogs", new StringContent(payload));
+
+        var entry = Assert.Single(log.Entries);
+        Assert.Equal(AuditLevel.Info, entry.Level);
+        Assert.Contains($"request: {payload}", entry.Message, StringComparison.Ordinal);
+        // The response body stays out of a success line; only what we sent is worth recording.
+        Assert.DoesNotContain("\"id\":55", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Logs_no_request_body_when_there_is_none()
+    {
+        var log = new RecordingAuditLog();
+        using var client = CreateClient(log, "GDK.TimeSync.Toggl", HttpStatusCode.OK, "[]");
+
+        await client.GetAsync("me/time_entries");
 
         Assert.DoesNotContain("request:", Assert.Single(log.Entries).Message, StringComparison.Ordinal);
     }
 
-    // The Slack client's body is the message posted through a webhook whose URL is the credential;
-    // it is the one client whose request must never be written.
+    // For Slack the *URL* is the credential, not the body: the body is the composed message. It is
+    // recorded like any other, and the address still must not appear anywhere in the line.
     [Fact]
-    public async Task Never_logs_the_request_body_for_the_redacted_client()
+    public async Task Logs_the_redacted_clients_body_but_never_its_url()
     {
         var log = new RecordingAuditLog();
         var handler = new AuditLoggingHandler(log, "GDK.TimeSync.Slack", redactUri: true)
         {
-            InnerHandler = new StubHandler(HttpStatusCode.NotFound, "no_service")
+            InnerHandler = new StubHandler(HttpStatusCode.OK, "")
         };
         using var client = new HttpClient(handler) { BaseAddress = new Uri("https://hooks.slack.test/triggers/secret-trigger/") };
 
-        await client.PostAsync("", new StringContent("{\"text\":\"daily update\"}"));
+        await client.PostAsync("", new StringContent("{\"SlackTitle\":\"Daily update\"}"));
 
         var entry = Assert.Single(log.Entries);
-        Assert.DoesNotContain("request:", entry.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("daily update", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("\"SlackTitle\":\"Daily update\"", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("<slack webhook>", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-trigger", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("hooks.slack.test", entry.Message, StringComparison.Ordinal);
     }
 
     private sealed class CapturingHandler(HttpStatusCode status, string body) : HttpMessageHandler
