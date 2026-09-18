@@ -13,7 +13,7 @@ day, see [docs/user-guide.md](docs/user-guide.md); for cleaning up a partial del
 
 | To | You need |
 | --- | --- |
-| Build or run from source | .NET 10 SDK (`scripts/setup.ps1` installs it via winget if missing) |
+| Build or run from source | .NET 10 SDK and Git — see [§5](#5-set-up-a-developer-machine) for the full setup |
 | Run a published release | Nothing — the published exe is self-contained and bundles the runtime |
 
 The app is Windows-only (WPF), x64.
@@ -72,7 +72,8 @@ which issues a new URL.
 ## 3. Configure the app
 
 Everything below is entered in **Settings → Edit settings and credentials**. There is no config
-file to edit by hand and no environment variable to set.
+file to edit by hand and no environment variable to set for the desktop app.
+(The developer-only console tool in §5.5 is the one exception.)
 
 ### Credentials
 
@@ -122,15 +123,101 @@ Note the database folder is `GDK TimeSync` (with a space), while settings and lo
 Credentials are per Windows user, so a new machine or a new user profile needs all three entered
 again.
 
-## 5. Build, test, run
+## 5. Set up a developer machine
+
+### 5.1 Prerequisites
+
+| Need | Why | Install |
+| --- | --- | --- |
+| Windows 10/11, x64 | The app is WPF — it does not build or run on Linux or macOS, and there is no cross-platform target | — |
+| .NET 10 SDK | Everything targets `net10.0`; the Desktop project targets `net10.0-windows` | `winget install --id Microsoft.DotNet.SDK.10 --exact` |
+| Git | The build stamps the short commit into the version shown in the footer and the log | `winget install --id Git.Git --exact` |
+| An IDE (optional) | Visual Studio 2026, Rider, or VS Code with the C# Dev Kit | — |
+
+The solution file is `GDK.TimeSync.slnx`, the XML solution format. It needs an SDK that
+understands `.slnx` — .NET 10 does. An older SDK on the PATH will fail to open it, so check
+`dotnet --version` reports a `10.*` before anything else. Side-by-side 10.x patch versions are
+fine; the build does not pin one (there is no `global.json`).
+
+### 5.2 Clone and build
 
 ```powershell
-dotnet build GDK.TimeSync.slnx
-dotnet test tests/GDK.TimeSync.Tests/GDK.TimeSync.Tests.csproj
+git clone git@github.com:otomazeli/GDKTimeSync.git   # or https://github.com/otomazeli/GDKTimeSync.git
+cd GDKTimeSync
+./scripts/setup.ps1
+```
+
+`setup.ps1` is the whole developer setup in one command. It finds `dotnet` (falling back to
+`C:\Program Files\dotnet\dotnet.exe` when it is not on the PATH), installs the .NET 10 SDK via
+winget if it is missing, verifies the major version is 10, then runs restore, build, and the full
+test suite against the solution.
+
+If PowerShell refuses to run it — unsigned scripts are blocked under the default
+`Restricted`/`RemoteSigned` policy — run it for that one process instead of changing the
+machine-wide policy:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
+```
+
+If winget is unavailable (common on locked-down corporate images), the script tells you to install
+the SDK by hand from <https://dotnet.microsoft.com/download/dotnet/10.0> and stops.
+
+### 5.3 The individual commands
+
+`setup.ps1` runs these for you; use them directly for day-to-day work.
+
+```powershell
+dotnet restore GDK.TimeSync.slnx
+dotnet build   GDK.TimeSync.slnx
+dotnet test    tests/GDK.TimeSync.Tests/GDK.TimeSync.Tests.csproj
 dotnet run --project src/GDK.TimeSync.Desktop
 ```
 
-`scripts/setup.ps1` installs the .NET 10 SDK via winget if you don't have it.
+There is one test project covering all eight source projects. To run a single test while working:
+
+```powershell
+dotnet test tests/GDK.TimeSync.Tests/GDK.TimeSync.Tests.csproj --filter "FullyQualifiedName~TodayViewModel"
+```
+
+The Desktop build output lands in `src/GDK.TimeSync.Desktop/bin/<Debug|Release>/net10.0-windows/`,
+with the executable named `GDK.TimeSync.exe` (not `GDK.TimeSync.Desktop.exe` — `AssemblyName` is
+overridden).
+
+### 5.4 First run on a fresh machine
+
+Nothing in the repository configures the app. A fresh clone starts with no settings, no database,
+and no credentials — all three are created per Windows user on first run, outside the source tree,
+at the paths in §4. The app will report itself unconfigured until you enter a Jira base URL, so do
+§2 and §3 before expecting anything to connect.
+
+That also means **a clean checkout does not give you a clean app**. To reset the app itself, delete
+`%LOCALAPPDATA%\GDK\TimeSync` (settings and logs) and `%LOCALAPPDATA%\GDK TimeSync` (database), and
+remove the three `GDK.TimeSync.*` entries from Windows Credential Manager. Rebuilding changes none
+of it.
+
+Only one instance runs at a time. Launching a second one surfaces the window already running
+instead of starting over, so stop a running copy before starting a debug session — otherwise you
+end up debugging a process that immediately exits.
+
+### 5.5 The console project
+
+`src/GDK.TimeSync.Console` is a developer tool, not part of the shipped app. It talks to Tempo
+directly and is the one place environment variables apply — it reads standard .NET configuration,
+so `Jira__BaseUrl` and `Jira__PersonalAccessToken` (double underscore) are how you give it
+credentials. The Desktop app ignores these entirely and uses Credential Manager.
+
+```powershell
+$env:Jira__BaseUrl = 'https://jira.cgm.ag'
+$env:Jira__PersonalAccessToken = '<your PAT>'
+
+dotnet run --project src/GDK.TimeSync.Console -- tempo-discover
+dotnet run --project src/GDK.TimeSync.Console -- tempo-create CGMFRAVII-1234 2026-09-15 09:00 3600 "comment"
+```
+
+`tempo-discover` prints your instance's work attributes as JSON — that is how to check the work
+attribute id described in §2. `tempo-create` **writes a real worklog to real Tempo**; there is no
+dry-run flag on it.
 
 ## 6. Publish and install
 
