@@ -29,6 +29,7 @@ if (Test-Path -LiteralPath $packageDirectory) { Remove-Item -LiteralPath $packag
 Copy-Item -LiteralPath $executable -Destination (Join-Path $packageDirectory 'GDK.TimeSync.exe')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'setup-current-user.ps1') -Destination $packageDirectory
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'remove-current-user.ps1') -Destination $packageDirectory
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'README.md') -Destination $packageDirectory
 
 $readme = @'
 GDK TimeSync - CGM Windows x64
@@ -37,15 +38,22 @@ GDK TimeSync - CGM Windows x64
 2. Open PowerShell in the extracted folder.
 3. Run:
    .\setup-current-user.ps1 -CreateDesktopShortcut -Launch
-4. In Settings, enter the Jira base URL and workspace details, then add the Toggl API
-   token, CGM Jira personal access token, and (optional) GDK Slack Incoming Webhook.
-5. On the Review screen, run "Run diagnostics" and the guided Toggl/Jira/Tempo checks.
-6. Run Dry Run before posting anything for real.
+4. In Settings, enter the Jira base URL and the Toggl workspace ID, then add the Toggl
+   API token, the CGM Jira personal access token, and (optional) the GDK Slack webhook.
+   The Slack one must be a Workflow Builder webhook TRIGGER url
+   (https://hooks.slack.com/triggers/...) - the workflow's "Copy link" button gives a
+   shortcut link instead, which is a page, not an endpoint, and is rejected on save.
+5. Diagnostics -> Run diagnostics calls every read-only endpoint and writes nothing.
+6. Review -> Dry Run validates a day's plan locally before posting anything for real.
 7. Confirm each task with "Post task", then use "Compose daily Slack update" and "Send
    daily Slack update" once at the end of the day. Nothing is posted automatically.
 
-See docs/user-guide.md in the repository for the full guide and
-docs/operations/recovery-and-reconciliation.md for partial-failure recovery.
+README.md, included next to this file, is the full setup reference: the accounts and
+tokens to create first, every setting and what it defaults to, and where settings, logs,
+the database and the credentials are stored. Read it before step 4.
+
+The links inside it point into the repository: docs/user-guide.md for day-to-day use and
+docs/operations/recovery-and-reconciliation.md for recovering a partial delivery.
 
 The setup does not request, store, or pass credentials. It runs only for the current user and does not require administrator rights. To remove GDK TimeSync, run .\remove-current-user.ps1 (add -RemoveUserData -RemoveCredentials to also delete local data and stored credentials).
 '@
